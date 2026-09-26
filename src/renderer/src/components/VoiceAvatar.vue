@@ -132,6 +132,11 @@ function getStream(): MediaStream | null {
   if (captured) return captured
   const c = canvasRef.value
   if (!c) return null
+  const size = props.size ?? 160
+  if (!c.width) {
+    c.width = size
+    c.height = size
+  }
   try {
     captured = c.captureStream(30)
     return captured
