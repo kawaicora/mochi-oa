@@ -499,7 +499,19 @@ export const useAppStore = defineStore('app', () => {
     return d<{ detail: TaskDetail }>(ack)?.detail ?? null
   }
   async function createTask(input: { companyId?: number; projectId?: number; title: string; description?: string; startTime: string; dueTime: string; images?: string[]; assignments?: Array<{ userId: number; content: string }> }): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
-    const ack = await window.pantry.serverTaskCreate({ companyId: input.companyId ?? activeCompanyId.value, projectId: input.projectId ?? null, title: input.title, description: input.description ?? '', startTime: input.startTime, dueTime: input.dueTime, images: input.images ?? [], assignments: input.assignments ?? [] })
+    const payload = {
+      companyId: Number(input.companyId ?? activeCompanyId.value) || 0,
+      projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null,
+      title: String(input.title ?? ''),
+      description: String(input.description ?? ''),
+      startTime: String(input.startTime ?? ''),
+      dueTime: String(input.dueTime ?? ''),
+      images: Array.isArray(input.images) ? input.images.map((x) => String(x)).slice(0, 9) : [],
+      assignments: Array.isArray(input.assignments)
+        ? input.assignments.map((a) => ({ userId: Number(a?.userId) || 0, content: String(a?.content ?? '') }))
+        : []
+    }
+    const ack = await window.pantry.serverTaskCreate(payload)
     return { ok: ack.ok, error: ack.error, task: d<{ task: TaskItem }>(ack)?.task }
   }
   async function updateTask(input: { taskId: number; title?: string; description?: string; startTime?: string; dueTime?: string; images?: string[] }): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
