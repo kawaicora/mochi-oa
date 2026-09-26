@@ -777,7 +777,7 @@ export class ServerClient extends EventEmitter {
     if (!base) return { ok: false, error: '未配置服务器地址' }
     const authQ = `token=${encodeURIComponent(this.token)}&company=${companyId}`
     const CHUNK = 1024 * 1024 // 1MB/块
-    console.log(`[upload] 开始分块上传 ${filePath} -> ${base}/api/upload/chunk (company=${companyId})`)
+    // console.log(`[upload] 开始分块上传 ${filePath} -> ${base}/api/upload/chunk (company=${companyId})`)
     try {
       const { randomUUID } = await import('node:crypto')
       const { readFile, stat } = await import('node:fs/promises')
@@ -811,14 +811,14 @@ export class ServerClient extends EventEmitter {
         const body = Buffer.concat([head, buf.subarray(start, end), tail])
         const res = await httpPost(`${base}/api/upload/chunk?${authQ}`, { 'Content-Type': `multipart/form-data; boundary=${b}` }, body)
         const data = parseJson(res.text) as { ok?: boolean } | null
-        console.log(`[upload] 分块 ${i + 1}/${total}: http=${res.status} ok=${data?.ok}`)
+        // console.log(`[upload] 分块 ${i + 1}/${total}: http=${res.status} ok=${data?.ok}`)
         if (!data?.ok) throw new Error(`分块 ${i + 1}/${total} 上传失败（http ${res.status}）`)
         onProgress?.(Math.round(((i + 1) / total) * 100))
       }
 
       const compRes = await httpPost(`${base}/api/upload/chunk/complete?${authQ}`, { 'Content-Type': 'application/json' }, JSON.stringify({ uploadId, filename: name, totalChunks: total, mime, relativePath }))
       const comp = parseJson(compRes.text) as { ok?: boolean; error?: string; url?: string; uuid?: string; filename?: string; size?: number } | null
-      console.log(`[upload] complete: http=${compRes.status} ok=${comp?.ok} url=${comp?.url} ${comp?.error || ''}`)
+      // console.log(`[upload] complete: http=${compRes.status} ok=${comp?.ok} url=${comp?.url} ${comp?.error || ''}`)
       if (!comp?.ok) throw new Error(comp?.error || `合并文件失败（http ${compRes.status}）`)
       return { ok: true, url: comp.url, uuid: comp.uuid, fileName: comp.filename, size: comp.size }
     } catch (err) {
