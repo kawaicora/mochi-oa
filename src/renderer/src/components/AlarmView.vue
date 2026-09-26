@@ -15,6 +15,9 @@ const fName = ref('')
 const fRepeat = ref<AlarmRepeat>('once')
 const fWeekdays = ref<number[]>([1, 2, 3, 4, 5])
 const fRing = ref('')
+const fUseRing = ref(true)
+const fNotify = ref(true)
+const fCommand = ref('')
 const weekdayNames = ['日', '一', '二', '三', '四', '五', '六']
 
 function openAdd(): void {
@@ -24,6 +27,9 @@ function openAdd(): void {
   fRepeat.value = 'once'
   fWeekdays.value = [1, 2, 3, 4, 5]
   fRing.value = ''
+  fUseRing.value = true
+  fNotify.value = true
+  fCommand.value = ''
   showForm.value = true
 }
 function openEdit(a: Alarm): void {
@@ -33,6 +39,9 @@ function openEdit(a: Alarm): void {
   fRepeat.value = a.repeat
   fWeekdays.value = [...a.weekdays]
   fRing.value = a.ring
+  fUseRing.value = a.useRing
+  fNotify.value = a.notify
+  fCommand.value = a.command ?? ''
   showForm.value = true
 }
 function closeForm(): void {
@@ -49,6 +58,11 @@ const ringName = computed(() => {
   const parts = fRing.value.split(/[\\/]/)
   return parts[parts.length - 1]
 })
+
+async function pickCommand(): Promise<void> {
+  const p = await window.pantry.pickFile()
+  if (p) fCommand.value = p
+}
 
 function toggleWeekday(d: number): void {
   fWeekdays.value = fWeekdays.value.includes(d)
@@ -67,6 +81,9 @@ function saveForm(): void {
     repeat: fRepeat.value,
     weekdays: fRepeat.value === 'weekly' ? fWeekdays.value.slice().sort() : [],
     ring: fRing.value,
+    useRing: fUseRing.value,
+    notify: fNotify.value,
+    command: fCommand.value.trim(),
     enabled: existing?.enabled ?? true
   }
   const list = existing
@@ -113,8 +130,10 @@ function repeatLabel(a: Alarm): string {
           <div class="alarm-name">{{ a.name || '闹钟' }}</div>
           <div class="alarm-tags">
             <span class="alarm-tag" :class="a.repeat === 'once' ? 'once' : a.repeat === 'daily' ? 'daily' : 'weekly'">{{ repeatLabel(a) }}</span>
-            <span v-if="a.ring" class="alarm-tag ring"><i class="fas fa-music"></i> {{ a.ring.split(/[\\/]/).pop() }}</span>
-            <span v-else class="alarm-tag nore"><i class="fas fa-bell-slash"></i> 仅系统通知</span>
+            <span v-if="a.useRing && a.ring" class="alarm-tag ring"><i class="fas fa-music"></i> {{ a.ring.split(/[\\/]/).pop() }}</span>
+            <span v-if="a.notify" class="alarm-tag nore"><i class="fas fa-bell"></i> 系统通知</span>
+            <span v-if="a.command && a.command.trim()" class="alarm-tag cmd"><i class="fas fa-terminal"></i> {{ a.command.split(/[\\/]/).pop() }}</span>
+            <span v-if="!a.useRing && !a.notify && !(a.command && a.command.trim())" class="alarm-tag nore"><i class="fas fa-bell-slash"></i> 无动作</span>
           </div>
         </div>
         <div class="alarm-actions">
@@ -162,9 +181,22 @@ function repeatLabel(a: Alarm): string {
         <div class="alarm-form-row">
           <span class="alarm-form-label">铃声</span>
           <div class="alarm-ring">
-            <button class="alarm-ring-btn" @click="pickRing"><i class="fas fa-music"></i> 选择本地音乐</button>
-            <span v-if="ringName" class="alarm-ring-name" :title="fRing">{{ ringName }}</span>
-            <span v-else class="alarm-ring-none">未选择（到点仅发系统通知）</span>
+            <label class="alarm-switch"><input v-model="fUseRing" type="checkbox" /><span class="alarm-sw-slider"></span></label>
+            <button class="alarm-ring-btn" :disabled="!fUseRing" @click="pickRing"><i class="fas fa-music"></i> 选择本地音乐</button>
+            <span v-if="fUseRing && ringName" class="alarm-ring-name" :title="fRing">{{ ringName }}</span>
+            <span v-else-if="fUseRing" class="alarm-ring-none">未选择音乐</span>
+          </div>
+        </div>
+        <div class="alarm-form-row">
+          <span class="alarm-form-label">系统通知</span>
+          <label class="alarm-switch"><input v-model="fNotify" type="checkbox" /><span class="alarm-sw-slider"></span></label>
+          <span class="alarm-sw-hint">到点弹系统通知（可关闭，若你的程序自带提示）</span>
+        </div>
+        <div class="alarm-form-row">
+          <span class="alarm-form-label">执行操作</span>
+          <div class="alarm-ring">
+            <input v-model="fCommand" class="alarm-form-input" placeholder="如 D:\\app.exe /r  或  /home/user/run.sh 或 node x.js" />
+            <button class="alarm-ring-btn" @click="pickCommand"><i class="fas fa-terminal"></i> 选择程序/脚本</button>
           </div>
         </div>
         <div class="alarm-form-actions">
@@ -216,6 +248,7 @@ function repeatLabel(a: Alarm): string {
 .alarm-tag.weekly { background: #fff1d6; color: #d46b08; }
 .alarm-tag.ring { background: #f3e8ff; color: #8a2be2; }
 .alarm-tag.nore { background: #f1f3f5; color: var(--dt-text-3); }
+.alarm-tag.cmd { background: #e6f4ea; color: #188038; }
 .alarm-actions { display: flex; align-items: center; gap: 6px; }
 .alarm-toggle { font-size: 24px; color: var(--dt-border); display: inline-flex; padding: 0; }
 .alarm-toggle.on { color: var(--dt-primary); }
@@ -251,10 +284,25 @@ function repeatLabel(a: Alarm): string {
 }
 .alarm-wd.on { background: var(--dt-primary); border-color: var(--dt-primary); color: #fff; }
 .alarm-ring { display: flex; align-items: center; gap: 10px; flex: 1; }
-.alarm-ring-btn { height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; border: 1px solid var(--dt-border-light); color: var(--dt-text-2); background: #fff; display: inline-flex; align-items: center; gap: 6px; }
+.alarm-ring .alarm-form-input { flex: 1; min-width: 0; }
+.alarm-ring-btn { height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; border: 1px solid var(--dt-border-light); color: var(--dt-text-2); background: #fff; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .alarm-ring-btn:hover { border-color: var(--dt-primary); color: var(--dt-primary); }
+.alarm-ring-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .alarm-ring-name { font-size: 12px; color: var(--dt-text-2); max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .alarm-ring-none { font-size: 12px; color: var(--dt-text-4); }
+.alarm-switch { position: relative; display: inline-flex; flex-shrink: 0; }
+.alarm-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.alarm-sw-slider {
+  width: 36px; height: 20px; border-radius: 20px; background: var(--dt-border);
+  position: relative; cursor: pointer; transition: background 0.15s;
+}
+.alarm-sw-slider::before {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.alarm-switch input:checked + .alarm-sw-slider { background: var(--dt-primary); }
+.alarm-switch input:checked + .alarm-sw-slider::before { transform: translateX(16px); }
+.alarm-sw-hint { font-size: 12px; color: var(--dt-text-4); }
 .alarm-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 .alarm-save { height: 32px; padding: 0 18px; border-radius: 8px; background: var(--dt-primary); color: #fff; font-size: 13px; border: none; }
 .alarm-cancel { height: 32px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--dt-border-light); color: var(--dt-text-2); background: #fff; font-size: 13px; }

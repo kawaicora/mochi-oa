@@ -89,6 +89,9 @@ export const IpcChannels = {
   serverHolidayRemoveMany: 'server:holiday:removeMany',
   serverHolidayReset: 'server:holiday:reset',
 
+  // 闹钟：到点执行用户程序/脚本（跨平台，main 进程 spawn）
+  alarmRun: 'alarm:run',
+
   // 文件上传
   serverUpload: 'server:upload',
   /** 分块上传（带进度回调，支持断点续传；完成后返回 {ok,url,...}） */

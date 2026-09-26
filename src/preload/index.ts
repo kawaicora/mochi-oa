@@ -253,6 +253,7 @@ const api = {
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
+  runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)
 }
 

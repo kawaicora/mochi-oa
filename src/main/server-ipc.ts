@@ -357,6 +357,21 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     return Promise.resolve(res.canceled ? null : res.filePaths[0] ?? null)
   })
 
+  // 闹钟到点执行用户程序/脚本（Windows: bat/ps1/exe，Linux/macOS: sh/可执行程序；shell 统一执行，兼容三平台）
+  ipcMain.handle(IpcChannels.alarmRun, async (_e, command) => {
+    const cmd = typeof command === 'string' ? command.trim() : ''
+    if (!cmd) return { ok: false, error: '空命令' }
+    try {
+      const { spawn } = await import('node:child_process')
+      const child = spawn(cmd, { shell: true, detached: true, stdio: 'ignore' })
+      child.on('error', () => {})
+      child.unref()
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   // 文件夹选择框（用于发送文件夹：遍历其中文件批量发送）
   ipcMain.handle(IpcChannels.filePickFolder, async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
