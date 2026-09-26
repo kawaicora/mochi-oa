@@ -273,13 +273,10 @@ class VideoStream {
         drawHalf(dataR, -Math.PI / 2, Math.PI / 2, 'rgba(0,200,180,ALPHA)', faceR)
       }
     }
-    const loop = (): void => {
-      drawFrame()
-      raf = requestAnimationFrame(loop)
-    }
-    // captureStream 前同步先画一帧：确保发送流 ssrc 建立时即有画面，避免 No sending stream
+    // 用 setInterval 驱动绘制：requestAnimationFrame 在窗口最小化/不可见时会被浏览器暂停，
+    // 导致后台不更新、captureStream 无新帧、远程收不到数据；interval 后台持续运行
     drawFrame()
-    raf = requestAnimationFrame(loop)
+    raf = window.setInterval(drawFrame, 33)
 
     let stream: MediaStream
     try {
@@ -293,7 +290,7 @@ class VideoStream {
 
     const stop = (): void => {
       running = false
-      cancelAnimationFrame(raf)
+      clearInterval(raf)
       source?.disconnect()
       splitter?.disconnect()
       analyserL?.disconnect()
