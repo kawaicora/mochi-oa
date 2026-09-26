@@ -220,7 +220,9 @@ class VideoStream {
       // 用满全部 fft 数据（1024 柱）；幅度范围拉大 + 增益，让频谱明显
       const inner = faceR + 2
       const outer = faceR + 55
-      const n = Math.min(data.length, 1024)
+      // 只绘制 1-8000Hz：按采样率换算 FFT bin 数（fftSize=2048，48000Hz→约342bin）
+      const rate = audioCtx?.sampleRate ?? 48000
+      const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 2048)))
       for (let i = 0; i < n; i++) {
         const v = Math.min(1, (data[i] / 255) * 1.5)
         const len = inner + v * (outer - inner)
