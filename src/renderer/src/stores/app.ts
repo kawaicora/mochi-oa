@@ -438,6 +438,21 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverHolidayRemove(date)
     return { ok: ack.ok, error: ack.error }
   }
+  async function addHolidays(items: Array<{ date: string; name: string; type: 'legal' | 'workday' | 'custom' }>): Promise<{ ok: boolean; error?: string; added?: number }> {
+    const ack = await window.pantry.serverHolidayAddMany(items)
+    const data = d<{ added: number }>(ack)
+    return { ok: ack.ok, error: ack.error, added: data?.added }
+  }
+  async function removeHolidays(dates: string[]): Promise<{ ok: boolean; error?: string; removed?: number }> {
+    const ack = await window.pantry.serverHolidayRemoveMany(dates)
+    const data = d<{ removed: number }>(ack)
+    return { ok: ack.ok, error: ack.error, removed: data?.removed }
+  }
+  async function resetHolidays(): Promise<{ ok: boolean; error?: string; count?: number }> {
+    const ack = await window.pantry.serverHolidayReset()
+    const data = d<{ count: number }>(ack)
+    return { ok: ack.ok, error: ack.error, count: data?.count }
+  }
   async function addCompanyMember(target: number | string, departmentId?: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverAddCompanyMember(activeCompanyId.value, target, departmentId ?? undefined)
     if (ack.ok) await refreshMembers()
@@ -814,6 +829,9 @@ export const useAppStore = defineStore('app', () => {
     fetchHolidays,
     addHoliday,
     removeHoliday,
+    addHolidays,
+    removeHolidays,
+    resetHolidays,
     createDepartment,
     deleteDepartment,
     assignToDepartment,

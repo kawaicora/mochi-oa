@@ -85,6 +85,9 @@ export const IpcChannels = {
   serverHolidays: 'server:holidays',
   serverHolidayAdd: 'server:holiday:add',
   serverHolidayRemove: 'server:holiday:remove',
+  serverHolidayAddMany: 'server:holiday:addMany',
+  serverHolidayRemoveMany: 'server:holiday:removeMany',
+  serverHolidayReset: 'server:holiday:reset',
 
   // 文件上传
   serverUpload: 'server:upload',

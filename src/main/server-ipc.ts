@@ -242,6 +242,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverHolidays, (_e, year) => serverClient.listHolidays(year ? Number(year) : undefined))
   ipcMain.handle(IpcChannels.serverHolidayAdd, (_e, date, name, type) => serverClient.addHoliday(String(date), String(name), type as 'legal' | 'workday' | 'custom'))
   ipcMain.handle(IpcChannels.serverHolidayRemove, (_e, date) => serverClient.removeHoliday(String(date)))
+  ipcMain.handle(IpcChannels.serverHolidayAddMany, (_e, items) => serverClient.addHolidays(items as Array<{ date: string; name: string; type: 'legal' | 'workday' | 'custom' }>))
+  ipcMain.handle(IpcChannels.serverHolidayRemoveMany, (_e, dates) => serverClient.removeHolidays((dates as string[]) ?? []))
+  ipcMain.handle(IpcChannels.serverHolidayReset, () => serverClient.resetHolidays())
   ipcMain.handle(IpcChannels.serverFriendAdd, (_e, userId) => serverClient.addFriend(Number(userId) || 0))
   ipcMain.handle(IpcChannels.serverFriendRemove, (_e, userId) => serverClient.removeFriend(Number(userId) || 0))
 

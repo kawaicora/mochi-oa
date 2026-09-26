@@ -507,6 +507,21 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'holiday:remove', { date })
   }
 
+  async addHolidays(items: Array<{ date: string; name: string; type: HolidayType }>): Promise<Ack & { data?: { added: number } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ added: number }>(this.socket, 'holiday:addMany', { items })
+  }
+
+  async removeHolidays(dates: string[]): Promise<Ack & { data?: { removed: number } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ removed: number }>(this.socket, 'holiday:removeMany', { dates })
+  }
+
+  async resetHolidays(): Promise<Ack & { data?: { holidays: Holiday[]; count: number } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ holidays: Holiday[]; count: number }>(this.socket, 'holiday:reset', {})
+  }
+
   async addCompanyMember(companyId: number, target: number | string, departmentId?: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     const isId = typeof target === 'number'

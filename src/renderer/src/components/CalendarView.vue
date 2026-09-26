@@ -109,6 +109,55 @@ async function clearHoliday(): Promise<void> {
   initHolidayName()
 }
 
+// ─── 多选 / 批量 / 恢复默认 ───
+const isMulti = ref(false)
+const multiDates = ref<string[]>([])
+function onCellClick(c: Cell): void {
+  if (isMulti.value) {
+    multiDates.value = multiDates.value.includes(c.date)
+      ? multiDates.value.filter((d) => d !== c.date)
+      : [...multiDates.value, c.date]
+  } else {
+    selectedDate.value = c.date
+  }
+}
+function isMultiSel(date: string): boolean {
+  return multiDates.value.includes(date)
+}
+function toggleMultiMode(): void {
+  isMulti.value = !isMulti.value
+  if (!isMulti.value) multiDates.value = []
+}
+function exitMulti(): void {
+  isMulti.value = false
+  multiDates.value = []
+}
+async function bulkSet(type: 'legal' | 'workday'): Promise<void> {
+  if (!multiDates.value.length) return
+  const defaultName = type === 'legal' ? '法定假期' : '调休上班'
+  const name = holidayName.value.trim() || defaultName
+  const items = multiDates.value.map((date) => ({ date, name, type }))
+  await app.addHolidays(items)
+  await loadHolidays()
+  exitMulti()
+}
+async function bulkClear(): Promise<void> {
+  if (!multiDates.value.length) return
+  await app.removeHolidays(multiDates.value)
+  await loadHolidays()
+  exitMulti()
+}
+async function resetDefault(): Promise<void> {
+  if (!window.confirm('将清空全部假期并恢复为官方法定安排（会移除你的自定义与修改），确定恢复默认？')) return
+  const r = await app.resetHolidays()
+  if (r.ok) {
+    await loadHolidays()
+    initHolidayName()
+  } else {
+    window.alert(r.error || '恢复默认失败')
+  }
+}
+
 let offHolidays: (() => void) | null = null
 onMounted(async () => {
   await loadHolidays()
@@ -172,6 +221,23 @@ function goToday(): void {
         <button class="cal-nav-btn" title="下个月" @click="go(1)"><i class="fas fa-chevron-right"></i></button>
       </div>
       <div class="cal-ym">{{ viewYear }} 年 {{ viewMonth + 1 }} 月</div>
+      <div class="cal-ops">
+        <button class="cal-op-btn" :class="{ active: isMulti }" @click="toggleMultiMode">
+          <i class="fas fa-object-group"></i> 多选{{ isMulti ? '中' : '' }}
+        </button>
+        <button class="cal-op-btn" title="清空并恢复为官方法定安排" @click="resetDefault">
+          <i class="fas fa-undo"></i> 恢复默认
+        </button>
+      </div>
+    </div>
+
+    <div v-if="isMulti" class="cal-multi-bar">
+      <span class="cal-multi-count"><i class="fas fa-check-circle"></i> 已选 {{ multiDates.length }} 天</span>
+      <input v-model="holidayName" class="cal-multi-input" placeholder="假期名称（可空：默认法定假期/调休上班）" maxlength="20" @keyup.enter="bulkSet('legal')" />
+      <button class="cal-multi-btn legal" @click="bulkSet('legal')"><i class="fas fa-sun"></i> 设为法定假期</button>
+      <button class="cal-multi-btn workday" @click="bulkSet('workday')"><i class="fas fa-briefcase"></i> 设为补班</button>
+      <button class="cal-multi-btn clear" @click="bulkClear"><i class="fas fa-trash"></i> 取消假期</button>
+      <button class="cal-multi-btn exit" @click="exitMulti"><i class="fas fa-times"></i> 退出</button>
     </div>
 
     <div class="cal-week">
@@ -183,8 +249,8 @@ function goToday(): void {
         v-for="c in cells"
         :key="c.date"
         class="cal-cell"
-        :class="{ out: !c.inMonth, today: c.date === todayStr, sel: c.date === selectedDate, legal: holidayType(c.date) === 'legal', workday: holidayType(c.date) === 'workday' }"
-        @click="selectedDate = c.date"
+        :class="{ out: !c.inMonth, today: c.date === todayStr, sel: c.date === selectedDate && !isMulti, legal: holidayType(c.date) === 'legal', workday: holidayType(c.date) === 'workday', multi: isMultiSel(c.date) }"
+        @click="onCellClick(c)"
       >
         <span class="cal-day">{{ c.day }}</span>
         <div class="cal-lunar">{{ lunarLabel(c.date) }}</div>
@@ -261,6 +327,35 @@ function goToday(): void {
   justify-content: space-between;
   padding: 14px 20px 8px;
 }
+.cal-ops { display: flex; align-items: center; gap: 8px; }
+.cal-op-btn {
+  height: 30px; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--dt-text-2);
+  border: 1px solid var(--dt-border-light); background: #fff;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.cal-op-btn:hover { border-color: var(--dt-primary); color: var(--dt-primary); }
+.cal-op-btn.active { background: var(--dt-primary); border-color: var(--dt-primary); color: #fff; }
+
+.cal-multi-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 20px 8px; padding: 8px 12px; border-radius: 10px;
+  background: #e8f3ff; border: 1px solid #b8d9ff;
+}
+.cal-multi-count { font-size: 13px; font-weight: 700; color: var(--dt-primary); display: flex; align-items: center; gap: 6px; }
+.cal-multi-input {
+  height: 28px; border: 1px solid var(--dt-border); border-radius: 8px;
+  padding: 0 10px; font-size: 12px; color: var(--dt-text); outline: none; background: #fff; min-width: 160px;
+}
+.cal-multi-input:focus { border-color: var(--dt-primary); }
+.cal-multi-btn {
+  height: 28px; padding: 0 12px; border-radius: 8px; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--dt-border-light); background: #fff; color: var(--dt-text-2);
+}
+.cal-multi-btn.legal:hover { color: #d92b3a; border-color: #ff5f6d; background: #fff2f3; }
+.cal-multi-btn.workday:hover { color: #d46b08; border-color: #ffa940; background: #fff7e6; }
+.cal-multi-btn.clear:hover { color: var(--dt-danger); border-color: var(--dt-danger); background: #fff0f0; }
+.cal-multi-btn.exit { color: var(--dt-text-3); }
+.cal-multi-btn.exit:hover { color: var(--dt-text); border-color: var(--dt-text-3); }
 .cal-nav { display: flex; align-items: center; gap: 8px; }
 .cal-nav-btn {
   height: 30px; padding: 0 12px; border-radius: 8px;
@@ -302,6 +397,8 @@ function goToday(): void {
 .cal-cell.out { opacity: 0.4; }
 .cal-cell.today { border-color: var(--dt-primary); box-shadow: 0 0 0 1px var(--dt-primary); }
 .cal-cell.sel { background: #e8f3ff; border-color: var(--dt-primary); }
+.cal-cell.multi { background: #dbeefe; border-color: var(--dt-primary); box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.35); }
+.cal-cell.multi .cal-day { color: var(--dt-primary); font-weight: 800; }
 .cal-cell.legal { border-color: #ff5f6d; background: rgba(255, 95, 109, 0.08); }
 .cal-cell.legal .cal-day { color: #d92b3a; }
 .cal-cell.workday { border-color: #ffa940; background: rgba(255, 169, 64, 0.08); }

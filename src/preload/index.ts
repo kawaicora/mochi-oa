@@ -181,6 +181,9 @@ const api = {
   serverHolidays: (year?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidays, year),
   serverHolidayAdd: (date: string, name: string, type: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayAdd, date, name, type),
   serverHolidayRemove: (date: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayRemove, date),
+  serverHolidayAddMany: (items: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayAddMany, items),
+  serverHolidayRemoveMany: (dates: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayRemoveMany, dates),
+  serverHolidayReset: (): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayReset),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
