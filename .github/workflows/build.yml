@@ -69,12 +69,40 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # push v* tag 或手动触发（手动时从 package.json 自动取版本号打 tag）
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # tag / release 名统一取 package.json 的 version（如 0.9.4 → v0.9.4）
+      - name: Resolve version & tag
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # 仅手动触发时：若该 tag 不存在则从当前提交创建
+      - name: Create tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG already exists, reuse it"
+          else
+            gh api --method POST "repos/${{ github.repository }}/git/refs" \
+              -f "ref=refs/tags/$TAG" \
+              -f "sha=${{ github.sha }}"
+            echo "created tag $TAG"
+          fi
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -84,7 +112,9 @@ jobs:
       - name: Create Release & attach installers
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: dist-artifacts/**
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
