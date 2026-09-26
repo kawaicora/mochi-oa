@@ -168,7 +168,7 @@ class VideoStream {
       this.divStreamCache = null
     }
 
-    const h = opts.size ?? 180
+    const h = opts.size ?? 1080
     const w = Math.round((h * 16) / 9)
     const dpr = window.devicePixelRatio || 1
     const canvas = document.createElement('canvas')
@@ -192,10 +192,10 @@ class VideoStream {
       splitter = audioCtx.createChannelSplitter(2)
       source.connect(splitter)
       analyserL = audioCtx.createAnalyser()
-      analyserL.fftSize = 1024
+      analyserL.fftSize = 2048
       analyserL.smoothingTimeConstant = 0.8
       analyserR = audioCtx.createAnalyser()
-      analyserR.fftSize = 1024
+      analyserR.fftSize = 2048
       analyserR.smoothingTimeConstant = 0.8
       splitter.connect(analyserL, 0)
       splitter.connect(analyserR, 1)
