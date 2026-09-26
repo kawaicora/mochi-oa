@@ -192,10 +192,10 @@ class VideoStream {
       splitter = audioCtx.createChannelSplitter(2)
       source.connect(splitter)
       analyserL = audioCtx.createAnalyser()
-      analyserL.fftSize = 1024
+      analyserL.fftSize = 2048
       analyserL.smoothingTimeConstant = 0.8
       analyserR = audioCtx.createAnalyser()
-      analyserR.fftSize = 1024
+      analyserR.fftSize = 2048
       analyserR.smoothingTimeConstant = 0.8
       splitter.connect(analyserL, 0)
       splitter.connect(analyserR, 1)
@@ -224,7 +224,7 @@ class VideoStream {
       const rate = audioCtx?.sampleRate ?? 48000
       const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 1024)))
       for (let i = 0; i < n; i++) {
-        const v = Math.min(1, (data[i] / 255) * 1.5)
+        const v = data[i] / 255//Math.min(1, (data[i] / 255) * 1.5)
         const len = inner + v * (outer - inner)
         const a = startA + (i / n) * (endA - startA)
         const x1 = w / 2 + Math.cos(a) * inner
@@ -232,7 +232,7 @@ class VideoStream {
         const x2 = w / 2 + Math.cos(a) * len
         const y2 = h / 2 + Math.sin(a) * len
         g.strokeStyle = color.replace('ALPHA', (0.35 + v * 0.65).toFixed(2))
-        g.lineWidth = 3
+        g.lineWidth = 5
         g.lineCap = 'round'
         g.beginPath()
         g.moveTo(x1, y1)
