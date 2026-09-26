@@ -615,7 +615,7 @@ export const useAppStore = defineStore('app', () => {
   function fileKindOf(p: string): MessageKind {
     if (/\.(mp4|webm|mov|mkv|avi|m4v|flv)$/i.test(p)) return 'video'
     if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)) return 'image'
-    if (/\.(mp3|wav|flac|aac|ogg|m4a|wma)$/i.test(p)) return 'audio'
+    if (/\.(mp3|wav|flac|aac|ogg|oga|opus|weba|m4a|m4b|wma|ac3|aiff|aif|au|amr|alac|mka|mid|midi|cda|cue)$/i.test(p)) return 'audio'
     return 'file'
   }
   function baseNameOf(p: string): string {
