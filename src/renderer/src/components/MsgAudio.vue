@@ -52,14 +52,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="msg-audio">
-    <i class="fas fa-music msg-audio-icon"></i>
+    <!-- 文件名 + 图标一行，播放器一行 -->
+    <div class="msg-audio-top">
+      <i class="fas fa-music msg-audio-icon"></i>
+      <span class="msg-audio-name" :title="nameOf()">{{ nameOf() }}</span>
+    </div>
     <!-- 原生可播放：内联播放器 -->
     <audio v-if="src && !err" :src="src" controls preload="metadata" class="msg-audio-el" @error="err = true"></audio>
-    <!-- 浏览器不支持该格式（ac3/cda/cue 等）：显示文件名 + 提示（后续接 ffmpeg 转码） -->
-    <template v-else-if="err">
-      <span class="msg-audio-name" :title="nameOf()">{{ nameOf() }}</span>
-      <span class="msg-audio-err">该格式暂不支持内联播放</span>
-    </template>
+    <!-- 浏览器不支持该格式（ac3/cda/cue 等） -->
+    <span v-else-if="err" class="msg-audio-err">该格式暂不支持内联播放</span>
     <span v-else class="msg-audio-loading">音频加载中…</span>
   </div>
 </template>
@@ -67,31 +68,34 @@ onBeforeUnmount(() => {
 <style scoped>
 .msg-audio {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+}
+.msg-audio-top {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 240px;
+  gap: 6px;
 }
 .msg-audio-icon {
   color: var(--dt-primary);
-  font-size: 18px;
+  font-size: 14px;
   flex-shrink: 0;
 }
-.msg-audio-el {
-  max-width: 220px;
-  height: 38px;
-}
 .msg-audio-name {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--dt-text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+}
+.msg-audio-el {
+  width: 260px;
+  height: 38px;
 }
 .msg-audio-err {
   font-size: 12px;
   color: var(--dt-danger);
-  flex-shrink: 0;
 }
 .msg-audio-loading {
   font-size: 12px;
