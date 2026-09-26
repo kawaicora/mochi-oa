@@ -6,6 +6,8 @@ import ConversationList from './ConversationList.vue'
 import ChatWindow from './ChatWindow.vue'
 import ContactsNav, { type ContactsScope } from './ContactsNav.vue'
 import ContactsContent from './ContactsContent.vue'
+import CalendarView from './CalendarView.vue'
+import CalendarSide from './CalendarSide.vue'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
 import UserAvatar from './UserAvatar.vue'
@@ -254,7 +256,7 @@ function openJoin(): void {
             <button class="m-nav-btn" @click="openJoin"><i class="fas fa-sign-in-alt"></i> 加入会议</button>
           </div>
         </template>
-        <template v-else-if="nav === 'calendar'"><PlaceholderPanel mode="nav" title="日历" icon="far fa-calendar-alt" /></template>
+        <template v-else-if="nav === 'calendar'"><CalendarSide /></template>
         <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="nav" title="待办" icon="fas fa-check-square" /></template>
       </div>
 
@@ -277,7 +279,7 @@ function openJoin(): void {
             </div>
           </div>
         </template>
-        <template v-else-if="nav === 'calendar'"><PlaceholderPanel mode="content" title="日历" icon="far fa-calendar-alt" /></template>
+        <template v-else-if="nav === 'calendar'"><CalendarView /></template>
         <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="content" title="待办" icon="fas fa-check-square" /></template>
       </div>
     </div>
