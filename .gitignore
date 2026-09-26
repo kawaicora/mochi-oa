@@ -8,3 +8,4 @@ release/
 tools/.shot/
 *.log
 功能反馈截图
+electron.vite.config.*.mjs
