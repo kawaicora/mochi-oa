@@ -7,6 +7,50 @@ import type { ConversationItem } from '@shared/server-types'
 const app = useAppStore()
 const keyword = ref('')
 
+// 发起会话（消息标题右侧加号）
+const showLaunch = ref(false)
+const showLaunchDm = ref(false)
+const showLaunchCreate = ref(false)
+const showLaunchJoin = ref(false)
+const launchMsg = ref('')
+const dmKeyword = ref('')
+const dmResults = ref<Array<{ id: number; username: string; nick?: string; avatar?: string }>>([])
+const dmSearching = ref(false)
+const newGroupName = ref('')
+const joinGroupCode = ref('')
+
+async function searchLaunchDm(): Promise<void> {
+  const k = dmKeyword.value.trim()
+  if (!k) { dmResults.value = []; return }
+  dmSearching.value = true
+  launchMsg.value = ''
+  try { dmResults.value = await app.searchUsers(k) }
+  catch { dmResults.value = []; launchMsg.value = '搜索失败，请重试' }
+  finally { dmSearching.value = false }
+}
+function startLaunchDm(u: { id: number; username: string; nick?: string }): void {
+  showLaunchDm.value = false
+  dmKeyword.value = ''
+  dmResults.value = []
+  void app.openDm(u.id, u.nick || u.username)
+}
+async function doLaunchCreateGroup(): Promise<void> {
+  const name = newGroupName.value.trim()
+  if (!name) return
+  launchMsg.value = ''
+  const r = await app.createGroup(name)
+  if (r.ok) { showLaunchCreate.value = false; newGroupName.value = '' }
+  else launchMsg.value = r.error || '创建群失败'
+}
+async function doLaunchJoinGroup(): Promise<void> {
+  const code = joinGroupCode.value.trim()
+  if (!code) return
+  launchMsg.value = ''
+  const r = await app.joinGroup(code)
+  if (r.ok) { showLaunchJoin.value = false; joinGroupCode.value = '' }
+  else launchMsg.value = r.error || '加入群失败'
+}
+
 const list = computed(() => {
   const k = keyword.value.trim().toLowerCase()
   const items = k
@@ -36,7 +80,12 @@ function initials(name: string): string {
   <section class="conv-panel">
     <div class="conv-head">
       <div class="conv-title">消息</div>
-      <button class="conv-add" title="发起会话（暂无新建入口）"><i class="fas fa-plus"></i></button>
+      <button class="conv-add" title="发起会话" @click="showLaunch = !showLaunch"><i class="fas fa-plus"></i></button>
+    </div>
+    <div v-if="showLaunch" class="conv-add-menu">
+      <button @click="showLaunchDm = true; showLaunch = false; launchMsg = ''"><i class="far fa-comment"></i> 发起私聊</button>
+      <button @click="showLaunchCreate = true; showLaunch = false; launchMsg = ''"><i class="fas fa-users"></i> 创建群</button>
+      <button @click="showLaunchJoin = true; showLaunch = false; launchMsg = ''"><i class="fas fa-sign-in-alt"></i> 加入群</button>
     </div>
     <div class="conv-search">
       <i class="fas fa-search"></i>
@@ -75,6 +124,60 @@ function initials(name: string): string {
         <p>暂无会话</p>
       </div>
     </div>
+
+    <!-- 发起私聊 -->
+    <div v-if="showLaunchDm" class="modal-mask" @click.self="showLaunchDm = false">
+      <div class="modal">
+        <div class="modal-head">发起私聊</div>
+        <div class="modal-body">
+          <div class="launch-row">
+            <input v-model="dmKeyword" class="modal-input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="searchLaunchDm" />
+            <button class="dt-btn dt-btn-primary" :disabled="dmSearching" @click="searchLaunchDm">搜索</button>
+          </div>
+          <div v-if="dmResults.length" class="launch-users">
+            <div v-for="u in dmResults" :key="u.id" class="launch-user" @click="startLaunchDm(u)">
+              <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="32" />
+              <div class="launch-uinfo">
+                <div class="launch-uname">{{ u.nick || u.username }}</div>
+                <div class="launch-usub">@{{ u.username }} · ID {{ u.id }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="dmKeyword.trim()" class="launch-hint">未找到匹配用户</div>
+        </div>
+        <div class="modal-foot"><button class="dt-btn dt-btn-default" @click="showLaunchDm = false">取消</button></div>
+      </div>
+    </div>
+
+    <!-- 创建群 -->
+    <div v-if="showLaunchCreate" class="modal-mask" @click.self="showLaunchCreate = false">
+      <div class="modal">
+        <div class="modal-head">创建群</div>
+        <div class="modal-body">
+          <input v-model="newGroupName" class="modal-input" placeholder="群名称" maxlength="64" @keyup.enter="doLaunchCreateGroup" />
+          <div v-if="launchMsg" class="launch-hint err">{{ launchMsg }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn dt-btn-default" @click="showLaunchCreate = false">取消</button>
+          <button class="dt-btn dt-btn-primary" :disabled="!newGroupName.trim()" @click="doLaunchCreateGroup">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 加入群 -->
+    <div v-if="showLaunchJoin" class="modal-mask" @click.self="showLaunchJoin = false">
+      <div class="modal">
+        <div class="modal-head">加入群</div>
+        <div class="modal-body">
+          <input v-model="joinGroupCode" class="modal-input" placeholder="输入群加入码" maxlength="32" @keyup.enter="doLaunchJoinGroup" />
+          <div v-if="launchMsg" class="launch-hint err">{{ launchMsg }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn dt-btn-default" @click="showLaunchJoin = false">取消</button>
+          <button class="dt-btn dt-btn-primary" :disabled="!joinGroupCode.trim()" @click="doLaunchJoinGroup">加入</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -93,7 +196,43 @@ function initials(name: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px 4px;
+  position: relative;
 }
+.conv-add-menu {
+  position: absolute;
+  top: 42px;
+  right: 12px;
+  width: 176px;
+  background: #fff;
+  border: 1px solid var(--dt-border-light);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  z-index: 60;
+  padding: 4px;
+}
+.conv-add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--dt-text);
+  text-align: left;
+}
+.conv-add-menu button:hover {
+  background: var(--dt-hover);
+}
+.launch-row { display: flex; gap: 8px; }
+.launch-users { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.launch-user { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; background: var(--dt-hover); cursor: pointer; }
+.launch-user:hover { background: #e8f3ff; }
+.launch-uinfo { flex: 1; min-width: 0; }
+.launch-uname { font-size: 14px; color: var(--dt-text); }
+.launch-usub { font-size: 12px; color: var(--dt-text-3); }
+.launch-hint { font-size: 13px; color: var(--dt-text-4); text-align: center; padding: 12px 0; }
+.launch-hint.err { color: var(--dt-danger); text-align: left; padding: 8px 0 0; }
 .conv-title {
   font-size: 17px;
   font-weight: 600;
