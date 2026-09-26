@@ -4,7 +4,6 @@ import VideoStream from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 import UserAvatar from '@renderer/components/UserAvatar.vue'
-import VoiceAvatar from '@renderer/components/VoiceAvatar.vue'
 import MediaDevicePanel from '@renderer/components/MediaDevicePanel.vue'
 import type {
   Ack,
@@ -27,7 +26,6 @@ const pantry = window.pantry as unknown as typeof window.pantry & MeetingChatPan
 const room = ref<RtcRoom | null>(null)
 const peers = ref<RtcPeer[]>([])
 const remoteStreams = reactive<Record<number, MediaStream>>({})
-const localVoiceRef = ref<{ getStream?: () => MediaStream | null } | null>(null)
 const isMuted = ref(false)
 const isCameraOff = ref(false)
 const isScreenSharing = ref(false)
@@ -79,7 +77,7 @@ function audioOpts(): { sampleRate: number; channelCount: number } {
 
 // 无摄像头状态（isCameraOff）的默认视频轨：本地频谱头像画面；不可用则空视频兜底
 function spectrumVideoTrack(): MediaStreamTrack | null {
-  return VideoStream.getDivStream(VideoStream.stream, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
+  return VideoStream.GetVoiceAvatarStream(VideoStream.stream, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
 }
 
 // 设备面板「应用」→ 切换本端麦克风/扬声器/摄像头（对每个 PC replaceTrack 并重新协商）
@@ -242,7 +240,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     mic = VideoStream.GetEmptyAudioStream()
   }
   isCameraOff.value = true
-  const divStream = VideoStream.getDivStream(mic, { avatar: myAvatar.value })
+  const divStream = VideoStream.GetVoiceAvatarStream(mic, { avatar: myAvatar.value })
   const empty = VideoStream.GetEmptyVideoStream()
   const videoTrack = divStream?.getVideoTracks()[0] ?? empty.getVideoTracks()[0] ?? null
   const localStream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...mic.getTracks()])
@@ -572,7 +570,7 @@ onBeforeUnmount(() => { cleanup() })
             :srcObject="VideoStream.stream"
           ></video>
           <div v-else class="tile-avatar">
-            <VoiceAvatar ref="localVoiceRef" :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="96" />
+            <UserAvatar :nick="myNick" :avatar="myAvatar" :size="96" />
           </div>
           <div class="tile-name">我：{{ myNick }}</div>
           <button class="tile-fs" title="全屏" @click.stop="fullscreenEl"><i class="fas fa-expand"></i></button>
@@ -588,7 +586,7 @@ onBeforeUnmount(() => { cleanup() })
             :muted="focusedKey === p.socketId"
           ></video>
           <div v-else class="tile-avatar">
-            <VoiceAvatar :stream="remoteStreams[p.userId]" :nick="p.nick" :avatar="p.avatar" :size="96" />
+            <UserAvatar :nick="p.nick" :avatar="p.avatar" :size="96" />
           </div>
           <div class="tile-name">{{ p.nick }}</div>
           <button class="tile-fs" title="全屏" @click.stop="fullscreenEl"><i class="fas fa-expand"></i></button>
@@ -603,14 +601,14 @@ onBeforeUnmount(() => { cleanup() })
         <template v-if="focusedKey === 'me'">
           <video v-if="localHasVideo" autoplay playsinline muted :srcObject="VideoStream.stream"></video>
           <div v-else class="focus-avatar">
-            <VoiceAvatar :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="180" />
+            <UserAvatar :nick="myNick" :avatar="myAvatar" :size="180" />
           </div>
           <div class="focus-name">我：{{ myNick }}</div>
         </template>
         <template v-else-if="focusedPeer">
           <video v-if="hasRemoteVideo(focusedPeer.userId)" autoplay playsinline :srcObject="remoteStreams[focusedPeer.userId]"></video>
           <div v-else class="focus-avatar">
-            <VoiceAvatar :stream="remoteStreams[focusedPeer.userId]" :nick="focusedPeer.nick" :avatar="focusedPeer.avatar" :size="180" />
+            <UserAvatar :nick="focusedPeer.nick" :avatar="focusedPeer.avatar" :size="180" />
           </div>
           <div class="focus-name">{{ focusedPeer.nick }}</div>
         </template>

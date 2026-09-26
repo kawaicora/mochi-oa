@@ -154,7 +154,7 @@ class VideoStream {
    * 生成"头像+频谱"视频流（canvas）：圆形头像 + 左右声道实时环形频谱。
    * 不绘制名字；无摄像头时作为视频轨，本地与远端同步显示。
    */
-  getDivStream(
+  GetVoiceAvatarStream(
     audioStream: MediaStream | null,
     opts: { size?: number; avatar?: string } = {}
   ): MediaStream | null {
