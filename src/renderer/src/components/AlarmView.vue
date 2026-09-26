@@ -18,6 +18,7 @@ const fRing = ref('')
 const fUseRing = ref(true)
 const fNotify = ref(true)
 const fCommand = ref('')
+const fRepeatMinutes = ref(10)
 const weekdayNames = ['日', '一', '二', '三', '四', '五', '六']
 
 function openAdd(): void {
@@ -30,6 +31,7 @@ function openAdd(): void {
   fUseRing.value = true
   fNotify.value = true
   fCommand.value = ''
+  fRepeatMinutes.value = 10
   showForm.value = true
 }
 function openEdit(a: Alarm): void {
@@ -42,6 +44,7 @@ function openEdit(a: Alarm): void {
   fUseRing.value = a.useRing
   fNotify.value = a.notify
   fCommand.value = a.command ?? ''
+  fRepeatMinutes.value = a.repeatMinutes ?? 10
   showForm.value = true
 }
 function closeForm(): void {
@@ -84,6 +87,7 @@ function saveForm(): void {
     useRing: fUseRing.value,
     notify: fNotify.value,
     command: fCommand.value.trim(),
+    repeatMinutes: Math.max(0, Math.floor(Number(fRepeatMinutes.value) || 0)),
     enabled: existing?.enabled ?? true
   }
   const list = existing
@@ -130,6 +134,7 @@ function repeatLabel(a: Alarm): string {
           <div class="alarm-name">{{ a.name || '闹钟' }}</div>
           <div class="alarm-tags">
             <span class="alarm-tag" :class="a.repeat === 'once' ? 'once' : a.repeat === 'daily' ? 'daily' : 'weekly'">{{ repeatLabel(a) }}</span>
+            <span v-if="a.repeatMinutes > 0" class="alarm-tag repeat">每 {{ a.repeatMinutes }} 分钟</span>
             <span v-if="a.useRing && a.ring" class="alarm-tag ring"><i class="fas fa-music"></i> {{ a.ring.split(/[\\/]/).pop() }}</span>
             <span v-if="a.notify" class="alarm-tag nore"><i class="fas fa-bell"></i> 系统通知</span>
             <span v-if="a.command && a.command.trim()" class="alarm-tag cmd"><i class="fas fa-terminal"></i> {{ a.command.split(/[\\/]/).pop() }}</span>
@@ -177,6 +182,11 @@ function repeatLabel(a: Alarm): string {
               @click="toggleWeekday(d)"
             >{{ w }}</button>
           </div>
+        </div>
+        <div class="alarm-form-row">
+          <span class="alarm-form-label">间隔</span>
+          <input v-model.number="fRepeatMinutes" type="number" min="0" max="1440" class="alarm-form-input alarm-time-input" />
+          <span class="alarm-sw-hint">分钟，0=仅一次；到点后每隔 N 分钟重响（点击通知可暂停）</span>
         </div>
         <div class="alarm-form-row">
           <span class="alarm-form-label">铃声</span>
@@ -249,6 +259,7 @@ function repeatLabel(a: Alarm): string {
 .alarm-tag.ring { background: #f3e8ff; color: #8a2be2; }
 .alarm-tag.nore { background: #f1f3f5; color: var(--dt-text-3); }
 .alarm-tag.cmd { background: #e6f4ea; color: #188038; }
+.alarm-tag.repeat { background: #fff7e6; color: #b8860b; }
 .alarm-actions { display: flex; align-items: center; gap: 6px; }
 .alarm-toggle { font-size: 24px; color: var(--dt-border); display: inline-flex; padding: 0; }
 .alarm-toggle.on { color: var(--dt-primary); }
