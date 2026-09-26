@@ -278,8 +278,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'meeting'">
           <div class="m-nav">
             <div class="m-nav-title"><i class="fas fa-video"></i> 会议</div>
-            <button class="m-nav-btn" @click="openCreateVideo"><i class="fas fa-video"></i> 发起视频会议</button>
-            <button class="m-nav-btn" @click="openCreateVoice"><i class="fas fa-phone"></i> 发起语音会议</button>
+            <button class="m-nav-btn" @click="openCreateVideo"><i class="fas fa-video"></i> 发起会议</button>
             <button class="m-nav-btn" @click="openJoin"><i class="fas fa-sign-in-alt"></i> 加入会议</button>
           </div>
         </template>
@@ -298,8 +297,7 @@ function openJoin(): void {
             <div class="m-title">会议</div>
             <div class="m-desc">发起或加入会议后将在独立窗口中打开</div>
             <div class="m-actions">
-              <button class="dt-btn dt-btn-primary" @click="openCreateVideo"><i class="fas fa-video"></i> 发起视频会议</button>
-              <button class="dt-btn dt-btn-primary" @click="openCreateVoice"><i class="fas fa-phone"></i> 发起语音会议</button>
+              <button class="dt-btn dt-btn-primary" @click="openCreateVideo"><i class="fas fa-video"></i> 发起会议</button>
             </div>
             <div class="m-join">
               <input v-model="meetingNo" class="srv-input" placeholder="输入会议号加入" @keydown.enter="openJoin" />
