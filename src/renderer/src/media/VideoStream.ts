@@ -160,7 +160,13 @@ class VideoStream {
   ): MediaStream | null {
     const track = audioStream?.getAudioTracks()[0]
     if (!track) return null
-    if (this.divStreamCache) return this.divStreamCache.stream
+    if (this.divStreamCache) {
+      const cachedTrack = this.divStreamCache.stream.getVideoTracks()[0]
+      if (cachedTrack && cachedTrack.readyState !== 'ended') return this.divStreamCache.stream
+      // 旧轨道已结束 → 停掉并重建，避免本地/远程用死轨
+      this.divStreamCache.stop?.()
+      this.divStreamCache = null
+    }
 
     const h = opts.size ?? 180
     const w = Math.round((h * 16) / 9)
@@ -201,20 +207,12 @@ class VideoStream {
     }
 
     if (opts.avatar) {
-      // 优先 fetch 转 blob（安全不污染 canvas）；失败回退 crossOrigin img
-      void fetch(opts.avatar)
-        .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('bad'))))
-        .then((blob) => {
-          const img = new Image()
-          img.onload = () => { avatarImg = img }
-          img.src = URL.createObjectURL(blob)
-        })
-        .catch(() => {
-          const img = new Image()
-          img.crossOrigin = 'anonymous'
-          img.onload = () => { avatarImg = img }
-          img.src = opts.avatar ?? ''
-        })
+      // crossOrigin img 直接加载（服务端已返回 Access-Control-Allow-Origin），保证头像画进 canvas
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => { avatarImg = img }
+      img.onerror = () => { avatarImg = null }
+      img.src = opts.avatar
     }
 
     // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
