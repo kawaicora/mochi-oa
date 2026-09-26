@@ -9,7 +9,7 @@ import ContactsContent from './ContactsContent.vue'
 import CalendarView from './CalendarView.vue'
 import CalendarSide from './CalendarSide.vue'
 import AlarmView from './AlarmView.vue'
-import { fireDueAlarms } from '../utils/alarms'
+import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
 import UserAvatar from './UserAvatar.vue'
@@ -55,9 +55,12 @@ onMounted(async () => {
   panelReady.value = true
   // 闹钟到点检测（应用运行期间常驻，不随标签切换停止）
   alarmTimer = window.setInterval(() => fireDueAlarms(), 1000)
+  // 点击闹钟通知 → 弹出选择窗口（停止/暂停）
+  setAlarmActionHandler((a) => { alarmAction.value = a })
 })
 onBeforeUnmount(() => {
   if (alarmTimer !== null) window.clearInterval(alarmTimer)
+  setAlarmActionHandler(null)
 })
 
 // 头像菜单 / 账号安全 / 服务器设置（原工作台能力移入标题栏头像）
@@ -65,6 +68,7 @@ const showAccountMenu = ref(false)
 const showAccount = ref(false)
 const showSettings = ref(false)
 const showPersonalSettings = ref(false)
+const alarmAction = ref<Alarm | null>(null)
 const accountError = ref('')
 const sessions = ref<ServerSession[]>([])
 const currentSessionId = ref(0)
@@ -80,6 +84,18 @@ const daysOptions = [
 const meNick = computed(() => server.state.nick || server.state.username || '')
 const meUser = computed(() => server.state.username || '')
 const meAvatar = computed(() => server.state.avatar || '')
+
+// 闹钟到点选择：停止 / 暂停
+function doAlarmStop(): void {
+  const a = alarmAction.value
+  if (a) stopAlarm(a.id)
+  alarmAction.value = null
+}
+function doAlarmSnooze(): void {
+  const a = alarmAction.value
+  if (a) snoozeAlarm(a.id, a.repeatMinutes || 10)
+  alarmAction.value = null
+}
 
 async function refreshSessions(): Promise<void> {
   const r = await server.listSessions()
@@ -373,6 +389,20 @@ function openJoin(): void {
 
     <!-- 个人信息设置 -->
     <PersonalSettings v-if="showPersonalSettings" @close="showPersonalSettings = false" />
+
+    <!-- 闹钟到点：点击通知弹出选择（停止 / 暂停） -->
+    <div v-if="alarmAction" class="modal-mask" @click.self="alarmAction = null">
+      <div class="modal alarm-action-modal">
+        <div class="modal-head"><i class="fas fa-bell"></i> 闹钟到点 · {{ alarmAction.name || '闹钟' }} {{ alarmAction.time }}</div>
+        <div class="modal-body">
+          <p class="alarm-action-hint">选择如何处理本次闹钟？</p>
+        </div>
+        <div class="modal-foot">
+          <button class="alarm-act-btn danger" @click="doAlarmStop"><i class="fas fa-stop"></i> 停止</button>
+          <button class="alarm-act-btn" @click="doAlarmSnooze"><i class="fas fa-pause"></i> 暂停 {{ alarmAction.repeatMinutes || 10 }} 分钟</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -444,6 +474,12 @@ function openJoin(): void {
 .head-sub { font-size: 12px; font-weight: 400; color: var(--dt-text-3); margin-left: 8px; }
 .modal-body { padding: 18px; }
 .modal-foot { padding: 12px 18px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--dt-border-light); }
+.alarm-action-modal { width: 360px; }
+.alarm-action-hint { margin: 0; color: var(--dt-text-2); font-size: 13px; }
+.alarm-act-btn { height: 34px; padding: 0 18px; border-radius: 8px; font-size: 13px; border: 1px solid var(--dt-border-light); color: var(--dt-text-2); background: #fff; display: inline-flex; align-items: center; gap: 6px; }
+.alarm-act-btn:hover { border-color: var(--dt-primary); color: var(--dt-primary); }
+.alarm-act-btn.danger { color: var(--dt-danger); }
+.alarm-act-btn.danger:hover { border-color: var(--dt-danger); color: var(--dt-danger); }
 .account-modal { width: 540px; }
 .modal-desc { font-size: 13px; color: var(--dt-text-3); margin-bottom: 14px; }
 .srv-row { display: flex; align-items: center; gap: 8px; }

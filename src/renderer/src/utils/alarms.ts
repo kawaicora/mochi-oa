@@ -72,22 +72,34 @@ function stopRing(): void {
   currentRing.alarmId = null
 }
 
-/** 弹系统通知；点击通知 = 暂停（停止响铃，repeatMinutes 后重响；无重复则停止本次） */
+// 通知点击 → 弹出选择窗口（停止/暂停）的回调，由 MainScreen 注册
+let actionHandler: ((a: Alarm) => void) | null = null
+export function setAlarmActionHandler(fn: ((a: Alarm) => void) | null): void {
+  actionHandler = fn
+}
+/** 暂停：停止响铃，N 分钟后重响 */
+export function snoozeAlarm(id: string, minutes: number): void {
+  stopRing()
+  nextFire.set(id, Date.now() + Math.max(1, minutes) * 60000)
+}
+/** 停止：停止响铃，本次结束（不再循环） */
+export function stopAlarm(id: string): void {
+  stopRing()
+  nextFire.delete(id)
+}
+
+/** 弹系统通知；点击通知 = 弹出选择窗口（停止 / 暂停） */
 function notify(a: Alarm): void {
   try {
-    const mins = a.repeatMinutes > 0 ? a.repeatMinutes : null
     const body = a.name ? `${a.name} · ${a.time}` : `到点啦，现在是 ${a.time}`
     const n = new Notification('⏰ 闹钟', {
-      body: mins ? `${body}（点击暂停 ${mins} 分钟）` : body,
+      body,
       silent: true // 关闭系统默认提示音，避免与铃声叠加
     })
     n.onclick = () => {
       stopRing()
-      if (a.repeatMinutes > 0) {
-        nextFire.set(a.id, Date.now() + a.repeatMinutes * 60000) // 延后 N 分钟重响
-      } else {
-        nextFire.delete(a.id) // 无重复 → 停止本次
-      }
+      void window.pantry.focusWindow?.()
+      actionHandler?.(a)
     }
   } catch {
     // 通知不可用则静默
