@@ -77,6 +77,11 @@ function audioOpts(): { sampleRate: number; channelCount: number } {
   }
 }
 
+// 无摄像头状态（isCameraOff）的默认视频轨：本地频谱头像画面；不可用则空视频兜底
+function spectrumVideoTrack(): MediaStreamTrack | null {
+  return localVoiceRef.value?.getStream?.()?.getVideoTracks()[0] ?? null
+}
+
 // 设备面板「应用」→ 切换本端麦克风/扬声器/摄像头（对每个 PC replaceTrack 并重新协商）
 async function applyDevicesFromPanel(p: {
   audioInId: string
@@ -93,11 +98,18 @@ async function applyDevicesFromPanel(p: {
       engine?.replaceTrack(track, 'audio')
     }
     if (p.cameraId) {
-      const ms = await VideoStream.GetCameraStream(p.cameraId)
-      const track = ms.getVideoTracks()[0] ?? null
+      let track: MediaStreamTrack | null
+      if (p.cameraId === 'default') {
+        // 关闭摄像头 → 频谱占位
+        track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+        isCameraOff.value = true
+      } else {
+        const ms = await VideoStream.GetCameraStream(p.cameraId)
+        track = ms.getVideoTracks()[0] ?? null
+        isCameraOff.value = false
+      }
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
       engine?.replaceTrack(track, 'video')
-      isCameraOff.value = p.cameraId === 'default'
     }
     if (p.audioOutId) {
       if (localVideoRef.value) VideoStream.SetSinkId(localVideoRef.value, p.audioOutId)
@@ -141,12 +153,19 @@ async function switchMic(deviceId: string): Promise<void> {
 async function switchCamera(deviceId: string): Promise<void> {
   showCamMenu.value = false
   try {
-    const ms = await VideoStream.GetCameraStream(deviceId)
-    const track = ms.getVideoTracks()[0] ?? null
+    let track: MediaStreamTrack | null
+    if (deviceId === 'default') {
+      // 关闭摄像头 → 频谱占位
+      track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+      isCameraOff.value = true
+    } else {
+      const ms = await VideoStream.GetCameraStream(deviceId)
+      track = ms.getVideoTracks()[0] ?? null
+      isCameraOff.value = false
+    }
     await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
     engine?.replaceTrack(track, 'video')
     currentCam.value = deviceId
-    isCameraOff.value = deviceId === 'default'
   } catch {
     error.value = '摄像头切换失败'
   }
@@ -311,8 +330,8 @@ async function toggleCamera(): Promise<void> {
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
       engine?.replaceTrack(track, 'video')
     } else {
-      const emptyStream = VideoStream.GetEmptyVideoStream()
-      const track = emptyStream.getVideoTracks()[0] ?? null
+      // 关摄像头 → 频谱占位
+      const track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
       engine?.replaceTrack(track, 'video')
     }
@@ -326,14 +345,13 @@ async function toggleScreenShare(): Promise<void> {
   if (!engine) return
   try {
     if (isScreenSharing.value) {
-      // 停止共享：回到摄像头（若仍开启）或空视频
-      const camStream = await VideoStream.GetCameraStream().catch(() => null)
+      // 停止共享：回到摄像头（若仍开启）或频谱占位（无摄像头）
       let track: MediaStreamTrack | null = null
-      if (camStream) track = camStream.getVideoTracks()[0] ?? null
-      if (!track) {
-        const empty = await VideoStream.GetEmptyVideoStream()
-        track = empty.getVideoTracks()[0] ?? null
+      if (!isCameraOff.value) {
+        const camStream = await VideoStream.GetCameraStream().catch(() => null)
+        track = camStream?.getVideoTracks()[0] ?? null
       }
+      if (!track) track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
       engine.replaceTrack(track, 'video')
       isScreenSharing.value = false
