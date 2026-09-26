@@ -27,6 +27,7 @@ const pantry = window.pantry as unknown as typeof window.pantry & MeetingChatPan
 const room = ref<RtcRoom | null>(null)
 const peers = ref<RtcPeer[]>([])
 const remoteStreams = reactive<Record<number, MediaStream>>({})
+const localVoiceRef = ref<{ getStream?: () => MediaStream | null } | null>(null)
 const isMuted = ref(false)
 const isCameraOff = ref(false)
 const isScreenSharing = ref(false)
@@ -550,7 +551,7 @@ onBeforeUnmount(() => { cleanup() })
             :style="{ display: localHasVideo ? 'block' : 'none' }"
           ></video>
           <div v-if="!localHasVideo" class="tile-avatar">
-            <VoiceAvatar :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="96" />
+            <VoiceAvatar ref="localVoiceRef" :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="96" />
           </div>
           <div class="tile-name">我：{{ myNick }}</div>
           <button class="tile-fs" title="全屏" @click.stop="fullscreenEl"><i class="fas fa-expand"></i></button>
