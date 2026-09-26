@@ -44,6 +44,8 @@ import type {
   ServerPresenceUpdate,
   ServerGroupMember,
   ServerSession,
+  Holiday,
+  HolidayType,
   UserInfo,
   UserProfileUpdateAck
 } from '../../shared/server-types'
@@ -282,6 +284,7 @@ export class ServerClient extends EventEmitter {
     socket.on('group:added', (d: { groupId: number }) => this.emit('groupAdded', d))
     socket.on('group:removed', (d: { groupId: number }) => this.emit('groupRemoved', d))
     socket.on('friends:updated', () => this.emit('friendsUpdated'))
+    socket.on('holiday:updated', () => this.emit('holidaysUpdated'))
   }
 
   disconnect(): void {
@@ -485,6 +488,23 @@ export class ServerClient extends EventEmitter {
   async searchUsers(keyword: string): Promise<Ack & { data?: { users: Array<{ id: number; username: string; nick?: string; avatar?: string }> } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck<{ users: Array<{ id: number; username: string; nick?: string; avatar?: string }> }>(this.socket, 'user:search', { keyword })
+  }
+
+  // ─── 假期（全局日历：法定/调休/自定义，多端同步） ─────────
+
+  async listHolidays(year?: number): Promise<Ack & { data?: { holidays: Holiday[] } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ holidays: Holiday[] }>(this.socket, 'holiday:list', { year: year ?? 0 })
+  }
+
+  async addHoliday(date: string, name: string, type: HolidayType): Promise<Ack & { data?: { holiday: Holiday } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ holiday: Holiday }>(this.socket, 'holiday:add', { date, name, type })
+  }
+
+  async removeHoliday(date: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'holiday:remove', { date })
   }
 
   async addCompanyMember(companyId: number, target: number | string, departmentId?: number): Promise<Ack> {

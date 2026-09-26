@@ -81,6 +81,11 @@ export const IpcChannels = {
   serverFriendAdd: 'server:friend:add',
   serverFriendRemove: 'server:friend:remove',
 
+  // 假期（全局日历：法定/调休/自定义，多端同步）
+  serverHolidays: 'server:holidays',
+  serverHolidayAdd: 'server:holiday:add',
+  serverHolidayRemove: 'server:holiday:remove',
+
   // 文件上传
   serverUpload: 'server:upload',
   /** 分块上传（带进度回调，支持断点续传；完成后返回 {ok,url,...}） */
@@ -178,6 +183,7 @@ export const IpcEvents = {
   groupAdded: 'server:event:group:added',
   groupRemoved: 'server:event:group:removed',
   friendsUpdated: 'server:event:friends:updated',
+  holidaysUpdated: 'server:event:holidays:updated',
   userProfileUpdated: 'server:event:user:profileUpdated',
   /** 分块上传进度：{ uploadId, fileName, percent, done? } */
   uploadProgress: 'server:event:uploadProgress',

@@ -320,6 +320,17 @@ export interface RtcDmIncomingEvent {
   ts: number
 }
 
+export type HolidayType = 'legal' | 'workday' | 'custom'
+export interface Holiday {
+  id: number
+  /** 日期 YYYY-MM-DD（唯一） */
+  date: string
+  name: string
+  /** legal=法定假期，workday=周末调休补班，custom=自定义 */
+  type: HolidayType
+  createdAt: string
+}
+
 export interface RtcGroupCallEvent {
   room: string
   kind: RtcKind

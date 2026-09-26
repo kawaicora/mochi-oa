@@ -60,6 +60,7 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
     "flv.js": "^1.6.2",
+    "lunar-javascript": "^1.7.7",
     "pinia": "^2.1.7",
     "socket.io-client": "^4.7.5",
     "three": "^0.186.1",

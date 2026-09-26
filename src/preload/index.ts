@@ -178,6 +178,9 @@ const api = {
   serverListFriends: (): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverFriends),
   serverAddFriend: (userId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverFriendAdd, userId),
   serverRemoveFriend: (userId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverFriendRemove, userId),
+  serverHolidays: (year?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidays, year),
+  serverHolidayAdd: (date: string, name: string, type: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayAdd, date, name, type),
+  serverHolidayRemove: (date: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayRemove, date),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
@@ -246,6 +249,7 @@ const api = {
   onGroupAdded: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupAdded, l),
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
+  onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)
 }
 

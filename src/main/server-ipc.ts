@@ -52,6 +52,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('groupAdded', (d) => broadcastToAllWindows(IpcEvents.groupAdded, d))
   serverClient.on('groupRemoved', (d) => broadcastToAllWindows(IpcEvents.groupRemoved, d))
   serverClient.on('friendsUpdated', () => broadcastToAllWindows(IpcEvents.friendsUpdated, {}))
+  serverClient.on('holidaysUpdated', () => broadcastToAllWindows(IpcEvents.holidaysUpdated, {}))
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {
@@ -238,6 +239,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
 
   // 好友
   ipcMain.handle(IpcChannels.serverFriends, () => serverClient.listFriends())
+  ipcMain.handle(IpcChannels.serverHolidays, (_e, year) => serverClient.listHolidays(year ? Number(year) : undefined))
+  ipcMain.handle(IpcChannels.serverHolidayAdd, (_e, date, name, type) => serverClient.addHoliday(String(date), String(name), type as 'legal' | 'workday' | 'custom'))
+  ipcMain.handle(IpcChannels.serverHolidayRemove, (_e, date) => serverClient.removeHoliday(String(date)))
   ipcMain.handle(IpcChannels.serverFriendAdd, (_e, userId) => serverClient.addFriend(Number(userId) || 0))
   ipcMain.handle(IpcChannels.serverFriendRemove, (_e, userId) => serverClient.removeFriend(Number(userId) || 0))
 

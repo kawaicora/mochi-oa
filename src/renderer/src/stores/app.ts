@@ -425,6 +425,19 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverSearchUsers(keyword)
     return d<{ users: Array<{ id: number; username: string; nick?: string; avatar?: string }> }>(ack)?.users ?? []
   }
+  type HolidayItem = { id: number; date: string; name: string; type: string; createdAt: string }
+  async function fetchHolidays(year?: number): Promise<HolidayItem[]> {
+    const ack = await window.pantry.serverHolidays(year)
+    return d<{ holidays: HolidayItem[] }>(ack)?.holidays ?? []
+  }
+  async function addHoliday(date: string, name: string, type: 'legal' | 'workday' | 'custom'): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverHolidayAdd(date, name, type)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function removeHoliday(date: string): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverHolidayRemove(date)
+    return { ok: ack.ok, error: ack.error }
+  }
   async function addCompanyMember(target: number | string, departmentId?: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverAddCompanyMember(activeCompanyId.value, target, departmentId ?? undefined)
     if (ack.ok) await refreshMembers()
@@ -798,6 +811,9 @@ export const useAppStore = defineStore('app', () => {
     addCompanyMember,
     loadDepartmentMembers,
     searchUsers,
+    fetchHolidays,
+    addHoliday,
+    removeHoliday,
     createDepartment,
     deleteDepartment,
     assignToDepartment,

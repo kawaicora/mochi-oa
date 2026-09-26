@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { Lunar } from 'lunar-javascript'
+import { useAppStore } from '../stores/app'
 
+const app = useAppStore()
 const STORE_KEY = 'mochi_calendar_events'
 const pad = (n: number) => String(n).padStart(2, '0')
 const today = new Date()
@@ -8,6 +11,31 @@ const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(toda
 const weekNames = ['日', '一', '二', '三', '四', '五', '六']
 const weekday = `星期${weekNames[today.getDay()]}`
 const todayLabel = `${today.getFullYear()} 年 ${today.getMonth() + 1} 月 ${today.getDate()} 日`
+
+const todayLunar = (() => {
+  const l = Lunar.fromDate(today)
+  return `${l.getYearInChinese()}年${l.getMonthInChinese()}月${l.getDayInChinese()}`
+})()
+const todayFestival = (() => {
+  const l = Lunar.fromDate(today)
+  return [...(l.getFestivals() ?? []), ...(l.getOtherFestivals() ?? [])][0] ?? ''
+})()
+
+const todayHoliday = ref<{ name: string; type: string } | null>(null)
+async function loadHolidays(): Promise<void> {
+  const list = await app.fetchHolidays()
+  const hit = list.find((h) => h.date === todayStr)
+  todayHoliday.value = hit ? { name: hit.name, type: hit.type } : null
+}
+let offHolidays: (() => void) | null = null
+onMounted(async () => {
+  await loadHolidays()
+  offHolidays = window.pantry.onHolidaysUpdated(() => void loadHolidays())
+})
+onUnmounted(() => {
+  offHolidays?.()
+  offHolidays = null
+})
 
 function load(): Record<string, string[]> {
   try {
@@ -35,6 +63,16 @@ const monthCount = computed(() =>
           <span class="cal-side-ym">{{ today.getFullYear() }} 年 {{ today.getMonth() + 1 }} 月</span>
           <span class="cal-side-wd">{{ weekday }}</span>
         </div>
+      </div>
+    </div>
+
+    <div class="cal-side-section">
+      <div class="cal-side-title"><i class="fas fa-moon"></i> 今日农历</div>
+      <div class="cal-side-lunar">{{ todayLunar }}</div>
+      <div class="cal-side-lunar-sub">
+        <span v-if="todayFestival" class="cal-side-festival">{{ todayFestival }}</span>
+        <span v-else>节气 / 平日</span>
+        <span v-if="todayHoliday" class="cal-side-hd" :class="todayHoliday.type">{{ todayHoliday.name }} · {{ todayHoliday.type === 'legal' ? '法定假期' : todayHoliday.type === 'workday' ? '调休补班' : '自定义' }}</span>
       </div>
     </div>
 
@@ -99,6 +137,13 @@ const monthCount = computed(() =>
 .cal-side-ym { font-size: 14px; font-weight: 600; }
 .cal-side-wd { font-size: 12px; opacity: 0.9; }
 .cal-side-section { padding: 14px; border-bottom: 1px solid var(--dt-border-light); }
+.cal-side-lunar { font-size: 18px; font-weight: 700; color: var(--dt-text); }
+.cal-side-lunar-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--dt-text-3); flex-wrap: wrap; }
+.cal-side-festival { color: #d92b3a; font-weight: 600; }
+.cal-side-hd { padding: 1px 8px; border-radius: 20px; font-weight: 600; }
+.cal-side-hd.legal { background: #ffe3e6; color: #d92b3a; }
+.cal-side-hd.workday { background: #fff1d6; color: #d46b08; }
+.cal-side-hd.custom { background: #e8f3ff; color: var(--dt-primary); }
 .cal-side-title { font-size: 14px; font-weight: 600; color: var(--dt-text); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .cal-side-list { display: flex; flex-direction: column; gap: 8px; }
 .cal-side-item { display: flex; align-items: flex-start; gap: 8px; }
