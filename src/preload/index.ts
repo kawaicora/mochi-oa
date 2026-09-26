@@ -190,7 +190,7 @@ const api = {
     ipcRenderer.invoke(IpcChannels.serverUpload, filePath, companyId ?? 0),
   serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
     ipcRenderer.invoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? ''),
-  pickFile: (filter?: 'image' | 'video'): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePick, filter ?? null),
+  pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePick, filter ?? null),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePickFolder),
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     ipcRenderer.invoke(IpcChannels.serverListFolderFiles, folderPath),

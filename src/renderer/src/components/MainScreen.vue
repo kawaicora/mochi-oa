@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useServerStore } from '../stores/server'
 import { useAppStore } from '../stores/app'
 import ConversationList from './ConversationList.vue'
@@ -8,6 +8,8 @@ import ContactsNav, { type ContactsScope } from './ContactsNav.vue'
 import ContactsContent from './ContactsContent.vue'
 import CalendarView from './CalendarView.vue'
 import CalendarSide from './CalendarSide.vue'
+import AlarmView from './AlarmView.vue'
+import { fireDueAlarms } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
 import UserAvatar from './UserAvatar.vue'
@@ -16,12 +18,13 @@ import type { ServerSession } from '@shared/server-types'
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'todo'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
   meeting: { label: '会议', icon: 'fas fa-video' },
   calendar: { label: '日历', icon: 'far fa-calendar-alt' },
+  alarm: { label: '闹钟', icon: 'fas fa-bell' },
   todo: { label: '待办', icon: 'fas fa-check-square' }
 }
 const nav = ref<NavTab>('message')
@@ -46,9 +49,15 @@ const cScope = ref<ContactsScope>('org')
 const cDept = ref<number | null>(null)
 
 const panelReady = ref(false)
+let alarmTimer: number | null = null
 onMounted(async () => {
   await app.bootstrap()
   panelReady.value = true
+  // 闹钟到点检测（应用运行期间常驻，不随标签切换停止）
+  alarmTimer = window.setInterval(() => fireDueAlarms(), 1000)
+})
+onBeforeUnmount(() => {
+  if (alarmTimer !== null) window.clearInterval(alarmTimer)
 })
 
 // 头像菜单 / 账号安全 / 服务器设置（原工作台能力移入标题栏头像）
@@ -257,6 +266,7 @@ function openJoin(): void {
           </div>
         </template>
         <template v-else-if="nav === 'calendar'"><CalendarSide /></template>
+        <template v-else-if="nav === 'alarm'"></template>
         <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="nav" title="待办" icon="fas fa-check-square" /></template>
       </div>
 
@@ -280,6 +290,7 @@ function openJoin(): void {
           </div>
         </template>
         <template v-else-if="nav === 'calendar'"><CalendarView /></template>
+        <template v-else-if="nav === 'alarm'"><AlarmView /></template>
         <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="content" title="待办" icon="fas fa-check-square" /></template>
       </div>
     </div>

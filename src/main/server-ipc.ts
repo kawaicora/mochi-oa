@@ -347,6 +347,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     let filters: Electron.FileFilter[]
     if (filter === 'image') filters = [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
     else if (filter === 'video') filters = [{ name: '视频', extensions: ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v', 'flv'] }]
+    else if (filter === 'audio') filters = [{ name: '音频', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma'] }]
     else filters = [{ name: '所有文件', extensions: ['*'] }]
     const res = await dialog.showOpenDialog(win ?? undefined as unknown as BrowserWindow, {
       title: '选择文件',
