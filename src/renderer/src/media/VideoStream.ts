@@ -216,9 +216,10 @@ class VideoStream {
     }
 
     // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
-    const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string): void => {
-      const inner = h / 2 - 13
-      const outer = h / 2 - 3
+    const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string, faceR: number): void => {
+      // 频谱环紧贴头像外圈，大小随头像半径适配
+      const inner = faceR + 4
+      const outer = faceR + 16
       const n = Math.min(data.length, 64)
       for (let i = 0; i < n; i++) {
         const v = data[i] / 255
@@ -266,8 +267,8 @@ class VideoStream {
       if (analyserL && analyserR) {
         analyserL.getByteFrequencyData(dataL)
         analyserR.getByteFrequencyData(dataR)
-        drawHalf(dataL, Math.PI / 2, (Math.PI * 3) / 2, 'rgba(56,132,255,ALPHA)')
-        drawHalf(dataR, -Math.PI / 2, Math.PI / 2, 'rgba(0,200,180,ALPHA)')
+        drawHalf(dataL, Math.PI / 2, (Math.PI * 3) / 2, 'rgba(56,132,255,ALPHA)', faceR)
+        drawHalf(dataR, -Math.PI / 2, Math.PI / 2, 'rgba(0,200,180,ALPHA)', faceR)
       }
     }
     const loop = (): void => {
