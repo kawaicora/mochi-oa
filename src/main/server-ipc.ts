@@ -40,13 +40,33 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
 
   // RTC 信令推送 → renderer（广播到所有窗口，会议独立窗口也需接收）
-  serverClient.on('rtcDmIncoming', (d) => broadcastToAllWindows(IpcEvents.rtcDmIncoming, d))
+  serverClient.on('rtcDmIncoming', (d) => {
+    broadcastToAllWindows(IpcEvents.rtcDmIncoming, d)
+    // 来电：未聚焦/最小化时托盘闪动 + 唤起主窗口弹呼叫界面
+    const win = getMainWindow()
+    if (win && (!win.isFocused() || win.isMinimized())) {
+      flashTray()
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
   serverClient.on('rtcDmRejected', (d) => broadcastToAllWindows(IpcEvents.rtcDmRejected, d))
   serverClient.on('rtcPeerJoined', (d) => broadcastToAllWindows(IpcEvents.rtcPeerJoined, d))
   serverClient.on('rtcPeerLeft', (d) => broadcastToAllWindows(IpcEvents.rtcPeerLeft, d))
   serverClient.on('rtcSignal', (d) => broadcastToAllWindows(IpcEvents.rtcSignal, d))
   serverClient.on('rtcEnded', (d) => broadcastToAllWindows(IpcEvents.rtcEnded, d))
-  serverClient.on('rtcGroupCall', (d) => broadcastToAllWindows(IpcEvents.rtcGroupCall, d))
+  serverClient.on('rtcGroupCall', (d) => {
+    broadcastToAllWindows(IpcEvents.rtcGroupCall, d)
+    // 会议/群通话邀请：未聚焦/最小化时托盘闪动 + 唤起主窗口弹会议界面
+    const win = getMainWindow()
+    if (win && (!win.isFocused() || win.isMinimized())) {
+      flashTray()
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
   serverClient.on('rtcChatMessage', (d) => broadcastToAllWindows(IpcEvents.rtcChatMessage, d))
   serverClient.on('groupMembersUpdated', (d) => broadcastToAllWindows(IpcEvents.groupMembersUpdated, d))
   serverClient.on('groupInvite', (d) => broadcastToAllWindows(IpcEvents.groupInvite, d))
