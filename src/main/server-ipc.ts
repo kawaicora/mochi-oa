@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { readFile, writeFile } from 'node:fs/promises'
 import { IpcChannels, IpcEvents } from '../shared/ipc'
 import { serverClient } from './net/server-client'
+import { flashTray } from './tray'
 import { loadServerConfig, saveServerConfig } from './server-config'
 
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
@@ -25,7 +26,12 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
   // 推送 → renderer
   serverClient.on('state', (s) => sendToMainWindow(getMainWindow(), IpcEvents.serverState, s))
-  serverClient.on('message', (m) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessage, m))
+  serverClient.on('message', (m) => {
+    const win = getMainWindow()
+    sendToMainWindow(win, IpcEvents.serverMessage, m)
+    // 收到消息且窗口未聚焦/最小化 → 托盘图标闪动提醒
+    if (win && (!win.isFocused() || win.isMinimized())) flashTray()
+  })
   serverClient.on('presence', (p) => sendToMainWindow(getMainWindow(), IpcEvents.serverPresence, p))
   serverClient.on('userProfileUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.userProfileUpdated, d))
   serverClient.on('messageDeleted', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessageDeleted, d))

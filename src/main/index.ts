@@ -6,7 +6,7 @@ import { registerServerIpcHandlers } from './server-ipc'
 import { IpcChannels } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
-import { setupTray, destroyTray } from './tray'
+import { setupTray, destroyTray, stopFlashTray } from './tray'
 
 /** 应用图标：优先打包目录(resourcesPath)，其次开发目录(项目根 resources/)。任务栏/窗口用。 */
 function resolveAppIcon(): string | undefined {
@@ -52,6 +52,7 @@ function showMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+  stopFlashTray()
 }
 
 function createWindow(): void {
@@ -76,6 +77,8 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // 窗口聚焦 → 停止托盘闪动
+  mainWindow.on('focus', () => stopFlashTray())
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }

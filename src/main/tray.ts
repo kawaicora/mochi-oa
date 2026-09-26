@@ -12,6 +12,8 @@ export interface TrayDeps {
 }
 
 let tray: Tray | null = null
+let normalTrayIcon: ReturnType<typeof nativeImage.createFromPath> | ReturnType<typeof nativeImage.createFromBuffer> | null = null
+let flashTimer: NodeJS.Timeout | null = null
 
 /**
  * 托盘图标：优先用 resources 内新增的应用图标（icon_256/icon_64），
@@ -65,6 +67,41 @@ export function setupTray(deps: TrayDeps): boolean {
     console.warn('[mochi-oa] 托盘不可用，关窗将直接退出：', err)
     return false
   }
+}
+
+/** 16x16 高亮（红色）图标：与普通图标交替实现托盘闪动提醒 */
+function makeAlertIcon(): ReturnType<typeof nativeImage.createFromBuffer> {
+  const size = 16
+  const buf = Buffer.alloc(size * size * 4)
+  for (let i = 0; i < size * size; i++) {
+    buf[i * 4] = 0xff
+    buf[i * 4 + 1] = 0x53
+    buf[i * 4 + 2] = 0x4d
+    buf[i * 4 + 3] = 0xff
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size })
+}
+
+/** 托盘图标闪动（收到新消息时）；窗口聚焦 / 唤起后停止 */
+export function flashTray(): void {
+  if (!tray) return
+  normalTrayIcon = createTrayIcon()
+  const alert = makeAlertIcon()
+  stopFlashTray()
+  let on = false
+  flashTimer = setInterval(() => {
+    if (!tray) return
+    on = !on
+    tray.setImage(on ? alert : normalTrayIcon!)
+  }, 400)
+}
+
+export function stopFlashTray(): void {
+  if (flashTimer) {
+    clearInterval(flashTimer)
+    flashTimer = null
+  }
+  if (tray && normalTrayIcon) tray.setImage(normalTrayIcon)
 }
 
 export function destroyTray(): void {
