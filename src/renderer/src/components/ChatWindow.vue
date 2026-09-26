@@ -104,6 +104,17 @@ async function onPickVideo(): Promise<void> {
   }
 }
 
+async function onPickAudio(): Promise<void> {
+  const path = await window.pantry.pickFile('audio')
+  if (!path) return
+  sending.value = true
+  try {
+    await app.sendFile(path)
+  } finally {
+    sending.value = false
+  }
+}
+
 async function onScreenshot(): Promise<void> {
   if (sending.value) return
   sending.value = true
@@ -352,7 +363,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
         <div v-if="app.pendingUploads.length" class="up-list">
           <div v-for="p in app.pendingUploads" :key="p.clientId" class="up-card" :class="{ 'up-card-err': p.error }">
             <template v-if="!p.error">
-              <i :class="p.kind === 'folder' ? 'fas fa-folder up-folder' : fileIcon(p.kind === 'image' ? 'a.png' : p.kind === 'video' ? 'a.mp4' : 'a.bin')"></i>
+              <i :class="p.kind === 'folder' ? 'fas fa-folder up-folder' : fileIcon(p.fileName || 'a.bin')"></i>
               <span class="up-name" :title="p.fileName">{{ p.fileName }}</span>
               <div class="up-ring" :style="{ background: `conic-gradient(var(--dt-primary) ${p.percent * 3.6}deg, #e6e9ee 0deg)` }">
                 <span class="up-ring-inner">{{ p.percent }}%</span>
@@ -368,6 +379,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
           <button class="chat-tool" title="表情" @click="showEmoji = !showEmoji"><i class="far fa-smile"></i></button>
           <button class="chat-tool" title="发送图片" @click="onPickImage"><i class="far fa-image"></i></button>
           <button class="chat-tool" title="发送视频" @click="onPickVideo"><i class="far fa-file-video"></i></button>
+          <button class="chat-tool" title="发送音频" @click="onPickAudio"><i class="far fa-file-audio"></i></button>
           <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button>
           <button class="chat-tool" title="发送文件" @click="onPickFile"><i class="far fa-paperclip"></i></button>
           <button class="chat-tool" title="发送文件夹" @click="onPickFolder"><i class="far fa-folder-open"></i></button>
