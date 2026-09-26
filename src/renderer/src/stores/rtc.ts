@@ -97,7 +97,7 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcDmIncoming((d) => {
         if (activeCall.value) return // 已有通话，忽略新来电
         incomingDm.value = d
-        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, d.kind === 'video' ? '视频通话' : '语音通话', { kind: 'main' })
+        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, '通话', { kind: 'main' })
       })
     )
 
@@ -160,7 +160,7 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcGroupCall((d) => {
         if (activeCall.value) return // 已有通话，忽略
         incomingGroup.value = d
-        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, d.kind === 'video' ? '群视频通话' : '群语音通话', { kind: 'main' })
+        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, '群通话', { kind: 'main' })
       })
     )
 

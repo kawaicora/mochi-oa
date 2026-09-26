@@ -292,17 +292,12 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
           <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="群设置" @click="app.openGroupSettings(selected.groupId!, selected.name)">
             <i class="fas fa-cog"></i>
           </button>
-          <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="视频通话" @click="startDmVideo">
-            <i class="fas fa-video"></i>
+          <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="通话" @click="startDmVideo">
+            <i class="fas fa-phone"></i>
           </button>
-          <template v-if="selected.kind === 'group' && selected.groupId">
-            <button class="chat-act" title="语音通话" @click="startGroupVoice">
-              <i class="fas fa-phone"></i>
-            </button>
-            <button class="chat-act" title="视频通话" @click="startGroupVideo">
-              <i class="fas fa-video"></i>
-            </button>
-          </template>
+          <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="通话" @click="startGroupVideo">
+            <i class="fas fa-phone"></i>
+          </button>
           <button v-if="selected.kind === 'group'" class="chat-act" title="群成员" @click="loadMembers">
             <i class="fas fa-users"></i>
           </button>
