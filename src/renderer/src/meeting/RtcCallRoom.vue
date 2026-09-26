@@ -572,7 +572,7 @@ onBeforeUnmount(() => { cleanup() })
             :srcObject="VideoStream.stream"
           ></video>
           <div v-else class="tile-avatar">
-            <UserAvatar :nick="myNick" :avatar="myAvatar" :size="96" />
+            <VoiceAvatar ref="localVoiceRef" :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="96" />
           </div>
           <div class="tile-name">我：{{ myNick }}</div>
           <button class="tile-fs" title="全屏" @click.stop="fullscreenEl"><i class="fas fa-expand"></i></button>
@@ -588,7 +588,7 @@ onBeforeUnmount(() => { cleanup() })
             :muted="focusedKey === p.socketId"
           ></video>
           <div v-else class="tile-avatar">
-            <UserAvatar :nick="p.nick" :avatar="p.avatar" :size="96" />
+            <VoiceAvatar :stream="remoteStreams[p.userId]" :nick="p.nick" :avatar="p.avatar" :size="96" />
           </div>
           <div class="tile-name">{{ p.nick }}</div>
           <button class="tile-fs" title="全屏" @click.stop="fullscreenEl"><i class="fas fa-expand"></i></button>
@@ -603,14 +603,14 @@ onBeforeUnmount(() => { cleanup() })
         <template v-if="focusedKey === 'me'">
           <video v-if="localHasVideo" autoplay playsinline muted :srcObject="VideoStream.stream"></video>
           <div v-else class="focus-avatar">
-            <UserAvatar :nick="myNick" :avatar="myAvatar" :size="180" />
+            <VoiceAvatar :stream="VideoStream.stream" :nick="myNick" :avatar="myAvatar" :size="180" />
           </div>
           <div class="focus-name">我：{{ myNick }}</div>
         </template>
         <template v-else-if="focusedPeer">
           <video v-if="hasRemoteVideo(focusedPeer.userId)" autoplay playsinline :srcObject="remoteStreams[focusedPeer.userId]"></video>
           <div v-else class="focus-avatar">
-            <UserAvatar :nick="focusedPeer.nick" :avatar="focusedPeer.avatar" :size="180" />
+            <VoiceAvatar :stream="remoteStreams[focusedPeer.userId]" :nick="focusedPeer.nick" :avatar="focusedPeer.avatar" :size="180" />
           </div>
           <div class="focus-name">{{ focusedPeer.nick }}</div>
         </template>
