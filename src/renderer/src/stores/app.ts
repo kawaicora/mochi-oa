@@ -599,18 +599,18 @@ export const useAppStore = defineStore('app', () => {
     const clientId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const fileName = baseNameOf(filePath)
     pendingUploads.value.push({ clientId, fileName, kind, percent: 0 })
-    let up: Ack & { data?: { url?: string; error?: string } }
+    let up: { ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }
     try {
       up = await window.pantry.serverUploadChunked(filePath, clientId, activeCompanyId.value, relativePath)
     } catch (e) {
       failUpload(clientId, e instanceof Error ? e.message : '上传调用异常')
       return false
     }
-    const url = up.data?.url
-    if (!up.ok || !url) {
-      failUpload(clientId, up.data?.error || up.error || '上传失败')
+    if (!up.ok || !up.url) {
+      failUpload(clientId, up.error || '上传失败')
       return false
     }
+    const url = up.url
     const ack =
       s.kind === 'group' && s.groupId
         ? await window.pantry.serverChatSend(s.groupId, url, kind)
@@ -628,8 +628,8 @@ export const useAppStore = defineStore('app', () => {
   async function uploadOnly(filePath: string, relativePath: string, clientId: string): Promise<{ ok: boolean; url?: string; error?: string }> {
     try {
       const up = await window.pantry.serverUploadChunked(filePath, clientId, activeCompanyId.value, relativePath)
-      if (!up.ok || !up.data?.url) return { ok: false, error: up.error || '上传失败' }
-      return { ok: true, url: up.data.url }
+      if (!up.ok || !up.url) return { ok: false, error: up.error || '上传失败' }
+      return { ok: true, url: up.url }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : '上传调用异常' }
     }
