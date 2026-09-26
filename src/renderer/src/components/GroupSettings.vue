@@ -185,7 +185,7 @@ function opsOf(m: ServerGroupMember): string[] {
       <!-- 头像右键菜单 -->
       <div v-if="ctxMenu" class="gs-ctx" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
         <button class="ctx-item" @click="dm(ctxMenu!.m); closeCtx()"><i class="fas fa-comment-dots"></i> 私信</button>
-        <button class="ctx-item" @click="call(ctxMenu!.m, 'video'); closeCtx()"><i class="fas fa-phone"></i> 通话</button>
+        <button class="ctx-item" @click="call(ctxMenu!.m, 'video'); closeCtx()"><i class="fas fa-video"></i> 通话</button>
         <template v-if="canSetAdmin(ctxMenu!.m)">
           <div class="ctx-sep"></div>
           <button class="ctx-item" @click="doSetAdmin(ctxMenu!.m)"><i class="fas fa-crown"></i> 设置管理员</button>

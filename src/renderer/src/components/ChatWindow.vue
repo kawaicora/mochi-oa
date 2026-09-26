@@ -293,10 +293,10 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
             <i class="fas fa-cog"></i>
           </button>
           <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="通话" @click="startDmVideo">
-            <i class="fas fa-phone"></i>
+            <i class="fas fa-video"></i>
           </button>
           <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="通话" @click="startGroupVideo">
-            <i class="fas fa-phone"></i>
+            <i class="fas fa-video"></i>
           </button>
           <button v-if="selected.kind === 'group'" class="chat-act" title="群成员" @click="loadMembers">
             <i class="fas fa-users"></i>

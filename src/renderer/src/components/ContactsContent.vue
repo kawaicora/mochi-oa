@@ -288,7 +288,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
     <!-- 成员右键菜单 -->
     <div v-if="memberMenu" class="ctx-menu" :style="{ left: memberMenu.x + 'px', top: memberMenu.y + 'px' }" @click.stop>
       <button class="ctx-item" @click="app.openDm(memberMenu.user.userId, memberMenu.user.nick || memberMenu.user.username); closeMenus()"><i class="fas fa-comment"></i> 发起私聊</button>
-      <button class="ctx-item" @click="rtc.startDmCall(memberMenu.user.userId, 'video'); closeMenus()"><i class="fas fa-phone"></i> 通话</button>
+      <button class="ctx-item" @click="rtc.startDmCall(memberMenu.user.userId, 'video'); closeMenus()"><i class="fas fa-video"></i> 通话</button>
       <button v-if="app.isAdmin && memberMenu.user.userId !== myId" class="ctx-item" @click="doKickMember(memberMenu.user.userId)"><i class="fas fa-user-minus"></i> 移出企业</button>
       <button v-if="app.isAdmin && memberMenu.user.userId !== myId && memberMenu.user.role !== 'owner'" class="ctx-item" @click="doSetAdmin(memberMenu.user.userId, memberMenu.user.role === 'admin' ? 'member' : 'admin')">
         <i class="fas fa-user-cog"></i> {{ memberMenu.user.role === 'admin' ? '取消管理员' : '设为管理员' }}
@@ -298,7 +298,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
     <!-- 好友右键菜单 -->
     <div v-if="friendMenu" class="ctx-menu" :style="{ left: friendMenu.x + 'px', top: friendMenu.y + 'px' }" @click.stop>
       <button class="ctx-item" @click="app.openDm(friendMenu.f.userId, friendMenu.f.nick || friendMenu.f.username); closeFriendMenu()"><i class="fas fa-comment"></i> 发起私信</button>
-      <button class="ctx-item" @click="rtc.startDmCall(friendMenu.f.userId, 'video'); closeFriendMenu()"><i class="fas fa-phone"></i> 通话</button>
+      <button class="ctx-item" @click="rtc.startDmCall(friendMenu.f.userId, 'video'); closeFriendMenu()"><i class="fas fa-video"></i> 通话</button>
       <button class="ctx-item danger" @click="friendConfirm = friendMenu.f; closeFriendMenu()"><i class="fas fa-trash"></i> 删除好友</button>
     </div>
 
