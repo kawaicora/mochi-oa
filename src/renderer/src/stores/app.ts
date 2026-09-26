@@ -58,7 +58,7 @@ export const useAppStore = defineStore('app', () => {
 
   // ─── 本地预览（图片/视频/文件自动下载） ───
   function isAutoPreviewKind(kind: string): boolean {
-    return kind === 'image' || kind === 'video' || kind === 'file'
+    return kind === 'image' || kind === 'video' || kind === 'file' || kind === 'audio'
   }
   function autoDownloadEnabled(): boolean {
     return server.settings.autoDownload !== false

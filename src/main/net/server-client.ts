@@ -698,7 +698,7 @@ export class ServerClient extends EventEmitter {
 
   // ─── 消息 ───────────────────────────────────────────────
 
-  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'folder' = 'text'): Promise<Ack & { data?: { id: string } }> {
+  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck<{ id: string }>(this.socket, 'chat:send', { groupId, kind, content })
   }
@@ -708,7 +708,7 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ messages: ServerChatMessage[] }>(this.socket, 'chat:history', { groupId, beforeTs, limit })
   }
 
-  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'folder' = 'text'): Promise<Ack & { data?: { id: string } }> {
+  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck<{ id: string }>(this.socket, 'dm:send', { toUserId, kind, content })
   }

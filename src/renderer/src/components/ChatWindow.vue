@@ -7,6 +7,7 @@ import ModelPreview from './ModelPreview.vue'
 import MediaPreview from './MediaPreview.vue'
 import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
+import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 
@@ -331,6 +332,8 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
                 :server-url="server.settings.serverUrl"
               />
               <img v-else-if="m.kind === 'image' && isImageUrl(m.content)" :src="app.localPreviewUrl(m)" class="msg-img" @error="app.fallbackPreview(m)" @click="previewMedia = { kind: 'image', m }" />
+              <!-- 音频：内联播放控件 -->
+              <MsgAudio v-else-if="m.kind === 'audio'" :m="m" />
               <!-- 文件：3D 模型显示预览按钮，否则普通文件 -->
               <template v-else-if="m.kind === 'file' || m.kind === 'image'">
                 <div v-if="m.kind === 'file' && is3dModelUrl(m.content)" class="msg-model">

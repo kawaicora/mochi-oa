@@ -174,7 +174,7 @@ export interface FriendItem {
 }
 
 /** 消息种类 */
-export type MessageKind = 'text' | 'image' | 'file' | 'video' | 'folder'
+export type MessageKind = 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder'
 
 /** 聊天消息（服务端 chat:message / chat:history / dm:history 返回） */
 export interface ServerChatMessage {
