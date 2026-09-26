@@ -177,7 +177,7 @@ app.whenReady().then(() => {
 
   registerServerIpcHandlers(getMainWindow)
   createWindow()
-  initNotifManager(showMainWindow)
+  initNotifManager(showMainWindow, getMainWindow)
 
   // 托盘常驻
   trayEnabled = setupTray({

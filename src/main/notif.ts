@@ -1,7 +1,7 @@
 import { BrowserWindow, Notification } from 'electron'
 import { join } from 'node:path'
 import { flashTray } from './tray'
-import type { NotifTarget } from '../shared/ipc'
+import { IpcEvents, type NotifTarget } from '../shared/ipc'
 
 /** 打开独立会议窗口（create/join，带 meetingNo/password 参数） */
 export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; meetingNo?: string; password?: string }): void {
@@ -28,14 +28,19 @@ export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; m
 }
 
 let showMainWindow: (() => void) | null = null
-export function initNotifManager(showMain: () => void): void {
+let getMainWindow: (() => BrowserWindow | null) | null = null
+export function initNotifManager(showMain: () => void, getWin: () => BrowserWindow | null): void {
   showMainWindow = showMain
+  getMainWindow = getWin
 }
 
 /** 点击通知：按通知携带的目标打开对应窗口 */
 export function openTarget(t: NotifTarget): void {
-  if (t.kind === 'main') showMainWindow?.()
-  else if (t.kind === 'meeting') {
+  if (t.kind === 'main') {
+    showMainWindow?.()
+    // 携带会话参数 → 通知渲染层定位到该会话
+    if (t.conversationId) getMainWindow?.()?.webContents.send(IpcEvents.navigateToConversation, t.conversationId)
+  } else if (t.kind === 'meeting') {
     openMeetingWindow({ mode: t.mode, kind: t.callType, meetingNo: t.meetingNo, password: t.password })
   }
 }

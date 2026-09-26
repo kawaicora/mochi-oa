@@ -96,6 +96,10 @@ export const useAppStore = defineStore('app', () => {
     const p = pendingUploads.value.find((x) => x.clientId === clientId)
     if (p) p.percent = percent
   })
+  // 通知管理器：点击消息通知 → 定位到该会话
+  window.pantry.onNavigateToConversation((conversationId) => {
+    void navigateToConversation(conversationId)
+  })
 
   // ─── 群设置（owner/admin） ───
   const groupSettingsOpen = ref(false)
@@ -563,6 +567,17 @@ export const useAppStore = defineStore('app', () => {
   async function openConversation(item: ConversationItem): Promise<void> {
     if (item.type === 'group' && item.groupId) await openGroup(item.groupId, item.name)
     else if (item.type === 'dm' && item.dmUserId) await openDm(item.dmUserId, item.name)
+  }
+  /** 通知管理器：按 conversationId 定位到对应会话（找不到则刷新列表） */
+  async function navigateToConversation(conversationId: number): Promise<void> {
+    if (!conversationId || conversationId <= 0) return
+    let item = conversations.value.find((c) => c.conversationId === conversationId)
+    if (!item) {
+      const ack = await window.pantry.serverConversations()
+      conversations.value = d<{ conversations: ConversationItem[] }>(ack)?.conversations ?? []
+      item = conversations.value.find((c) => c.conversationId === conversationId)
+    }
+    if (item) await openConversation(item)
   }
   async function loadGroupHistory(groupId: number): Promise<void> {
     const ack = await window.pantry.serverChatHistory(groupId, undefined, 80)
