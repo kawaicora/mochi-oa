@@ -26,6 +26,7 @@ const pantry = window.pantry as unknown as typeof window.pantry & MeetingChatPan
 const room = ref<RtcRoom | null>(null)
 const peers = ref<RtcPeer[]>([])
 const remoteStreams = reactive<Record<number, MediaStream>>({})
+const localPreview = ref<MediaStream | null>(null)
 const isMuted = ref(false)
 const isCameraOff = ref(false)
 const isScreenSharing = ref(false)
@@ -107,6 +108,7 @@ async function applyDevicesFromPanel(p: {
         isCameraOff.value = false
       }
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+      localPreview.value = VideoStream.stream
       engine?.replaceTrack(track, 'video')
     }
     if (p.audioOutId) {
@@ -162,6 +164,7 @@ async function switchCamera(deviceId: string): Promise<void> {
       isCameraOff.value = false
     }
     await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+      localPreview.value = VideoStream.stream
     engine?.replaceTrack(track, 'video')
     currentCam.value = deviceId
   } catch {
@@ -201,7 +204,7 @@ const formattedDuration = computed(() => {
 })
 
 const localHasVideo = computed(() => {
-  const t = VideoStream.stream.getVideoTracks()[0]
+  const t = localPreview.value?.getVideoTracks()[0]
   return !!t && t.readyState !== 'ended'
 })
 
@@ -245,6 +248,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   const videoTrack = divStream?.getVideoTracks()[0] ?? empty.getVideoTracks()[0] ?? null
   const localStream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...mic.getTracks()])
   VideoStream.stream = localStream
+  localPreview.value = localStream
 
   // 2. WebRTC 引擎
   engine = new RtcEngine({
@@ -328,11 +332,13 @@ async function toggleCamera(): Promise<void> {
       const camStream = await VideoStream.GetCameraStream()
       const track = camStream.getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+      localPreview.value = VideoStream.stream
       engine?.replaceTrack(track, 'video')
     } else {
       // 关摄像头 → 频谱占位
       const track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+      localPreview.value = VideoStream.stream
       engine?.replaceTrack(track, 'video')
     }
     isCameraOff.value = !isCameraOff.value
@@ -353,6 +359,7 @@ async function toggleScreenShare(): Promise<void> {
       }
       if (!track) track = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+      localPreview.value = VideoStream.stream
       engine.replaceTrack(track, 'video')
       isScreenSharing.value = false
     } else {
@@ -361,6 +368,7 @@ async function toggleScreenShare(): Promise<void> {
       const track = screenStream.getVideoTracks()[0] ?? null
       if (!track) throw new Error('未获取到屏幕画面')
       await VideoStream.UpdateVideoStream(new MediaStream([track]))
+      localPreview.value = VideoStream.stream
       engine.replaceTrack(track, 'video')
       isScreenSharing.value = true
     }
@@ -567,7 +575,7 @@ onBeforeUnmount(() => { cleanup() })
             autoplay
             playsinline
             muted
-            :srcObject="VideoStream.stream"
+            :srcObject="localPreview"
           ></video>
           <div v-else class="tile-avatar">
             <UserAvatar :nick="myNick" :avatar="myAvatar" :size="96" />
@@ -599,7 +607,7 @@ onBeforeUnmount(() => { cleanup() })
       <!-- 点击放大视图 -->
       <div v-if="focusedKey" class="focus-overlay" @click.self="closeFocus">
         <template v-if="focusedKey === 'me'">
-          <video v-if="localHasVideo" autoplay playsinline muted :srcObject="VideoStream.stream"></video>
+          <video v-if="localHasVideo" autoplay playsinline muted :srcObject="localPreview"></video>
           <div v-else class="focus-avatar">
             <UserAvatar :nick="myNick" :avatar="myAvatar" :size="180" />
           </div>
