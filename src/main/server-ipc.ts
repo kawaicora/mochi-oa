@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { readFile, writeFile } from 'node:fs/promises'
 import { IpcChannels, IpcEvents } from '../shared/ipc'
 import { serverClient } from './net/server-client'
-import { flashTray } from './tray'
+import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
@@ -26,12 +26,7 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
   // 推送 → renderer
   serverClient.on('state', (s) => sendToMainWindow(getMainWindow(), IpcEvents.serverState, s))
-  serverClient.on('message', (m) => {
-    const win = getMainWindow()
-    sendToMainWindow(win, IpcEvents.serverMessage, m)
-    // 收到消息且窗口未聚焦/最小化 → 托盘图标闪动提醒
-    if (win && (!win.isFocused() || win.isMinimized())) flashTray()
-  })
+  serverClient.on('message', (m) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessage, m))
   serverClient.on('presence', (p) => sendToMainWindow(getMainWindow(), IpcEvents.serverPresence, p))
   serverClient.on('userProfileUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.userProfileUpdated, d))
   serverClient.on('messageDeleted', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessageDeleted, d))
@@ -42,10 +37,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // RTC 信令推送 → renderer（广播到所有窗口，会议独立窗口也需接收）
   serverClient.on('rtcDmIncoming', (d) => {
     broadcastToAllWindows(IpcEvents.rtcDmIncoming, d)
-    // 来电：未聚焦/最小化时托盘闪动 + 唤起主窗口弹呼叫界面
+    // 来电：未聚焦/最小化时唤起主窗口弹呼叫界面（托盘闪动/系统通知由渲染层通知管理器触发）
     const win = getMainWindow()
     if (win && (!win.isFocused() || win.isMinimized())) {
-      flashTray()
       if (win.isMinimized()) win.restore()
       win.show()
       win.focus()
@@ -58,10 +52,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('rtcEnded', (d) => broadcastToAllWindows(IpcEvents.rtcEnded, d))
   serverClient.on('rtcGroupCall', (d) => {
     broadcastToAllWindows(IpcEvents.rtcGroupCall, d)
-    // 会议/群通话邀请：未聚焦/最小化时托盘闪动 + 唤起主窗口弹会议界面
+    // 会议/群通话邀请：未聚焦/最小化时唤起主窗口弹会议界面（托盘闪动/系统通知由渲染层通知管理器触发）
     const win = getMainWindow()
     if (win && (!win.isFocused() || win.isMinimized())) {
-      flashTray()
       if (win.isMinimized()) win.restore()
       win.show()
       win.focus()

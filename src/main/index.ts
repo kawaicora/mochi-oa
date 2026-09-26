@@ -1,12 +1,13 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, net, Notification, protocol, screen, session, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
-import { IpcChannels } from '../shared/ipc'
+import { IpcChannels, type NotifTarget } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
+import { notify as notifyManager, initNotifManager } from './notif'
 
 /** 应用图标：优先打包目录(resourcesPath)，其次开发目录(项目根 resources/)。任务栏/窗口用。 */
 function resolveAppIcon(): string | undefined {
@@ -149,20 +150,11 @@ app.whenReady().then(() => {
     }
   })
 
-  // 最小化/后台时的 Windows 通知 + 窗口状态查询/唤起（渲染层用来提醒来电与消息）
-  ipcMain.handle(IpcChannels.notify, (_e, opts: { title: string; body: string }) => {
+  // 通知管理器：所有通知进这里，托盘闪动 + Windows 通知；点击 → 按目标打开对应窗口
+  ipcMain.handle(IpcChannels.notify, (_e, opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }) => {
     const fromWin = BrowserWindow.fromWebContents(_e.sender)
-    const noti = new Notification({ title: opts.title, body: opts.body, icon: resolveAppIcon() })
-    noti.on('click', () => {
-      if (fromWin && !fromWin.isDestroyed()) {
-        if (fromWin.isMinimized()) fromWin.restore()
-        fromWin.show()
-        fromWin.focus()
-      } else {
-        showMainWindow()
-      }
-    })
-    noti.show()
+    if (fromWin && !fromWin.isDestroyed() && fromWin.isFocused()) return
+    notifyManager({ title: opts.title ?? '', body: opts.body ?? '', target: opts.target ?? { kind: 'main' }, tray: opts.tray ?? true })
     return { ok: true }
   })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
@@ -185,6 +177,7 @@ app.whenReady().then(() => {
 
   registerServerIpcHandlers(getMainWindow)
   createWindow()
+  initNotifManager(showMainWindow)
 
   // 托盘常驻
   trayEnabled = setupTray({

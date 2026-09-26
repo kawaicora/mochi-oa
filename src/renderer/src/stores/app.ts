@@ -19,6 +19,7 @@ import type {
   ServerChatMessage,
   MessageKind
 } from '../../../shared/server-types'
+import type { NotifTarget } from '../../../shared/ipc'
 
 /** 从 ack 提取 data 载荷 */
 function d<T>(ack: unknown): T | undefined {
@@ -748,10 +749,10 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) messages.value = messages.value.filter((m) => m.id !== messageId)
     return { ok: ack.ok, error: ack.error }
   }
-  async function notifyIfUnfocused(title: string, body: string): Promise<void> {
+  async function notifyIfUnfocused(title: string, body: string, target?: NotifTarget): Promise<void> {
     try {
       const st = await window.pantry.getWindowState()
-      if (st && !st.focused) await window.pantry.notify({ title, body })
+      if (st && !st.focused) await window.pantry.notify({ title, body, target })
     } catch {
       // 忽略
     }
@@ -775,7 +776,7 @@ export const useAppStore = defineStore('app', () => {
     const preview =
       msg.kind === 'text' ? msg.content : msg.kind === 'image' ? '[图片]' : msg.kind === 'video' ? '[视频]' : msg.kind === 'folder' ? '[文件夹]' : '[文件]'
     if (msg.fromId !== server.state.userId) {
-      void notifyIfUnfocused(conv?.name ? `新消息：${conv.name}` : '新消息', preview)
+      void notifyIfUnfocused(conv?.name ? `新消息：${conv.name}` : '新消息', preview, { kind: 'main', conversationId: msg.conversationId })
     }
     if (conv) {
       const isSelf = msg.fromId === server.state.userId

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IpcChannels, IpcEvents } from '../shared/ipc'
+import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
 import type {
   Ack,
   AuthAck,
@@ -49,7 +49,7 @@ const api = {
   openMeetingWindow: (params: OpenMeetingWindowParams): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openMeetingWindow, params),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
-  notify: (opts: { title: string; body: string }): Promise<{ ok: boolean }> =>
+  notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
   getWindowState: (): Promise<{ focused: boolean; visible: boolean; minimized: boolean }> =>
     ipcRenderer.invoke(IpcChannels.getWindowState),

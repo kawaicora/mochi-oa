@@ -9,6 +9,7 @@ import type {
   RtcPeer,
   RtcRoom
 } from '@shared/server-types'
+import type { NotifTarget } from '@shared/ipc'
 import VideoStream from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
@@ -51,7 +52,7 @@ interface RtcPantryApi {
   onRtcSignal(l: (d: import('@shared/server-types').RtcSignalEvent) => void): () => void
   onRtcEnded(l: (d: import('@shared/server-types').RtcEndedEvent) => void): () => void
   onRtcGroupCall(l: (d: RtcGroupCallEvent) => void): () => void
-  notify(opts: { title: string; body: string }): Promise<unknown>
+  notify(opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<unknown>
   getWindowState(): Promise<{ focused: boolean; visible: boolean; minimized: boolean }>
 }
 
@@ -84,10 +85,10 @@ export const useRtcStore = defineStore('rtc', () => {
 
   // ─── 事件订阅 ───
 
-  async function maybeNotify(title: string, body: string): Promise<void> {
+  async function maybeNotify(title: string, body: string, target?: NotifTarget): Promise<void> {
     try {
       const st = await rtcPantry.getWindowState()
-      if (st && !st.focused) await rtcPantry.notify({ title, body })
+      if (st && !st.focused) await rtcPantry.notify({ title, body, target })
     } catch { /* 忽略 */ }
   }
 
@@ -96,7 +97,7 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcDmIncoming((d) => {
         if (activeCall.value) return // 已有通话，忽略新来电
         incomingDm.value = d
-        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, d.kind === 'video' ? '视频通话' : '语音通话')
+        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, d.kind === 'video' ? '视频通话' : '语音通话', { kind: 'main' })
       })
     )
 
@@ -159,7 +160,7 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcGroupCall((d) => {
         if (activeCall.value) return // 已有通话，忽略
         incomingGroup.value = d
-        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, d.kind === 'video' ? '群视频通话' : '群语音通话')
+        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, d.kind === 'video' ? '群视频通话' : '群语音通话', { kind: 'main' })
       })
     )
 

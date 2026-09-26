@@ -158,6 +158,11 @@ export const IpcChannels = {
   appOpenFileLocation: 'app:openFileLocation'
 } as const
 
+/** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
+export type NotifTarget =
+  | { kind: 'main'; nav?: string; conversationId?: number }
+  | { kind: 'meeting'; mode: 'create' | 'join'; callType?: 'voice' | 'video'; meetingNo?: string; password?: string }
+
 /** 主进程 → 渲染进程推送事件 */
 export const IpcEvents = {
   serverState: 'server:event:state',

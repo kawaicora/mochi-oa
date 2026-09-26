@@ -13,6 +13,7 @@ import type {
   RtcPeer,
   RtcRoom
 } from '@shared/server-types'
+import type { NotifTarget } from '@shared/ipc'
 
 
 // 发送会议聊天消息：preload 发送封装由主进程侧注册，此处做窄类型断言桥接（与 stores/rtc.ts 同约定）
@@ -199,10 +200,10 @@ const props = withDefaults(
 )
 
 // 窗口未聚焦时弹 Windows 通知（来电/会议消息提醒）
-async function notifyIfUnfocused(title: string, body: string): Promise<void> {
+async function notifyIfUnfocused(title: string, body: string, target?: NotifTarget): Promise<void> {
   try {
     const st = await window.pantry.getWindowState()
-    if (st && !st.focused) await window.pantry.notify({ title, body })
+    if (st && !st.focused) await window.pantry.notify({ title, body, target })
   } catch { /* 忽略 */ }
 }
 
@@ -284,7 +285,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
       if (showChat.value) nextTick(scrollChatToBottom)
       // 窗口未聚焦时会议消息 → Windows 通知
       if (d.from.userId !== myUserId.value) {
-        void notifyIfUnfocused(`会议消息（${roomInfo.meetingNo || roomInfo.id}）`, `${d.from.nick || ''}: ${d.content}`)
+        void notifyIfUnfocused(`会议消息（${roomInfo.meetingNo || roomInfo.id}）`, `${d.from.nick || ''}: ${d.content}`, { kind: 'main' })
       }
     })
   )
