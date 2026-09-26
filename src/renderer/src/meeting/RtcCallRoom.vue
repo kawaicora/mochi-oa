@@ -564,6 +564,7 @@ onBeforeUnmount(() => { cleanup() })
             :srcObject="remoteStreams[p.userId]"
             autoplay
             playsinline
+            :muted="focusedKey === p.socketId"
           ></video>
           <div v-else class="tile-avatar">
             <VoiceAvatar :stream="remoteStreams[p.userId]" :nick="p.nick" :avatar="p.avatar" :size="96" />

@@ -194,25 +194,17 @@ class VideoStream {
     ctx.fillStyle = '#2d2d44'
     ctx.fill()
 
-    // 麦克风图形（画一个圆角矩形 + 支架）
-    ctx.strokeStyle = '#8888aa'
-    ctx.lineWidth = 4
-    // 麦克风主体
-    ctx.beginPath()
-    ctx.roundRect(cx - 16, cy - 30, 32, 50, 16)
+    // 人像 LOGO（剪影：头 + 肩部）
     ctx.fillStyle = '#8888aa'
+    // 头
+    ctx.beginPath()
+    ctx.arc(cx, cy - 20, 18, 0, Math.PI * 2)
     ctx.fill()
-    // 麦克风支架
+    // 躯干 / 肩部（上半圆弧）
     ctx.beginPath()
-    ctx.moveTo(cx, cy + 20)
-    ctx.lineTo(cx, cy + 38)
-    ctx.strokeStyle = '#8888aa'
-    ctx.lineWidth = 5
-    ctx.stroke()
-    // 底座弧线
-    ctx.beginPath()
-    ctx.arc(cx, cy + 38, 18, Math.PI, 0)
-    ctx.stroke()
+    ctx.arc(cx, cy + 36, 33, Math.PI * 1.06, Math.PI * -0.06)
+    ctx.closePath()
+    ctx.fill()
 
     // 文字 "仅语音通话"
     ctx.fillStyle = '#aaaaaa'
