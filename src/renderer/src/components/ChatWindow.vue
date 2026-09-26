@@ -211,6 +211,7 @@ function isImageUrl(url: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(url)
 }
 
+
 /** 文件类型图标（Font Awesome），供文件消息/上传卡片使用 */
 function fileIcon(url: string): string {
   const n = url.toLowerCase()
