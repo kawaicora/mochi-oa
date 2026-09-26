@@ -4,6 +4,7 @@ import VideoStream from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 import UserAvatar from '@renderer/components/UserAvatar.vue'
+import VoiceAvatar from '@renderer/components/VoiceAvatar.vue'
 import MediaDevicePanel from '@renderer/components/MediaDevicePanel.vue'
 import type {
   Ack,
@@ -26,6 +27,7 @@ const pantry = window.pantry as unknown as typeof window.pantry & MeetingChatPan
 const room = ref<RtcRoom | null>(null)
 const peers = ref<RtcPeer[]>([])
 const remoteStreams = reactive<Record<number, MediaStream>>({})
+const localVoiceRef = ref<{ getStream?: () => MediaStream | null } | null>(null)
 const isMuted = ref(false)
 const isCameraOff = ref(false)
 const isScreenSharing = ref(false)
@@ -201,8 +203,8 @@ const formattedDuration = computed(() => {
 })
 
 const localHasVideo = computed(() => {
-  const t = VideoStream.stream.getVideoTracks()[0]
-  return !!t && t.readyState !== 'ended'
+  if (room.value?.kind === 'voice') return false
+  return !isCameraOff.value || isScreenSharing.value
 })
 
 function hasRemoteVideo(userId: number): boolean {
