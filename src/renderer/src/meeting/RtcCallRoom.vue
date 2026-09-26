@@ -203,8 +203,8 @@ const formattedDuration = computed(() => {
 })
 
 const localHasVideo = computed(() => {
-  if (room.value?.kind === 'voice') return false
-  return !isCameraOff.value || isScreenSharing.value
+  const t = VideoStream.stream.getVideoTracks()[0]
+  return !!t && t.readyState !== 'ended'
 })
 
 function hasRemoteVideo(userId: number): boolean {
