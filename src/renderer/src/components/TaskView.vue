@@ -50,6 +50,24 @@ function remainText(t: Task): string {
   if (d < 1) return `剩 ${Math.ceil(diff / 3600000)} 小时`
   return `剩 ${Math.ceil(d)} 天`
 }
+// 看板多列（按状态分组，列内按截止时间排序——同时进行的任务分布在不同列）
+const COLUMNS: Array<{ key: string; label: string }> = [
+  { key: 'created', label: '已创建' },
+  { key: 'in_progress', label: '进行中' },
+  { key: 'pending', label: '延期' },
+  { key: 'overdue', label: '已超时' },
+  { key: 'completed', label: '已完成' }
+]
+function grouped(key: string): Task[] {
+  return tasks.value
+    .filter((t) => {
+      if (key === 'pending') return t.status === 'pending_extension' || t.status === 'extended'
+      if (key === 'overdue') return t.status === 'overdue'
+      return t.status === key
+    })
+    .sort((a, b) => Date.parse(a.dueTime) - Date.parse(b.dueTime))
+}
+
 const fmt = (s: string): string => {
   if (!s) return ''
   const d = new Date(s)
@@ -132,7 +150,7 @@ function askStatus(t: Task, status: TaskStatus): void { statusModal.value = { ta
 async function submitStatus(): Promise<void> {
   const m = statusModal.value
   if (!m) return
-  if (m.status === 'completed' && !m.note.trim()) { err.value = '完成任务需填写说明'; return }
+  if (!m.note.trim()) { err.value = '流转需填写说明'; return }
   const r = await app.setTaskStatus(m.taskId, m.status, m.note.trim())
   statusModal.value = null
   if (!r.ok) { err.value = r.error || '状态变更失败'; return }
@@ -293,29 +311,36 @@ const isManager = (t: Task): boolean => {
       </button>
     </div>
 
-    <!-- 任务列表 -->
-    <div class="tv-list">
+    <!-- 任务列表（看板多列：按状态分列，列内按截止时间排序） -->
+    <div class="tv-board">
       <div v-if="!tasks.length" class="tv-empty"><i class="far fa-clipboard"></i> 还没有任务，点击「新建任务」创建</div>
-      <div v-for="t in tasks" :key="t.id" class="tv-card" :class="`lvl-${colorOf(t)}`" @click="openTask(t)">
-        <div class="tv-card-bar"></div>
-        <div class="tv-card-main">
-          <div class="tv-card-top">
-            <span class="tv-card-title">{{ t.title }}</span>
-            <span class="tv-badge" :class="t.status">{{ STATUS_LABEL[t.status] }}</span>
-          </div>
-          <div v-if="t.description" class="tv-card-desc">{{ t.description }}</div>
-          <div class="tv-card-meta">
-            <span class="tv-remain" :class="colorOf(t)"><i class="far fa-clock"></i> {{ remainText(t) }}</span>
-            <span><i class="far fa-calendar-alt"></i> {{ fmt(t.startTime) }} → {{ fmt(t.dueTime) }}</span>
-          </div>
-          <div class="tv-card-ops">
-            <button class="tv-op" @click.stop="askStatus(t, 'in_progress')"><i class="fas fa-play"></i> 开始</button>
-            <button class="tv-op" @click.stop="askStatus(t, 'completed')"><i class="fas fa-check"></i> 完成</button>
-            <button class="tv-op" @click.stop="askExtend(t)"><i class="fas fa-hourglass-half"></i> 延期</button>
-            <button v-if="isManager(t)" class="tv-op danger" @click.stop="onDelete(t)"><i class="fas fa-trash"></i> 删除</button>
+      <template v-else>
+        <div v-for="col in COLUMNS" :key="col.key" class="tv-col" :class="col.key">
+          <div class="tv-col-head"><i class="tv-col-dot"></i>{{ col.label }}<span class="tv-col-count">{{ grouped(col.key).length }}</span></div>
+          <div class="tv-col-body">
+            <div v-for="t in grouped(col.key)" :key="t.id" class="tv-card" :class="`lvl-${colorOf(t)}`" @click="openTask(t)">
+              <div class="tv-card-bar"></div>
+              <div class="tv-card-main">
+                <div class="tv-card-top">
+                  <span class="tv-card-title">{{ t.title }}</span>
+                  <span class="tv-badge" :class="t.status">{{ STATUS_LABEL[t.status] }}</span>
+                </div>
+                <div v-if="t.description" class="tv-card-desc">{{ t.description }}</div>
+                <div class="tv-card-meta">
+                  <span class="tv-remain" :class="colorOf(t)"><i class="far fa-clock"></i> {{ remainText(t) }}</span>
+                  <span><i class="far fa-calendar-alt"></i> {{ fmt(t.startTime) }} → {{ fmt(t.dueTime) }}</span>
+                </div>
+                <div class="tv-card-ops">
+                  <button class="tv-op" @click.stop="askStatus(t, 'in_progress')"><i class="fas fa-play"></i> 开始</button>
+                  <button class="tv-op" @click.stop="askStatus(t, 'completed')"><i class="fas fa-check"></i> 完成</button>
+                  <button class="tv-op" @click.stop="askExtend(t)"><i class="fas fa-hourglass-half"></i> 延期</button>
+                  <button v-if="isManager(t)" class="tv-op danger" @click.stop="onDelete(t)"><i class="fas fa-trash"></i> 删除</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- 详情面板 -->
@@ -447,29 +472,36 @@ const isManager = (t: Task): boolean => {
       <div class="modal tv-create">
         <div class="modal-head">新建任务</div>
         <div class="modal-body">
-          <label class="tv-lab">任务名称</label>
-          <input v-model="createForm.title" class="srv-input" placeholder="任务名称" />
-          <label class="tv-lab">所属项目</label>
-          <select v-model.number="createForm.projectId" class="srv-select">
-            <option :value="0">不归属项目</option>
-            <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-          <div class="tv-two">
-            <div><label class="tv-lab">开始时间</label><input v-model="createForm.startTime" type="datetime-local" class="srv-input" /></div>
-            <div><label class="tv-lab">预期结束时间</label><input v-model="createForm.dueTime" type="datetime-local" class="srv-input" /></div>
-          </div>
-          <label class="tv-lab">描述</label>
-          <textarea v-model="createForm.description" class="srv-input" rows="3" placeholder="任务描述"></textarea>
-          <label class="tv-lab">执行人（每人执行的内容）</label>
-          <div v-for="(a, i) in createAssign" :key="i" class="tv-create-assign">
-            <select v-model.number="a.userId" class="srv-select">
-              <option :value="0">选择执行人</option>
-              <option v-for="m in members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option>
+          <div class="tv-form-sec">
+            <label class="tv-lab">任务名称 <i class="req">*</i></label>
+            <input v-model="createForm.title" class="srv-input" placeholder="任务名称" />
+            <label class="tv-lab">所属项目</label>
+            <select v-model.number="createForm.projectId" class="srv-select">
+              <option :value="0">不归属项目</option>
+              <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
             </select>
-            <input v-model="a.content" class="srv-input" placeholder="要执行的内容" />
-            <button v-if="createAssign.length > 1" class="tv-op" @click="createAssign.splice(i, 1)"><i class="fas fa-minus"></i></button>
+            <label class="tv-lab">描述</label>
+            <textarea v-model="createForm.description" class="srv-input" rows="3" placeholder="任务描述"></textarea>
           </div>
-          <button class="dt-btn" @click="createAssign.push({ userId: 0, content: '' })"><i class="fas fa-plus"></i> 添加执行人</button>
+          <div class="tv-form-sec">
+            <label class="tv-lab">时间安排</label>
+            <div class="tv-two">
+              <div><label class="tv-lab">开始时间 <i class="req">*</i></label><input v-model="createForm.startTime" type="datetime-local" class="srv-input" /></div>
+              <div><label class="tv-lab">预期结束时间 <i class="req">*</i></label><input v-model="createForm.dueTime" type="datetime-local" class="srv-input" /></div>
+            </div>
+          </div>
+          <div class="tv-form-sec">
+            <label class="tv-lab">执行人（每人执行的内容）</label>
+            <div v-for="(a, i) in createAssign" :key="i" class="tv-create-assign">
+              <select v-model.number="a.userId" class="srv-select">
+                <option :value="0">选择执行人</option>
+                <option v-for="m in members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option>
+              </select>
+              <input v-model="a.content" class="srv-input" placeholder="要执行的内容" />
+              <button v-if="createAssign.length > 1" class="tv-op" @click="createAssign.splice(i, 1)"><i class="fas fa-minus"></i></button>
+            </div>
+            <button class="dt-btn" @click="createAssign.push({ userId: 0, content: '' })"><i class="fas fa-plus"></i> 添加执行人</button>
+          </div>
           <div v-if="createErr" class="tv-err">{{ createErr }}</div>
         </div>
         <div class="modal-foot">
@@ -484,7 +516,7 @@ const isManager = (t: Task): boolean => {
       <div class="modal tv-create">
         <div class="modal-head">{{ statusModal.status === 'completed' ? '完成任务' : statusModal.status === 'in_progress' ? '开始进行' : '状态变更' }}</div>
         <div class="modal-body">
-          <label class="tv-lab">变更说明{{ statusModal.status === 'completed' ? '（必填）' : '' }}</label>
+          <label class="tv-lab">流转说明（必填）</label>
           <textarea v-model="statusModal.note" class="srv-input" rows="3" placeholder="说明变更原因/进展"></textarea>
         </div>
         <div class="modal-foot">
@@ -540,6 +572,17 @@ const isManager = (t: Task): boolean => {
 .tv-proj { padding: 5px 12px; border-radius: 16px; border: 1px solid var(--dt-border-light); background: #fff; font-size: 13px; cursor: pointer; }
 .tv-proj.on { background: var(--dt-primary); color: #fff; border-color: var(--dt-primary); }
 .tv-list { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
+.tv-board { flex: 1; overflow: auto; padding: 12px 18px; display: flex; gap: 12px; align-items: flex-start; }
+.tv-col { flex: 1 1 0; min-width: 250px; max-width: 330px; background: #f3f5f7; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; }
+.tv-col-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 4px 6px 8px; }
+.tv-col-dot { width: 8px; height: 8px; border-radius: 50%; }
+.tv-col.created .tv-col-dot { background: #909399; }
+.tv-col.in_progress .tv-col-dot { background: #409eff; }
+.tv-col.pending .tv-col-dot { background: #e6a23c; }
+.tv-col.overdue .tv-col-dot { background: #e64545; }
+.tv-col.completed .tv-col-dot { background: #2fbb6b; }
+.tv-col-count { margin-left: auto; font-size: 12px; color: var(--dt-text-3); }
+.tv-col-body { display: flex; flex-direction: column; gap: 8px; }
 .tv-empty { color: var(--dt-text-4); text-align: center; padding: 40px 0; font-size: 14px; }
 .tv-card { display: flex; border: 1px solid var(--dt-border-light); border-radius: 10px; background: #fff; cursor: pointer; overflow: hidden; }
 .tv-card-bar { width: 5px; flex-shrink: 0; }
@@ -614,6 +657,9 @@ const isManager = (t: Task): boolean => {
 /* 创建 modal */
 .tv-create { width: 520px; max-height: 88vh; overflow-y: auto; }
 .tv-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; }
+.tv-form-sec { margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px dashed var(--dt-border-light); }
+.tv-form-sec:last-child { border-bottom: none; }
+.req { color: #e64545; font-style: normal; }
 .tv-create .modal-body { padding: 6px 18px 16px; }
 .tv-two { display: flex; gap: 10px; }
 .tv-two > div { flex: 1; }
