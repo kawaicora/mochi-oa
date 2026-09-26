@@ -1,0 +1,90 @@
+# 麻薯OA 客户端 GitHub Actions 构建工作流
+# 触发方式：
+#   - push 到 main        → 全平台构建并上传构建产物（artifact）
+#   - push v* tag         → 全平台构建 + 自动创建 GitHub Release 并附带安装包
+#   - workflow_dispatch   → 手动触发
+#
+# 平台产物（electron-builder，输出到 release/）：
+#   Windows → NSIS 安装包 (.exe)
+#   macOS   → DMG
+#   Linux   → AppImage
+
+name: Build Client
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+# CI 无代码签名证书：跳过 electron-builder 自动签名（Windows 打未签名包，mac 不因签名失败）
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            artifact_name: mochi-oa-win
+          - os: macos-latest
+            script: dist:mac
+            artifact_name: mochi-oa-mac
+          - os: ubuntu-latest
+            script: dist:linux
+            artifact_name: mochi-oa-linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build & package (${{ matrix.os }})
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: Create Release & attach installers
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-artifacts/**
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
