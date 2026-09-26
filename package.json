@@ -1,0 +1,78 @@
+{
+  "name": "mochi-oa",
+  "version": "0.2.1",
+  "description": "麻薯-办公协同客户端",
+  "main": "./out/main/index.js",
+  "author": "零食大礼包",
+  "private": true,
+  "build": {
+    "appId": "com.mochi.oa",
+    "productName": "麻薯OA",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "!**/node_modules/.cache"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "win": {
+      "icon": "resources/icon_256.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "icon": "resources/icon_256.png",
+      "category": "public.app-category.business",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "icon": "resources/icon_256.png",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:watch": "electron-vite dev --watch",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1",
+    "flv.js": "^1.6.2",
+    "pinia": "^2.1.7",
+    "socket.io-client": "^4.7.5",
+    "three": "^0.186.1",
+    "vue": "^3.4.31"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-vue": "^5.0.5",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.1",
+    "vue-tsc": "^2.0.26"
+  }
+}

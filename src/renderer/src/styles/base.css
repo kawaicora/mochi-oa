@@ -1,0 +1,122 @@
+:root {
+  --dt-primary: #1677ff;
+  --dt-primary-hover: #4096ff;
+  --dt-bg-app: #f5f6f7;
+  --dt-bg-nav: #fbfbfb;
+  --dt-bg-panel: #ffffff;
+  --dt-border: #e5e6eb;
+  --dt-border-light: #f0f1f3;
+  --dt-text: #1d2129;
+  --dt-text-2: #4e5969;
+  --dt-text-3: #86909c;
+  --dt-text-4: #c9cdd4;
+  --dt-hover: #f2f3f5;
+  --dt-active: #e8f3ff;
+  --dt-danger: #f53f3f;
+  --dt-success: #00b42a;
+  --dt-radius: 6px;
+  --dt-radius-lg: 8px;
+  --dt-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --dt-nav-width: 72px;
+  --dt-aside-width: 260px;
+  --dt-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--dt-font);
+  font-size: 14px;
+  color: var(--dt-text);
+  background: var(--dt-bg-app);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 可拖拽标题栏区域 */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 通用按钮 */
+.dt-btn {
+  height: 36px;
+  padding: 0 20px;
+  border-radius: var(--dt-radius);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.dt-btn-primary {
+  background: var(--dt-primary);
+  color: #fff;
+}
+.dt-btn-primary:hover:not(:disabled) {
+  background: var(--dt-primary-hover);
+}
+.dt-btn-primary:disabled {
+  background: #a0cfff;
+  cursor: not-allowed;
+}
+.dt-btn-default {
+  background: #fff;
+  color: var(--dt-text);
+  border: 1px solid var(--dt-border);
+}
+.dt-btn-default:hover:not(:disabled) {
+  border-color: var(--dt-primary);
+  color: var(--dt-primary);
+}
+.dt-btn-block {
+  width: 100%;
+}
