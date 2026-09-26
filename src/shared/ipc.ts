@@ -167,6 +167,7 @@ export type NotifTarget =
 export const IpcEvents = {
   serverState: 'server:event:state',
   serverMessage: 'server:event:message',
+  navigateToConversation: 'app:navigateToConversation',
   serverPresence: 'server:event:presence',
   serverMessageDeleted: 'server:event:messageDeleted',
   serverConversationsUpdated: 'server:event:conversationsUpdated',

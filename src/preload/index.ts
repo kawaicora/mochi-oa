@@ -223,6 +223,7 @@ const api = {
   // 推送订阅
   onServerState: (l: (s: ServerClientState) => void) => subscribe<ServerClientState>(IpcEvents.serverState, l),
   onServerMessage: (l: (m: ServerChatMessage) => void) => subscribe<ServerChatMessage>(IpcEvents.serverMessage, l),
+  onNavigateToConversation: (l: (conversationId: number) => void) => subscribe<number>(IpcEvents.navigateToConversation, l),
   onServerPresence: (l: (p: ServerPresenceUpdate) => void) => subscribe<ServerPresenceUpdate>(IpcEvents.serverPresence, l),
   onUserProfileUpdated: (l: (d: { user: { id: number; username: string; nick: string; avatar: string; email: string; phone: string; extra: string } }) => void) => subscribe<{ user: { id: number; username: string; nick: string; avatar: string; email: string; phone: string; extra: string } }>(IpcEvents.userProfileUpdated, l),
   onServerMessageDeleted: (l: (d: ServerMessageDeleted) => void) =>
