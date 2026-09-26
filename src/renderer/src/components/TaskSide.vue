@@ -7,7 +7,7 @@ const app = useAppStore()
 const server = useServerStore()
 
 interface Project { id: number; companyId: number; name: string; pmId: number; createdAt: string }
-interface Task { id: number; companyId: number; projectId: number | null; title: string; dueTime: string; status: string; isOverdue: boolean; reminderYellow: number; reminderRed: number }
+interface Task { id: number; companyId: number; projectId: number | null; title: string; startTime: string; dueTime: string; status: string; isOverdue: boolean; reminderYellow: number; reminderRed: number }
 
 const projects = ref<Project[]>([])
 const tasks = ref<Task[]>([])
@@ -25,6 +25,25 @@ function projectCount(id: number): number {
 function projectName(id: number): string {
   const p = projects.value.find((x) => x.id === id)
   return p ? p.name : ''
+}
+const fDay = (n: number): string => {
+  const d = new Date(n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function projectRange(id: number): string {
+  const arr = tasks.value.filter((t) => t.projectId === id)
+  if (!arr.length) return ''
+  const times = arr.map((t) => Date.parse(t.startTime) || Date.parse(t.dueTime)).filter((n) => Number.isFinite(n))
+  if (!times.length) return ''
+  return `${fDay(Math.min(...times))} ~ ${fDay(Math.max(...times))}`
+}
+function projectDone(id: number): number {
+  return tasks.value.filter((t) => t.projectId === id && t.status === 'completed').length
+}
+function projectPct(id: number): number {
+  const total = projectCount(id)
+  if (!total) return 0
+  return Math.round((projectDone(id) / total) * 100)
 }
 
 async function load(): Promise<void> {
@@ -80,7 +99,9 @@ onUnmounted(() => { offT?.(); offP?.() })
       <div v-for="p in projects" :key="p.id" class="ts-proj">
         <div class="ts-proj-info">
           <div class="ts-proj-name"><i class="fas fa-folder-open"></i> {{ p.name }}</div>
-          <div class="ts-proj-meta">{{ projectCount(p.id) }} 个任务 · {{ p.pmId === meId ? '我负责' : '' }}</div>
+          <div class="ts-proj-meta">{{ projectRange(p.id) }}</div>
+          <div class="ts-proj-progress"><div class="ts-proj-bar" :style="{ width: projectPct(p.id) + '%' }"></div></div>
+          <div class="ts-proj-meta">{{ projectPct(p.id) }}% · {{ projectDone(p.id) }}/{{ projectCount(p.id) }}</div>
         </div>
         <button class="ts-del" title="删除项目" @click="onDeleteProject(p)"><i class="fas fa-trash"></i></button>
       </div>
@@ -120,7 +141,10 @@ onUnmounted(() => { offT?.(); offP?.() })
 .ts-add { width: 100%; padding: 6px 0; border: 1px dashed var(--dt-border-strong); border-radius: 8px; background: #fafafa; color: var(--dt-text-2); font-size: 13px; cursor: pointer; margin-bottom: 8px; }
 .ts-add:hover { color: var(--dt-primary); border-color: var(--dt-primary); }
 .ts-empty { font-size: 13px; color: var(--dt-text-4); }
-.ts-proj { display: flex; align-items: center; justify-content: space-between; padding: 7px 8px; border-radius: 8px; cursor: default; }
+.ts-proj { display: flex; align-items: flex-start; justify-content: space-between; padding: 9px 10px; border-radius: 8px; cursor: default; border: 1px solid var(--dt-border-light); margin-bottom: 8px; }
+.ts-proj:hover { background: #f6f8fb; border-color: var(--dt-border-strong); }
+.ts-proj-progress { height: 6px; background: #eef0f3; border-radius: 3px; margin: 6px 0 4px; overflow: hidden; }
+.ts-proj-bar { height: 100%; background: var(--dt-primary); border-radius: 3px; transition: width .3s; }
 .ts-proj:hover { background: #f6f8fb; }
 .ts-proj-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .ts-proj-meta { font-size: 11px; color: var(--dt-text-4); margin-top: 2px; }

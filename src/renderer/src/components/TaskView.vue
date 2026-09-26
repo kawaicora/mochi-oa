@@ -19,6 +19,7 @@ interface Detail { task: Task; assignments: Assignment[]; comments: Comment[]; i
 const projects = ref<Project[]>([])
 const tasks = ref<Task[]>([])
 const activeProject = ref(0)
+const view = ref<'list' | 'board' | 'gantt'>('board')
 const loading = ref(false)
 const err = ref('')
 
@@ -290,6 +291,47 @@ const isManager = (t: Task): boolean => {
   const role = myRole.value
   return role === 'owner' || role === 'admin' || t.createdBy === meId.value
 }
+
+function projectName(id: number | null): string {
+  const p = projects.value.find((x) => x.id === id)
+  return p ? p.name : '未归属'
+}
+
+// ─── 甘特图：按周刻度时间轴，任务条横跨 开始→结束 ───
+interface GanttWeek { start: Date; end: Date }
+interface GanttRow { t: Task; left: number; width: number }
+const gantt = computed(() => {
+  if (!tasks.value.length) return null
+  let min = Infinity, max = -Infinity
+  for (const t of tasks.value) {
+    const s = Date.parse(t.startTime), e = Date.parse(t.dueTime)
+    if (Number.isFinite(s) && s < min) min = s
+    if (Number.isFinite(e) && e > max) max = e
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  const start = new Date(min)
+  start.setHours(0, 0, 0, 0)
+  const cursor = new Date(start)
+  cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7)) // 对齐到周一
+  const weeks: GanttWeek[] = []
+  while (cursor <= new Date(max)) {
+    const ws = new Date(cursor)
+    const we = new Date(cursor); we.setDate(we.getDate() + 6)
+    weeks.push({ start: ws, end: we })
+    cursor.setDate(cursor.getDate() + 7)
+  }
+  if (!weeks.length) return null
+  const t0 = weeks[0].start.getTime()
+  const t1 = weeks[weeks.length - 1].end.getTime() + 86400000
+  const total = t1 - t0
+  const rows: GanttRow[] = tasks.value.map((t) => {
+    const s = Math.max(Date.parse(t.startTime), t0)
+    const e = Math.min(Date.parse(t.dueTime), t1)
+    return { t, left: ((s - t0) / total) * 100, width: Math.max(((e - s) / total) * 100, 2) }
+  }).sort((a, b) => Date.parse(a.t.startTime) - Date.parse(b.t.startTime))
+  return { weeks, rows, todayPct: Math.max(0, Math.min(100, ((Date.now() - t0) / total) * 100)) }
+})
+const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDate()} - ${w.end.getMonth() + 1}.${w.end.getDate()}`
 </script>
 
 <template>
@@ -311,8 +353,15 @@ const isManager = (t: Task): boolean => {
       </button>
     </div>
 
+    <!-- 视图切换 -->
+    <div class="tv-views">
+      <button :class="{ on: view === 'list' }" @click="view = 'list'"><i class="fas fa-list"></i> 列表</button>
+      <button :class="{ on: view === 'board' }" @click="view = 'board'"><i class="fas fa-columns"></i> 看板</button>
+      <button :class="{ on: view === 'gantt' }" @click="view = 'gantt'"><i class="fas fa-chart-bar"></i> 甘特图</button>
+    </div>
+
     <!-- 任务列表（看板多列：按状态分列，列内按截止时间排序） -->
-    <div class="tv-board">
+    <div v-if="view === 'board'" class="tv-board">
       <div v-if="!tasks.length" class="tv-empty"><i class="far fa-clipboard"></i> 还没有任务，点击「新建任务」创建</div>
       <template v-else>
         <div v-for="col in COLUMNS" :key="col.key" class="tv-col" :class="col.key">
@@ -338,6 +387,46 @@ const isManager = (t: Task): boolean => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- 列表视图（TAPD 表格） -->
+    <div v-if="view === 'list'" class="tv-table-wrap">
+      <div v-if="!tasks.length" class="tv-empty"><i class="far fa-clipboard"></i> 还没有任务，点击「新建任务」创建</div>
+      <table v-else class="tv-table">
+        <thead>
+          <tr><th>标题</th><th>项目</th><th>预计开始</th><th>预计结束</th><th>状态</th><th>剩余</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="t in tasks" :key="t.id" @click="openTask(t)">
+            <td class="tv-t-title">{{ t.title }}</td>
+            <td>{{ projectName(t.projectId) }}</td>
+            <td>{{ fmt(t.startTime) }}</td>
+            <td>{{ fmt(t.dueTime) }}</td>
+            <td><span class="tv-badge" :class="t.status">{{ STATUS_LABEL[t.status] }}</span></td>
+            <td><span class="tv-remain" :class="colorOf(t)">{{ remainText(t) }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 甘特图视图 -->
+    <div v-if="view === 'gantt'" class="tv-gantt">
+      <div v-if="!gantt" class="tv-empty">没有可绘制的时间范围</div>
+      <template v-else>
+        <div class="tg-head">
+          <div class="tg-label-col"></div>
+          <div class="tg-axis">
+            <div v-for="w in gantt.weeks" :key="w.start.getTime()" class="tg-week">{{ wl(w) }}</div>
+          </div>
+        </div>
+        <div v-for="r in gantt.rows" :key="r.t.id" class="tg-row">
+          <div class="tg-label">{{ r.t.title }}</div>
+          <div class="tg-track">
+            <div class="tg-today" :style="{ left: gantt.todayPct + '%' }"></div>
+            <div class="tg-bar" :class="`lvl-${colorOf(r.t)}`" :style="{ left: r.left + '%', width: r.width + '%' }" @click="openTask(r.t)"></div>
           </div>
         </div>
       </template>
@@ -571,6 +660,34 @@ const isManager = (t: Task): boolean => {
 .tv-projects { display: flex; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--dt-border-light); flex-wrap: wrap; flex-shrink: 0; }
 .tv-proj { padding: 5px 12px; border-radius: 16px; border: 1px solid var(--dt-border-light); background: #fff; font-size: 13px; cursor: pointer; }
 .tv-proj.on { background: var(--dt-primary); color: #fff; border-color: var(--dt-primary); }
+
+/* 视图切换 */
+.tv-views { display: flex; gap: 4px; padding: 8px 18px 0; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
+.tv-views button { border: none; background: none; padding: 8px 14px; font-size: 13px; cursor: pointer; color: var(--dt-text-3); border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px; }
+.tv-views button.on { color: var(--dt-primary); border-bottom-color: var(--dt-primary); font-weight: 600; }
+
+/* 列表表格 */
+.tv-table-wrap { flex: 1; overflow: auto; padding: 12px 18px; }
+.tv-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; }
+.tv-table th, .tv-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--dt-border-light); white-space: nowrap; }
+.tv-table th { background: #fafbfc; font-weight: 600; color: var(--dt-text-3); font-size: 12px; }
+.tv-table tbody tr:hover { background: #f6f8fb; cursor: pointer; }
+.tv-t-title { font-weight: 600; max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 甘特图 */
+.tv-gantt { flex: 1; overflow: auto; padding: 12px 18px; }
+.tg-head, .tg-row { display: flex; align-items: center; }
+.tg-label-col { width: 220px; flex-shrink: 0; }
+.tg-axis { flex: 1; display: flex; border-bottom: 1px solid var(--dt-border-light); }
+.tg-week { flex: 1; min-width: 96px; font-size: 11px; color: var(--dt-text-4); padding: 6px 8px; border-right: 1px solid var(--dt-border-light); white-space: nowrap; }
+.tg-row { border-bottom: 1px solid var(--dt-border-light); }
+.tg-label { width: 220px; flex-shrink: 0; font-size: 13px; font-weight: 600; padding: 10px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-track { flex: 1; position: relative; height: 40px; }
+.tg-bar { position: absolute; top: 12px; height: 16px; border-radius: 4px; cursor: pointer; min-width: 4px; }
+.tg-bar.lvl-green { background: rgba(47, 187, 107, 0.7); }
+.tg-bar.lvl-yellow { background: rgba(230, 162, 60, 0.85); }
+.tg-bar.lvl-red { background: rgba(230, 69, 69, 0.85); }
+.tg-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #d92b3a; opacity: 0.5; z-index: 1; }
 .tv-list { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
 .tv-board { flex: 1; overflow: auto; padding: 12px 18px; display: flex; gap: 12px; align-items: flex-start; }
 .tv-col { flex: 1 1 0; min-width: 250px; max-width: 330px; background: #f3f5f7; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; }
