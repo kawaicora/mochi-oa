@@ -217,12 +217,12 @@ class VideoStream {
 
     // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
     const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string, faceR: number): void => {
-      // 频谱环紧贴头像外圈，大小随头像半径适配
-      const inner = faceR + 4
-      const outer = faceR + 16
-      const n = Math.min(data.length, 64)
+      // 用满全部 fft 数据（1024 柱）；幅度范围拉大 + 增益，让频谱明显
+      const inner = faceR + 2
+      const outer = faceR + 55
+      const n = Math.min(data.length, 1024)
       for (let i = 0; i < n; i++) {
-        const v = data[i] / 255
+        const v = Math.min(1, (data[i] / 255) * 1.5)
         const len = inner + v * (outer - inner)
         const a = startA + (i / n) * (endA - startA)
         const x1 = w / 2 + Math.cos(a) * inner
