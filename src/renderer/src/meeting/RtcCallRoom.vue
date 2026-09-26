@@ -182,10 +182,14 @@ function closeFocus(): void {
   focusedKey.value = null
 }
 function fullscreenEl(ev: Event): void {
-  const el = (ev.currentTarget as HTMLElement | null)?.parentElement
-  if (el && el.requestFullscreen) {
-    void el.requestFullscreen().catch(() => { /* ignore */ })
+  const btn = ev.currentTarget as HTMLElement | null
+  const el = btn?.closest('.tile, .focus-overlay') as HTMLElement | null
+  if (!el) return
+  if (document.fullscreenElement === el) {
+    void document.exitFullscreen().catch(() => { /* ignore */ })
+    return
   }
+  if (el.requestFullscreen) void el.requestFullscreen().catch(() => { /* ignore */ })
 }
 
 // ─── 内部引用 ─────────────────────────────────────────────
@@ -982,6 +986,24 @@ onBeforeUnmount(() => { cleanup() })
   justify-content: center;
 }
 .tile video { width: 100%; height: 100%; object-fit: cover; }
+/* 全屏：撑满并居中显示视频，避免 tile 的 aspect-ratio/max-width 让高度塌陷成黑屏 */
+.tile:fullscreen,
+.focus-overlay:fullscreen {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  aspect-ratio: auto;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tile:fullscreen video,
+.focus-overlay:fullscreen video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 .tile-avatar {
   display: flex;
   flex-direction: column;
