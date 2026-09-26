@@ -70,14 +70,19 @@ function notify(a: Alarm): void {
   }
 }
 
-function playRing(ring: string): void {
+/** 播放本地音乐：fetch app-file 协议读成 blob → Audio 播放（绕开 registerFileProtocol 对音频 range 流请求支持不足的问题） */
+async function playRing(ring: string): Promise<void> {
   if (!ring) return
   try {
-    const audio = new Audio(ringUrl(ring))
+    const res = await fetch(ringUrl(ring))
+    if (!res.ok) return
+    const blob = await res.blob()
+    const objUrl = URL.createObjectURL(blob)
+    const audio = new Audio(objUrl)
     audio.volume = 1
     audio.play().catch(() => {})
   } catch {
-    // 播放失败静默（至少已发系统通知）
+    // 播放失败静默（至少已发系统通知/执行动作）
   }
 }
 
@@ -103,7 +108,7 @@ export function fireDueAlarms(): void {
     if (a.repeat === 'weekly' && !a.weekdays.includes(weekday)) continue
     const key = `${a.id}_${dateStr}_${timeStr}`
     if (firedOnce.has(key)) continue
-    if (a.useRing && a.ring) playRing(a.ring)
+    if (a.useRing && a.ring) void playRing(a.ring)
     if (a.notify) notify(a)
     if (a.command && a.command.trim()) void runCommand(a.command)
     if (a.repeat === 'once') {
