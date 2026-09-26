@@ -184,6 +184,27 @@ const api = {
   serverHolidayAddMany: (items: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayAddMany, items),
   serverHolidayRemoveMany: (dates: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayRemoveMany, dates),
   serverHolidayReset: (): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverHolidayReset),
+  // 任务流程系统
+  serverTaskListProjects: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskProjects, companyId),
+  serverTaskCreateProject: (companyId: number, name: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskProjectCreate, companyId, name),
+  serverTaskDeleteProject: (companyId: number, projectId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskProjectDelete, companyId, projectId),
+  serverTaskSetProjectRole: (companyId: number, projectId: number, userId: number, role: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskProjectSetRole, companyId, projectId, userId, role),
+  serverTaskProjectMembers: (projectId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskProjectMembers, projectId),
+  serverTaskList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskList, companyId, projectId),
+  serverTaskDetail: (taskId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskDetail, taskId),
+  serverTaskCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskCreate, payload),
+  serverTaskUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskUpdate, payload),
+  serverTaskDelete: (taskId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskDelete, taskId),
+  serverTaskSetStatus: (taskId: number, status: string, note: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskSetStatus, taskId, status, note),
+  serverTaskSetReminder: (taskId: number, y: number, r: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskSetReminder, taskId, y, r),
+  serverTaskAddAssignment: (taskId: number, userId: number, content: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskAddAssignment, taskId, userId, content),
+  serverTaskRemoveAssignment: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskRemoveAssignment, id),
+  serverTaskSetAssignmentStatus: (id: number, status: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskSetAssignmentStatus, id, status),
+  serverTaskComment: (taskId: number, content: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskComment, taskId, content),
+  serverTaskAddIssue: (taskId: number, title: string, content: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskAddIssue, taskId, title, content),
+  serverTaskResolveIssue: (issueId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskResolveIssue, issueId),
+  serverTaskRequestExtension: (taskId: number, dt: string, reason: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskRequestExtension, taskId, dt, reason),
+  serverTaskDecideExtension: (companyId: number, taskId: number, extensionId: number, approved: boolean): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskDecideExtension, companyId, taskId, extensionId, approved),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
@@ -254,6 +275,8 @@ const api = {
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
+  onTasksUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.tasksUpdated, l),
+  onProjectsUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.projectsUpdated, l),
   runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
   readAudioFile: (path: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> => ipcRenderer.invoke(IpcChannels.audioReadFile, path),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)

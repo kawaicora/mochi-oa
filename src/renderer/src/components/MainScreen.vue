@@ -9,6 +9,8 @@ import ContactsContent from './ContactsContent.vue'
 import CalendarView from './CalendarView.vue'
 import CalendarSide from './CalendarSide.vue'
 import AlarmView from './AlarmView.vue'
+import TaskView from './TaskView.vue'
+import TaskSide from './TaskSide.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -25,7 +27,7 @@ const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   meeting: { label: '会议', icon: 'fas fa-video' },
   calendar: { label: '日历', icon: 'far fa-calendar-alt' },
   alarm: { label: '闹钟', icon: 'fas fa-bell' },
-  todo: { label: '待办', icon: 'fas fa-check-square' }
+  todo: { label: '任务', icon: 'fas fa-tasks' }
 }
 const nav = ref<NavTab>('message')
 
@@ -283,7 +285,7 @@ function openJoin(): void {
         </template>
         <template v-else-if="nav === 'calendar'"><CalendarSide /></template>
         <template v-else-if="nav === 'alarm'"></template>
-        <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="nav" title="待办" icon="fas fa-check-square" /></template>
+        <template v-else-if="nav === 'todo'"><TaskSide /></template>
       </div>
 
       <!-- 2.3 大内容区 -->
@@ -307,7 +309,7 @@ function openJoin(): void {
         </template>
         <template v-else-if="nav === 'calendar'"><CalendarView /></template>
         <template v-else-if="nav === 'alarm'"><AlarmView /></template>
-        <template v-else-if="nav === 'todo'"><PlaceholderPanel mode="content" title="待办" icon="fas fa-check-square" /></template>
+        <template v-else-if="nav === 'todo'"><TaskView /></template>
       </div>
     </div>
 

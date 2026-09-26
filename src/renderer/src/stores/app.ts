@@ -458,6 +458,98 @@ export const useAppStore = defineStore('app', () => {
     const data = d<{ count: number }>(ack)
     return { ok: ack.ok, error: ack.error, count: data?.count }
   }
+
+  // ─── 任务流程系统 ───
+  type TaskStatusStr = 'created' | 'in_progress' | 'completed' | 'pending_extension' | 'extended' | 'overdue'
+  type TaskProject = { id: number; companyId: number; name: string; pmId: number; createdAt: string }
+  type TaskProjectMember = { projectId: number; userId: number; role: string; joinedAt: string }
+  type TaskItem = { id: number; companyId: number; projectId: number | null; title: string; description: string; startTime: string; dueTime: string; completedTime: string | null; status: TaskStatusStr; isOverdue: boolean; reminderYellow: number; reminderRed: number; images: string[]; createdBy: number; createdAt: string; updatedAt: string }
+  type TaskAssignment = { id: number; taskId: number; userId: number; content: string; status: 'created' | 'in_progress' | 'completed'; completedAt: string | null; username?: string; nick?: string; avatar?: string }
+  type TaskComment = { id: number; taskId: number; userId: number; content: string; createdAt: string; username?: string; nick?: string; avatar?: string }
+  type TaskIssue = { id: number; taskId: number; userId: number; title: string; content: string; status: 'open' | 'resolved'; resolvedAt: string | null; createdAt: string; username?: string; nick?: string; avatar?: string }
+  type TaskExtension = { id: number; taskId: number; userId: number; requestedDueTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; decidedBy: number | null; decidedAt: string | null; createdAt: string; username?: string; nick?: string }
+  type TaskLog = { id: number; taskId: number; userId: number; fromStatus: string; toStatus: TaskStatusStr; note: string; createdAt: string; username?: string; nick?: string }
+  type TaskDetail = { task: TaskItem; assignments: TaskAssignment[]; comments: TaskComment[]; issues: TaskIssue[]; extensions: TaskExtension[]; logs: TaskLog[] }
+  async function fetchProjects(): Promise<TaskProject[]> {
+    const ack = await window.pantry.serverTaskListProjects(activeCompanyId.value)
+    return d<{ projects: TaskProject[] }>(ack)?.projects ?? []
+  }
+  async function createProject(name: string): Promise<{ ok: boolean; error?: string; project?: TaskProject }> {
+    const ack = await window.pantry.serverTaskCreateProject(activeCompanyId.value, name)
+    return { ok: ack.ok, error: ack.error, project: d<{ project: TaskProject }>(ack)?.project }
+  }
+  async function deleteProject(projectId: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverTaskDeleteProject(activeCompanyId.value, projectId)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function setProjectRole(projectId: number, userId: number, role: string): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverTaskSetProjectRole(activeCompanyId.value, projectId, userId, role)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function projectMembers(projectId: number): Promise<TaskProjectMember[]> {
+    const ack = await window.pantry.serverTaskProjectMembers(projectId)
+    return d<{ members: TaskProjectMember[] }>(ack)?.members ?? []
+  }
+  async function fetchTasks(projectId?: number): Promise<TaskItem[]> {
+    const ack = await window.pantry.serverTaskList(activeCompanyId.value, projectId)
+    return d<{ tasks: TaskItem[] }>(ack)?.tasks ?? []
+  }
+  async function fetchTaskDetail(taskId: number): Promise<TaskDetail | null> {
+    const ack = await window.pantry.serverTaskDetail(taskId)
+    return d<{ detail: TaskDetail }>(ack)?.detail ?? null
+  }
+  async function createTask(input: { projectId?: number; title: string; description?: string; startTime: string; dueTime: string; images?: string[]; assignments?: Array<{ userId: number; content: string }> }): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
+    const ack = await window.pantry.serverTaskCreate({ companyId: activeCompanyId.value, projectId: input.projectId ?? null, title: input.title, description: input.description ?? '', startTime: input.startTime, dueTime: input.dueTime, images: input.images ?? [], assignments: input.assignments ?? [] })
+    return { ok: ack.ok, error: ack.error, task: d<{ task: TaskItem }>(ack)?.task }
+  }
+  async function updateTask(input: { taskId: number; title?: string; description?: string; startTime?: string; dueTime?: string; images?: string[] }): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
+    const ack = await window.pantry.serverTaskUpdate({ taskId: input.taskId, title: input.title, description: input.description, startTime: input.startTime, dueTime: input.dueTime, images: input.images })
+    return { ok: ack.ok, error: ack.error, task: d<{ task: TaskItem }>(ack)?.task }
+  }
+  async function deleteTask(taskId: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverTaskDelete(taskId)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function setTaskStatus(taskId: number, status: TaskStatusStr, note: string): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
+    const ack = await window.pantry.serverTaskSetStatus(taskId, status, note)
+    return { ok: ack.ok, error: ack.error, task: d<{ task: TaskItem }>(ack)?.task }
+  }
+  async function setTaskReminder(taskId: number, reminderYellow: number, reminderRed: number): Promise<{ ok: boolean; error?: string; task?: TaskItem }> {
+    const ack = await window.pantry.serverTaskSetReminder(taskId, reminderYellow, reminderRed)
+    return { ok: ack.ok, error: ack.error, task: d<{ task: TaskItem }>(ack)?.task }
+  }
+  async function addAssignment(taskId: number, userId: number, content: string): Promise<{ ok: boolean; error?: string; assignment?: TaskAssignment }> {
+    const ack = await window.pantry.serverTaskAddAssignment(taskId, userId, content)
+    return { ok: ack.ok, error: ack.error, assignment: d<{ assignment: TaskAssignment }>(ack)?.assignment }
+  }
+  async function removeAssignment(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverTaskRemoveAssignment(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function setAssignmentStatus(id: number, status: 'created' | 'in_progress' | 'completed'): Promise<{ ok: boolean; error?: string; assignment?: TaskAssignment }> {
+    const ack = await window.pantry.serverTaskSetAssignmentStatus(id, status)
+    return { ok: ack.ok, error: ack.error, assignment: d<{ assignment: TaskAssignment }>(ack)?.assignment }
+  }
+  async function addTaskComment(taskId: number, content: string): Promise<{ ok: boolean; error?: string; comment?: TaskComment }> {
+    const ack = await window.pantry.serverTaskComment(taskId, content)
+    return { ok: ack.ok, error: ack.error, comment: d<{ comment: TaskComment }>(ack)?.comment }
+  }
+  async function addTaskIssue(taskId: number, title: string, content: string): Promise<{ ok: boolean; error?: string; issue?: TaskIssue }> {
+    const ack = await window.pantry.serverTaskAddIssue(taskId, title, content)
+    return { ok: ack.ok, error: ack.error, issue: d<{ issue: TaskIssue }>(ack)?.issue }
+  }
+  async function resolveTaskIssue(issueId: number): Promise<{ ok: boolean; error?: string; issue?: TaskIssue }> {
+    const ack = await window.pantry.serverTaskResolveIssue(issueId)
+    return { ok: ack.ok, error: ack.error, issue: d<{ issue: TaskIssue }>(ack)?.issue }
+  }
+  async function requestExtension(taskId: number, requestedDueTime: string, reason: string): Promise<{ ok: boolean; error?: string; extension?: TaskExtension }> {
+    const ack = await window.pantry.serverTaskRequestExtension(taskId, requestedDueTime, reason)
+    return { ok: ack.ok, error: ack.error, extension: d<{ extension: TaskExtension }>(ack)?.extension }
+  }
+  async function decideExtension(taskId: number, extensionId: number, approved: boolean): Promise<{ ok: boolean; error?: string; extension?: TaskExtension }> {
+    const ack = await window.pantry.serverTaskDecideExtension(activeCompanyId.value, taskId, extensionId, approved)
+    return { ok: ack.ok, error: ack.error, extension: d<{ extension: TaskExtension }>(ack)?.extension }
+  }
   async function addCompanyMember(target: number | string, departmentId?: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverAddCompanyMember(activeCompanyId.value, target, departmentId ?? undefined)
     if (ack.ok) await refreshMembers()
@@ -859,6 +951,26 @@ export const useAppStore = defineStore('app', () => {
     addHolidays,
     removeHolidays,
     resetHolidays,
+    fetchProjects,
+    createProject,
+    deleteProject,
+    setProjectRole,
+    projectMembers,
+    fetchTasks,
+    fetchTaskDetail,
+    createTask,
+    updateTask,
+    deleteTask,
+    setTaskStatus,
+    setTaskReminder,
+    addAssignment,
+    removeAssignment,
+    setAssignmentStatus,
+    addTaskComment,
+    addTaskIssue,
+    resolveTaskIssue,
+    requestExtension,
+    decideExtension,
     createDepartment,
     deleteDepartment,
     assignToDepartment,

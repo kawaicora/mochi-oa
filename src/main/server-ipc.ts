@@ -72,6 +72,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('groupRemoved', (d) => broadcastToAllWindows(IpcEvents.groupRemoved, d))
   serverClient.on('friendsUpdated', () => broadcastToAllWindows(IpcEvents.friendsUpdated, {}))
   serverClient.on('holidaysUpdated', () => broadcastToAllWindows(IpcEvents.holidaysUpdated, {}))
+  serverClient.on('tasksUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.tasksUpdated, d ?? {}))
+  serverClient.on('projectsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.projectsUpdated, d ?? {}))
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {
@@ -266,6 +268,28 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverHolidayReset, () => serverClient.resetHolidays())
   ipcMain.handle(IpcChannels.serverFriendAdd, (_e, userId) => serverClient.addFriend(Number(userId) || 0))
   ipcMain.handle(IpcChannels.serverFriendRemove, (_e, userId) => serverClient.removeFriend(Number(userId) || 0))
+
+  // 任务流程系统
+  ipcMain.handle(IpcChannels.serverTaskProjects, (_e, companyId) => serverClient.taskListProjects(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskProjectCreate, (_e, companyId, name) => serverClient.taskCreateProject(Number(companyId) || 0, String(name)))
+  ipcMain.handle(IpcChannels.serverTaskProjectDelete, (_e, companyId, projectId) => serverClient.taskDeleteProject(Number(companyId) || 0, Number(projectId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskProjectSetRole, (_e, companyId, projectId, userId, role) => serverClient.taskSetProjectRole(Number(companyId) || 0, Number(projectId) || 0, Number(userId) || 0, String(role)))
+  ipcMain.handle(IpcChannels.serverTaskProjectMembers, (_e, projectId) => serverClient.taskProjectMembers(Number(projectId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskList, (_e, companyId, projectId) => serverClient.taskList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverTaskDetail, (_e, taskId) => serverClient.taskDetail(Number(taskId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskCreate, (_e, payload) => serverClient.taskCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverTaskUpdate, (_e, payload) => serverClient.taskUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverTaskDelete, (_e, taskId) => serverClient.taskDelete(Number(taskId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskSetStatus, (_e, taskId, status, note) => serverClient.taskSetStatus(Number(taskId) || 0, String(status), String(note ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskSetReminder, (_e, taskId, y, r) => serverClient.taskSetReminder(Number(taskId) || 0, Number(y) || 0, Number(r) || 0))
+  ipcMain.handle(IpcChannels.serverTaskAddAssignment, (_e, taskId, userId, content) => serverClient.taskAddAssignment(Number(taskId) || 0, Number(userId) || 0, String(content ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskRemoveAssignment, (_e, id) => serverClient.taskRemoveAssignment(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverTaskSetAssignmentStatus, (_e, id, status) => serverClient.taskSetAssignmentStatus(Number(id) || 0, String(status)))
+  ipcMain.handle(IpcChannels.serverTaskComment, (_e, taskId, content) => serverClient.taskComment(Number(taskId) || 0, String(content ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskAddIssue, (_e, taskId, title, content) => serverClient.taskAddIssue(Number(taskId) || 0, String(title ?? ''), String(content ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskResolveIssue, (_e, issueId) => serverClient.taskResolveIssue(Number(issueId) || 0))
+  ipcMain.handle(IpcChannels.serverTaskRequestExtension, (_e, taskId, dt, reason) => serverClient.taskRequestExtension(Number(taskId) || 0, String(dt), String(reason ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskDecideExtension, (_e, companyId, taskId, extensionId, approved) => serverClient.taskDecideExtension(Number(companyId) || 0, Number(taskId) || 0, Number(extensionId) || 0, Boolean(approved)))
 
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>

@@ -285,6 +285,8 @@ export class ServerClient extends EventEmitter {
     socket.on('group:removed', (d: { groupId: number }) => this.emit('groupRemoved', d))
     socket.on('friends:updated', () => this.emit('friendsUpdated'))
     socket.on('holiday:updated', () => this.emit('holidaysUpdated'))
+    socket.on('task:tasksUpdated', (d: { companyId?: number }) => this.emit('tasksUpdated', d))
+    socket.on('task:projectsUpdated', (d: { companyId?: number }) => this.emit('projectsUpdated', d))
   }
 
   disconnect(): void {
@@ -994,6 +996,88 @@ export class ServerClient extends EventEmitter {
   async setMainMailConfig(cfg: { email: string; displayName?: string; host: string; port?: number; secure?: boolean; user?: string; password: string }): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'mail:setMainConfig', cfg)
+  }
+
+  // ─── 任务流程系统 ─────────
+  async taskListProjects(companyId: number): Promise<Ack & { data?: { projects: Array<{ id: number; companyId: number; name: string; pmId: number; createdAt: string }> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:projectList', { companyId })
+  }
+  async taskCreateProject(companyId: number, name: string): Promise<Ack & { data?: { project: { id: number; companyId: number; name: string; pmId: number; createdAt: string } } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:projectCreate', { companyId, name })
+  }
+  async taskDeleteProject(companyId: number, projectId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:projectDelete', { companyId, projectId })
+  }
+  async taskSetProjectRole(companyId: number, projectId: number, userId: number, role: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:projectSetRole', { companyId, projectId, userId, role })
+  }
+  async taskProjectMembers(projectId: number): Promise<Ack & { data?: { members: Array<{ projectId: number; userId: number; role: string; joinedAt: string }> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:projectMembers', { projectId })
+  }
+  async taskList(companyId: number, projectId?: number): Promise<Ack & { data?: { tasks: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:list', { companyId, projectId: projectId ?? null })
+  }
+  async taskDetail(taskId: number): Promise<Ack & { data?: { detail: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:detail', { taskId })
+  }
+  async taskCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { task: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:create', payload)
+  }
+  async taskUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { task: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:update', payload)
+  }
+  async taskDelete(taskId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:delete', { taskId })
+  }
+  async taskSetStatus(taskId: number, status: string, note: string): Promise<Ack & { data?: { task: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:setStatus', { taskId, status, note })
+  }
+  async taskSetReminder(taskId: number, reminderYellow: number, reminderRed: number): Promise<Ack & { data?: { task: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:setReminder', { taskId, reminderYellow, reminderRed })
+  }
+  async taskAddAssignment(taskId: number, userId: number, content: string): Promise<Ack & { data?: { assignment: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:addAssignment', { taskId, userId, content })
+  }
+  async taskRemoveAssignment(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:removeAssignment', { id })
+  }
+  async taskSetAssignmentStatus(id: number, status: string): Promise<Ack & { data?: { assignment: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:setAssignmentStatus', { id, status })
+  }
+  async taskComment(taskId: number, content: string): Promise<Ack & { data?: { comment: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:comment', { taskId, content })
+  }
+  async taskAddIssue(taskId: number, title: string, content: string): Promise<Ack & { data?: { issue: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:addIssue', { taskId, title, content })
+  }
+  async taskResolveIssue(issueId: number): Promise<Ack & { data?: { issue: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:resolveIssue', { issueId })
+  }
+  async taskRequestExtension(taskId: number, requestedDueTime: string, reason: string): Promise<Ack & { data?: { extension: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:requestExtension', { taskId, requestedDueTime, reason })
+  }
+  async taskDecideExtension(companyId: number, taskId: number, extensionId: number, approved: boolean): Promise<Ack & { data?: { extension: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'task:decideExtension', { companyId, taskId, extensionId, approved })
   }
 }
 

@@ -89,6 +89,28 @@ export const IpcChannels = {
   serverHolidayRemoveMany: 'server:holiday:removeMany',
   serverHolidayReset: 'server:holiday:reset',
 
+  // 任务流程系统
+  serverTaskProjects: 'server:task:projects',
+  serverTaskProjectCreate: 'server:task:projectCreate',
+  serverTaskProjectDelete: 'server:task:projectDelete',
+  serverTaskProjectSetRole: 'server:task:projectSetRole',
+  serverTaskProjectMembers: 'server:task:projectMembers',
+  serverTaskList: 'server:task:list',
+  serverTaskDetail: 'server:task:detail',
+  serverTaskCreate: 'server:task:create',
+  serverTaskUpdate: 'server:task:update',
+  serverTaskDelete: 'server:task:delete',
+  serverTaskSetStatus: 'server:task:setStatus',
+  serverTaskSetReminder: 'server:task:setReminder',
+  serverTaskAddAssignment: 'server:task:addAssignment',
+  serverTaskRemoveAssignment: 'server:task:removeAssignment',
+  serverTaskSetAssignmentStatus: 'server:task:setAssignmentStatus',
+  serverTaskComment: 'server:task:comment',
+  serverTaskAddIssue: 'server:task:addIssue',
+  serverTaskResolveIssue: 'server:task:resolveIssue',
+  serverTaskRequestExtension: 'server:task:requestExtension',
+  serverTaskDecideExtension: 'server:task:decideExtension',
+
   // 闹钟：到点执行用户程序/脚本（跨平台，main 进程 spawn）
   alarmRun: 'alarm:run',
 
@@ -198,6 +220,8 @@ export const IpcEvents = {
   groupRemoved: 'server:event:group:removed',
   friendsUpdated: 'server:event:friends:updated',
   holidaysUpdated: 'server:event:holidays:updated',
+  tasksUpdated: 'server:event:tasks:updated',
+  projectsUpdated: 'server:event:projects:updated',
   userProfileUpdated: 'server:event:user:profileUpdated',
   /** 分块上传进度：{ uploadId, fileName, percent, done? } */
   uploadProgress: 'server:event:uploadProgress',
