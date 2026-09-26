@@ -9,7 +9,7 @@ const server = useServerStore()
 type TaskStatus = 'created' | 'in_progress' | 'completed' | 'pending_extension' | 'extended' | 'overdue'
 interface Project { id: number; companyId: number; name: string; pmId: number; createdAt: string }
 interface Assignment { id: number; taskId: number; userId: number; content: string; status: 'created' | 'in_progress' | 'completed'; completedAt: string | null; username?: string; nick?: string; avatar?: string }
-interface Comment { id: number; taskId: number; userId: number; content: string; createdAt: string; username?: string; nick?: string }
+interface Comment { id: number; taskId: number; userId: number; content: string; images: string[]; createdAt: string; username?: string; nick?: string }
 interface Issue { id: number; taskId: number; userId: number; title: string; content: string; status: 'open' | 'resolved'; createdAt: string; username?: string; nick?: string }
 interface Extension { id: number; taskId: number; userId: number; requestedDueTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; decidedBy: number | null; decidedAt: string | null; createdAt: string; username?: string; nick?: string }
 interface Log { id: number; taskId: number; userId: number; fromStatus: string; toStatus: string; note: string; createdAt: string; username?: string; nick?: string }
@@ -83,26 +83,15 @@ async function refresh(): Promise<void> {
 // ─── 创建任务 ───
 const showCreate = ref(false)
 const createForm = ref({ title: '', description: '', projectId: 0 as number, startTime: '', dueTime: '' })
-const createImages = ref<string[]>([])
 const createAssign = ref<Array<{ userId: number; content: string }>>([{ userId: 0, content: '' }])
 const createErr = ref('')
 const members = computed(() => app.members ?? [])
 function openCreate(): void {
   createErr.value = ''
   createForm.value = { title: '', description: '', projectId: activeProject.value, startTime: '', dueTime: '' }
-  createImages.value = []
   createAssign.value = [{ userId: 0, content: '' }]
   showCreate.value = true
 }
-async function onAddImage(): Promise<void> {
-  const path = await window.pantry.pickFile('image')
-  if (!path) return
-  const clientId = `task-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-  const up = await window.pantry.serverUploadChunked(path, clientId, app.activeCompanyId ?? 0)
-  if (up.ok && up.url) createImages.value.push(up.url)
-  else err.value = up.error || '图片上传失败'
-}
-function removeCreateImage(i: number): void { createImages.value.splice(i, 1) }
 function toIso(lt: string): string {
   if (!lt) return ''
   const d = new Date(lt)
@@ -115,7 +104,7 @@ async function submitCreate(): Promise<void> {
   if (!st || !dt) { createErr.value = '请填写开始与预期结束时间'; return }
   if (Date.parse(dt) < Date.parse(st)) { createErr.value = '结束时间不能早于开始时间'; return }
   const assigns = createAssign.value.filter((a) => a.userId > 0).map((a) => ({ userId: a.userId, content: a.content.trim() }))
-  const r = await app.createTask({ projectId: f.projectId || undefined, title: f.title.trim(), description: f.description.trim(), startTime: st, dueTime: dt, images: createImages.value, assignments: assigns })
+  const r = await app.createTask({ projectId: f.projectId || undefined, title: f.title.trim(), description: f.description.trim(), startTime: st, dueTime: dt, images: [], assignments: assigns })
   if (!r.ok) { createErr.value = r.error || '创建失败'; return }
   showCreate.value = false
   await loadTasks()
@@ -183,12 +172,25 @@ async function submitRemind(): Promise<void> {
   await refresh()
 }
 
-// 留言
+// 留言（对话流：文字 + 图片）
 const commentText = ref('')
+const commentImages = ref<string[]>([])
+async function onPickCommentImage(): Promise<void> {
+  const path = await window.pantry.pickFile('image')
+  if (!path) return
+  const clientId = `task-cm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const up = await window.pantry.serverUploadChunked(path, clientId, app.activeCompanyId ?? 0)
+  if (up.ok && up.url) commentImages.value.push(up.url)
+  else err.value = up.error || '图片上传失败'
+}
 async function addComment(): Promise<void> {
-  if (!detail.value || !commentText.value.trim()) return
-  const r = await app.addTaskComment(detail.value.task.id, commentText.value.trim())
+  if (!detail.value) return
+  const text = commentText.value.trim()
+  const imgs = commentImages.value
+  if (!text && imgs.length === 0) return
+  const r = await app.addTaskComment(detail.value.task.id, text, imgs)
   commentText.value = ''
+  commentImages.value = []
   if (r.ok) await refresh()
 }
 
@@ -372,13 +374,22 @@ const isManager = (t: Task): boolean => {
         <!-- 留言 -->
         <div v-if="detailTab === 'comments'" class="tv-tab">
           <div class="tv-comment-box">
-            <textarea v-model="commentText" class="srv-input" rows="2" placeholder="输入留言…" @keydown.ctrl.enter="addComment"></textarea>
-            <button class="dt-btn dt-btn-primary" @click="addComment">发送</button>
+            <textarea v-model="commentText" class="srv-input" rows="2" placeholder="输入留言…（可附图）" @keydown.ctrl.enter="addComment"></textarea>
+            <div v-if="commentImages.length" class="tv-comment-pre">
+              <a v-for="(im, i) in commentImages" :key="i" @click.prevent="commentImages.splice(i, 1)"><img :src="im" /></a>
+            </div>
+            <div class="tv-comment-ops">
+              <button class="tv-img-add" @click="onPickCommentImage"><i class="fas fa-image"></i> 附图</button>
+              <button class="dt-btn dt-btn-primary" @click="addComment">发送</button>
+            </div>
           </div>
           <div v-for="c in [...detail.comments].reverse()" :key="c.id" class="tv-comment">
             <span class="tv-log-user">{{ who(c.username, c.nick) }}</span>
             <span class="tv-log-time">{{ fmt(c.createdAt) }}</span>
-            <div class="tv-comment-text">{{ c.content }}</div>
+            <div v-if="c.content" class="tv-comment-text">{{ c.content }}</div>
+            <div v-if="c.images && c.images.length" class="tv-comment-imgs">
+              <a v-for="(im, i) in c.images" :key="i" :href="im" target="_blank"><img :src="im" /></a>
+            </div>
           </div>
         </div>
 
@@ -449,11 +460,6 @@ const isManager = (t: Task): boolean => {
           </div>
           <label class="tv-lab">描述</label>
           <textarea v-model="createForm.description" class="srv-input" rows="3" placeholder="任务描述"></textarea>
-          <label class="tv-lab">图片</label>
-          <div class="tv-create-images">
-            <a v-for="(im, i) in createImages" :key="i" class="tv-create-img" @click.prevent="removeCreateImage(i)"><img :src="im" /></a>
-            <button class="tv-img-add" @click="onAddImage"><i class="fas fa-plus"></i> 传图</button>
-          </div>
           <label class="tv-lab">执行人（每人执行的内容）</label>
           <div v-for="(a, i) in createAssign" :key="i" class="tv-create-assign">
             <select v-model.number="a.userId" class="srv-select">

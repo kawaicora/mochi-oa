@@ -465,7 +465,7 @@ export const useAppStore = defineStore('app', () => {
   type TaskProjectMember = { projectId: number; userId: number; role: string; joinedAt: string }
   type TaskItem = { id: number; companyId: number; projectId: number | null; title: string; description: string; startTime: string; dueTime: string; completedTime: string | null; status: TaskStatusStr; isOverdue: boolean; reminderYellow: number; reminderRed: number; images: string[]; createdBy: number; createdAt: string; updatedAt: string }
   type TaskAssignment = { id: number; taskId: number; userId: number; content: string; status: 'created' | 'in_progress' | 'completed'; completedAt: string | null; username?: string; nick?: string; avatar?: string }
-  type TaskComment = { id: number; taskId: number; userId: number; content: string; createdAt: string; username?: string; nick?: string; avatar?: string }
+  type TaskComment = { id: number; taskId: number; userId: number; content: string; images: string[]; createdAt: string; username?: string; nick?: string; avatar?: string }
   type TaskIssue = { id: number; taskId: number; userId: number; title: string; content: string; status: 'open' | 'resolved'; resolvedAt: string | null; createdAt: string; username?: string; nick?: string; avatar?: string }
   type TaskExtension = { id: number; taskId: number; userId: number; requestedDueTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; decidedBy: number | null; decidedAt: string | null; createdAt: string; username?: string; nick?: string }
   type TaskLog = { id: number; taskId: number; userId: number; fromStatus: string; toStatus: TaskStatusStr; note: string; createdAt: string; username?: string; nick?: string }
@@ -542,8 +542,8 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverTaskSetAssignmentStatus(id, status)
     return { ok: ack.ok, error: ack.error, assignment: d<{ assignment: TaskAssignment }>(ack)?.assignment }
   }
-  async function addTaskComment(taskId: number, content: string): Promise<{ ok: boolean; error?: string; comment?: TaskComment }> {
-    const ack = await window.pantry.serverTaskComment(taskId, content)
+  async function addTaskComment(taskId: number, content: string, images?: string[]): Promise<{ ok: boolean; error?: string; comment?: TaskComment }> {
+    const ack = await window.pantry.serverTaskComment(taskId, content, images ?? [])
     return { ok: ack.ok, error: ack.error, comment: d<{ comment: TaskComment }>(ack)?.comment }
   }
   async function addTaskIssue(taskId: number, title: string, content: string): Promise<{ ok: boolean; error?: string; issue?: TaskIssue }> {

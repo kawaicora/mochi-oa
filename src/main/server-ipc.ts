@@ -285,7 +285,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverTaskAddAssignment, (_e, taskId, userId, content) => serverClient.taskAddAssignment(Number(taskId) || 0, Number(userId) || 0, String(content ?? '')))
   ipcMain.handle(IpcChannels.serverTaskRemoveAssignment, (_e, id) => serverClient.taskRemoveAssignment(Number(id) || 0))
   ipcMain.handle(IpcChannels.serverTaskSetAssignmentStatus, (_e, id, status) => serverClient.taskSetAssignmentStatus(Number(id) || 0, String(status)))
-  ipcMain.handle(IpcChannels.serverTaskComment, (_e, taskId, content) => serverClient.taskComment(Number(taskId) || 0, String(content ?? '')))
+  ipcMain.handle(IpcChannels.serverTaskComment, (_e, taskId, content, images) => serverClient.taskComment(Number(taskId) || 0, String(content ?? ''), Array.isArray(images) ? images.filter((x): x is string => typeof x === 'string') : []))
   ipcMain.handle(IpcChannels.serverTaskAddIssue, (_e, taskId, title, content) => serverClient.taskAddIssue(Number(taskId) || 0, String(title ?? ''), String(content ?? '')))
   ipcMain.handle(IpcChannels.serverTaskResolveIssue, (_e, issueId) => serverClient.taskResolveIssue(Number(issueId) || 0))
   ipcMain.handle(IpcChannels.serverTaskRequestExtension, (_e, taskId, dt, reason) => serverClient.taskRequestExtension(Number(taskId) || 0, String(dt), String(reason ?? '')))

@@ -1059,9 +1059,9 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'task:setAssignmentStatus', { id, status })
   }
-  async taskComment(taskId: number, content: string): Promise<Ack & { data?: { comment: Record<string, unknown> } }> {
+  async taskComment(taskId: number, content: string, images: string[] = []): Promise<Ack & { data?: { comment: Record<string, unknown> } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'task:comment', { taskId, content })
+    return emitWithAck(this.socket, 'task:comment', { taskId, content, images })
   }
   async taskAddIssue(taskId: number, title: string, content: string): Promise<Ack & { data?: { issue: Record<string, unknown> } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
