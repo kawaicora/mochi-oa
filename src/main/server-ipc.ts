@@ -291,6 +291,33 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverTaskRequestExtension, (_e, taskId, dt, reason) => serverClient.taskRequestExtension(Number(taskId) || 0, String(dt), String(reason ?? '')))
   ipcMain.handle(IpcChannels.serverTaskDecideExtension, (_e, companyId, taskId, extensionId, approved) => serverClient.taskDecideExtension(Number(companyId) || 0, Number(taskId) || 0, Number(extensionId) || 0, Boolean(approved)))
 
+  // TAPD 项目管理
+  ipcMain.handle(IpcChannels.serverReqList, (_e, companyId, projectId) => serverClient.reqList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverReqCreate, (_e, payload) => serverClient.reqCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReqUpdate, (_e, payload) => serverClient.reqUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReqStatus, (_e, id, status) => serverClient.reqStatus(Number(id) || 0, String(status ?? '')))
+  ipcMain.handle(IpcChannels.serverReqDelete, (_e, id) => serverClient.reqDelete(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverReqLinkTasks, (_e, id, taskIds) => serverClient.reqLinkTasks(Number(id) || 0, Array.isArray(taskIds) ? taskIds.map((x: unknown) => Number(x) || 0).filter((n: number) => n > 0) : []))
+  ipcMain.handle(IpcChannels.serverBugList, (_e, companyId, projectId) => serverClient.bugList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverBugCreate, (_e, payload) => serverClient.bugCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverBugUpdate, (_e, payload) => serverClient.bugUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverBugStatus, (_e, id, status) => serverClient.bugStatus(Number(id) || 0, String(status ?? '')))
+  ipcMain.handle(IpcChannels.serverBugDelete, (_e, id) => serverClient.bugDelete(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverPlanList, (_e, companyId, projectId) => serverClient.planList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverPlanCreate, (_e, payload) => serverClient.planCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverPlanUpdate, (_e, payload) => serverClient.planUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverPlanDelete, (_e, id) => serverClient.planDelete(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverDocList, (_e, companyId, projectId) => serverClient.docList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverDocCreate, (_e, payload) => serverClient.docCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverDocUpdate, (_e, payload) => serverClient.docUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverDocDelete, (_e, id) => serverClient.docDelete(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverWikiList, (_e, companyId, projectId) => serverClient.wikiList(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverWikiCreate, (_e, payload) => serverClient.wikiCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverWikiUpdate, (_e, payload) => serverClient.wikiUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverWikiDelete, (_e, id) => serverClient.wikiDelete(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverPmDashboard, (_e, companyId, projectId) => serverClient.pmDashboard(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+  ipcMain.handle(IpcChannels.serverPmMemberTracking, (_e, companyId, projectId) => serverClient.pmMemberTracking(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)

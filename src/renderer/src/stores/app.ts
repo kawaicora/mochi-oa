@@ -562,6 +562,127 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverTaskDecideExtension(activeCompanyId.value, taskId, extensionId, approved)
     return { ok: ack.ok, error: ack.error, extension: d<{ extension: TaskExtension }>(ack)?.extension }
   }
+
+  // ─── TAPD 项目管理 ───
+  type ReqCategory = 'uncategorized' | 'product' | 'tech'
+  type ReqPriority = 'nth' | 'middle' | 'high'
+  type ReqStatus = 'planning' | 'in_progress' | 'done' | 'closed'
+  type RequirementItem = { id: number; companyId: number; projectId: number | null; code: string; title: string; description: string; category: ReqCategory; priority: ReqPriority; status: ReqStatus; handlerId: number | null; creatorId: number; startTime: string; dueTime: string; completedTime: string | null; linkedTaskIds: number[]; createdAt: string; updatedAt: string; handlerName?: string; creatorName?: string }
+  type BugSeverityStr = 'minor' | 'normal' | 'major' | 'critical'
+  type BugPriorityStr = 'low' | 'middle' | 'high'
+  type BugStatusStr = 'pending' | 'processing' | 'verified' | 'closed'
+  type BugItem = { id: number; companyId: number; projectId: number | null; requirementId: number | null; code: string; title: string; description: string; severity: BugSeverityStr; priority: BugPriorityStr; status: BugStatusStr; handlerId: number | null; creatorId: number; foundVersion: string; createdAt: string; updatedAt: string; handlerName?: string; creatorName?: string }
+  type PlanItem = { id: number; companyId: number; projectId: number | null; name: string; description: string; startTime: string; dueTime: string; status: string; creatorId: number; createdAt: string; updatedAt: string }
+  type DocItem = { id: number; companyId: number; projectId: number | null; title: string; content: string; creatorId: number; createdAt: string; updatedAt: string }
+  type WikiItem = DocItem
+  type DashboardItem = { newRequirement30d: number; overdueRequirement: number; bugResolveRate: number; unresolvedBug: number; requirementByStatus: Record<string, number>; bugBySeverity: Record<string, number> }
+  type MemberTrackItem = { userId: number; nick: string; username: string; total: number; completed: number; inProgress: number; overdue: number }
+
+  async function fetchRequirements(projectId?: number): Promise<RequirementItem[]> {
+    const ack = await window.pantry.serverReqList(activeCompanyId.value, projectId)
+    return d<{ requirements: RequirementItem[] }>(ack)?.requirements ?? []
+  }
+  async function createRequirement(input: { projectId?: number; title: string; description?: string; category?: string; priority?: string; handlerId?: number; startTime: string; dueTime: string; taskIds?: number[] }): Promise<{ ok: boolean; error?: string; requirement?: RequirementItem }> {
+    const ack = await window.pantry.serverReqCreate({ companyId: activeCompanyId.value, projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null, title: String(input.title ?? ''), description: String(input.description ?? ''), category: String(input.category ?? ''), priority: String(input.priority ?? ''), handlerId: Number(input.handlerId ?? 0) || null, startTime: String(input.startTime ?? ''), dueTime: String(input.dueTime ?? ''), taskIds: Array.isArray(input.taskIds) ? input.taskIds.map((x) => Number(x)) : [] })
+    return { ok: ack.ok, error: ack.error, requirement: d<{ requirement: RequirementItem }>(ack)?.requirement }
+  }
+  async function updateRequirement(input: { id: number; title?: string; description?: string; category?: string; priority?: string; handlerId?: number | null; startTime?: string; dueTime?: string }): Promise<{ ok: boolean; error?: string; requirement?: RequirementItem }> {
+    const ack = await window.pantry.serverReqUpdate({ id: input.id, title: input.title, description: input.description, category: input.category, priority: input.priority, handlerId: input.handlerId, startTime: input.startTime, dueTime: input.dueTime })
+    return { ok: ack.ok, error: ack.error, requirement: d<{ requirement: RequirementItem }>(ack)?.requirement }
+  }
+  async function setRequirementStatus(id: number, status: ReqStatus): Promise<{ ok: boolean; error?: string; requirement?: RequirementItem }> {
+    const ack = await window.pantry.serverReqStatus(id, status)
+    return { ok: ack.ok, error: ack.error, requirement: d<{ requirement: RequirementItem }>(ack)?.requirement }
+  }
+  async function deleteRequirement(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverReqDelete(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+  async function linkRequirementTasks(id: number, taskIds: number[]): Promise<{ ok: boolean; error?: string; linkedTaskIds?: number[] }> {
+    const ack = await window.pantry.serverReqLinkTasks(id, taskIds)
+    return { ok: ack.ok, error: ack.error, linkedTaskIds: d<{ linkedTaskIds: number[] }>(ack)?.linkedTaskIds }
+  }
+
+  async function fetchBugs(projectId?: number): Promise<BugItem[]> {
+    const ack = await window.pantry.serverBugList(activeCompanyId.value, projectId)
+    return d<{ bugs: BugItem[] }>(ack)?.bugs ?? []
+  }
+  async function createBug(input: { projectId?: number; requirementId?: number; title: string; description?: string; severity?: string; priority?: string; handlerId?: number; foundVersion?: string }): Promise<{ ok: boolean; error?: string; bug?: BugItem }> {
+    const ack = await window.pantry.serverBugCreate({ companyId: activeCompanyId.value, projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null, requirementId: input.requirementId && input.requirementId > 0 ? Number(input.requirementId) : null, title: String(input.title ?? ''), description: String(input.description ?? ''), severity: String(input.severity ?? ''), priority: String(input.priority ?? ''), handlerId: Number(input.handlerId ?? 0) || null, foundVersion: String(input.foundVersion ?? '') })
+    return { ok: ack.ok, error: ack.error, bug: d<{ bug: BugItem }>(ack)?.bug }
+  }
+  async function updateBug(input: { id: number; title?: string; description?: string; severity?: string; priority?: string; handlerId?: number | null; foundVersion?: string }): Promise<{ ok: boolean; error?: string; bug?: BugItem }> {
+    const ack = await window.pantry.serverBugUpdate({ id: input.id, title: input.title, description: input.description, severity: input.severity, priority: input.priority, handlerId: input.handlerId, foundVersion: input.foundVersion })
+    return { ok: ack.ok, error: ack.error, bug: d<{ bug: BugItem }>(ack)?.bug }
+  }
+  async function setBugStatus(id: number, status: BugStatusStr): Promise<{ ok: boolean; error?: string; bug?: BugItem }> {
+    const ack = await window.pantry.serverBugStatus(id, status)
+    return { ok: ack.ok, error: ack.error, bug: d<{ bug: BugItem }>(ack)?.bug }
+  }
+  async function deleteBug(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverBugDelete(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  async function fetchPlans(projectId?: number): Promise<PlanItem[]> {
+    const ack = await window.pantry.serverPlanList(activeCompanyId.value, projectId)
+    return d<{ plans: PlanItem[] }>(ack)?.plans ?? []
+  }
+  async function createPlan(input: { projectId?: number; name: string; description?: string; startTime: string; dueTime: string }): Promise<{ ok: boolean; error?: string; plan?: PlanItem }> {
+    const ack = await window.pantry.serverPlanCreate({ companyId: activeCompanyId.value, projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null, name: String(input.name ?? ''), description: String(input.description ?? ''), startTime: String(input.startTime ?? ''), dueTime: String(input.dueTime ?? '') })
+    return { ok: ack.ok, error: ack.error, plan: d<{ plan: PlanItem }>(ack)?.plan }
+  }
+  async function updatePlan(input: { id: number; name?: string; description?: string; startTime?: string; dueTime?: string; status?: string }): Promise<{ ok: boolean; error?: string; plan?: PlanItem }> {
+    const ack = await window.pantry.serverPlanUpdate({ id: input.id, name: input.name, description: input.description, startTime: input.startTime, dueTime: input.dueTime, status: input.status })
+    return { ok: ack.ok, error: ack.error, plan: d<{ plan: PlanItem }>(ack)?.plan }
+  }
+  async function deletePlan(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverPlanDelete(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  async function fetchDocs(projectId?: number): Promise<DocItem[]> {
+    const ack = await window.pantry.serverDocList(activeCompanyId.value, projectId)
+    return d<{ docs: DocItem[] }>(ack)?.docs ?? []
+  }
+  async function createDoc(input: { projectId?: number; title: string; content?: string }): Promise<{ ok: boolean; error?: string; doc?: DocItem }> {
+    const ack = await window.pantry.serverDocCreate({ companyId: activeCompanyId.value, projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null, title: String(input.title ?? ''), content: String(input.content ?? '') })
+    return { ok: ack.ok, error: ack.error, doc: d<{ doc: DocItem }>(ack)?.doc }
+  }
+  async function updateDoc(input: { id: number; title?: string; content?: string }): Promise<{ ok: boolean; error?: string; doc?: DocItem }> {
+    const ack = await window.pantry.serverDocUpdate({ id: input.id, title: input.title, content: input.content })
+    return { ok: ack.ok, error: ack.error, doc: d<{ doc: DocItem }>(ack)?.doc }
+  }
+  async function deleteDoc(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverDocDelete(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  async function fetchWiki(projectId?: number): Promise<WikiItem[]> {
+    const ack = await window.pantry.serverWikiList(activeCompanyId.value, projectId)
+    return d<{ pages: WikiItem[] }>(ack)?.pages ?? []
+  }
+  async function createWiki(input: { projectId?: number; title: string; content?: string }): Promise<{ ok: boolean; error?: string; page?: WikiItem }> {
+    const ack = await window.pantry.serverWikiCreate({ companyId: activeCompanyId.value, projectId: input.projectId && input.projectId > 0 ? Number(input.projectId) : null, title: String(input.title ?? ''), content: String(input.content ?? '') })
+    return { ok: ack.ok, error: ack.error, page: d<{ page: WikiItem }>(ack)?.page }
+  }
+  async function updateWiki(input: { id: number; title?: string; content?: string }): Promise<{ ok: boolean; error?: string; page?: WikiItem }> {
+    const ack = await window.pantry.serverWikiUpdate({ id: input.id, title: input.title, content: input.content })
+    return { ok: ack.ok, error: ack.error, page: d<{ page: WikiItem }>(ack)?.page }
+  }
+  async function deleteWiki(id: number): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverWikiDelete(id)
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  async function fetchDashboard(projectId?: number): Promise<DashboardItem | null> {
+    const ack = await window.pantry.serverPmDashboard(activeCompanyId.value, projectId)
+    return d<{ stats: DashboardItem }>(ack)?.stats ?? null
+  }
+  async function fetchMemberTracking(projectId?: number): Promise<MemberTrackItem[]> {
+    const ack = await window.pantry.serverPmMemberTracking(activeCompanyId.value, projectId)
+    return d<{ members: MemberTrackItem[] }>(ack)?.members ?? []
+  }
   async function addCompanyMember(target: number | string, departmentId?: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverAddCompanyMember(activeCompanyId.value, target, departmentId ?? undefined)
     if (ack.ok) await refreshMembers()
@@ -983,6 +1104,31 @@ export const useAppStore = defineStore('app', () => {
     resolveTaskIssue,
     requestExtension,
     decideExtension,
+    fetchRequirements,
+    createRequirement,
+    updateRequirement,
+    setRequirementStatus,
+    deleteRequirement,
+    linkRequirementTasks,
+    fetchBugs,
+    createBug,
+    updateBug,
+    setBugStatus,
+    deleteBug,
+    fetchPlans,
+    createPlan,
+    updatePlan,
+    deletePlan,
+    fetchDocs,
+    createDoc,
+    updateDoc,
+    deleteDoc,
+    fetchWiki,
+    createWiki,
+    updateWiki,
+    deleteWiki,
+    fetchDashboard,
+    fetchMemberTracking,
     createDepartment,
     deleteDepartment,
     assignToDepartment,

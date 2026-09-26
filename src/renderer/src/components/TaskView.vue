@@ -2,6 +2,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
+import ReqView from './ReqView.vue'
+import BugView from './BugView.vue'
+import PlanView from './PlanView.vue'
+import DocView from './DocView.vue'
+import WikiView from './WikiView.vue'
+import DashView from './DashView.vue'
+import MemberTrackView from './MemberTrackView.vue'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -20,6 +27,7 @@ const projects = ref<Project[]>([])
 const tasks = ref<Task[]>([])
 const activeProject = ref(0)
 const view = ref<'list' | 'board' | 'gantt'>('board')
+const module = ref<'task' | 'req' | 'bug' | 'plan' | 'doc' | 'wiki' | 'dash' | 'members'>('task')
 const loading = ref(false)
 const err = ref('')
 
@@ -343,9 +351,21 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
       </div>
     </div>
 
+    <!-- TAPD 模块导航 -->
+    <div class="tv-modules">
+      <button :class="{ on: module === 'task' }" @click="module = 'task'"><i class="fas fa-tasks"></i> 任务</button>
+      <button :class="{ on: module === 'req' }" @click="module = 'req'"><i class="fas fa-bullseye"></i> 需求</button>
+      <button :class="{ on: module === 'bug' }" @click="module = 'bug'"><i class="fas fa-bug"></i> 缺陷</button>
+      <button :class="{ on: module === 'plan' }" @click="module = 'plan'"><i class="fas fa-calendar-check"></i> 计划</button>
+      <button :class="{ on: module === 'doc' }" @click="module = 'doc'"><i class="fas fa-file-alt"></i> 文档</button>
+      <button :class="{ on: module === 'wiki' }" @click="module = 'wiki'"><i class="fas fa-book"></i> Wiki</button>
+      <button :class="{ on: module === 'dash' }" @click="module = 'dash'"><i class="fas fa-chart-pie"></i> 仪表盘</button>
+      <button :class="{ on: module === 'members' }" @click="module = 'members'"><i class="fas fa-users"></i> 成员跟踪</button>
+    </div>
+
     <div v-if="err" class="tv-err">{{ err }}</div>
 
-    <!-- 项目筛选 -->
+    <!-- 项目筛选（所有模块共用） -->
     <div class="tv-projects">
       <button class="tv-proj" :class="{ on: activeProject === 0 }" @click="activeProject = 0; loadTasks()">全部</button>
       <button v-for="p in projects" :key="p.id" class="tv-proj" :class="{ on: activeProject === p.id }" @click="activeProject = p.id; loadTasks()">
@@ -353,6 +373,18 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
       </button>
     </div>
 
+    <!-- TAPD 模块视图 -->
+    <div v-if="module !== 'task'" class="tv-module-body">
+      <ReqView v-if="module === 'req'" :project-id="activeProject" />
+      <BugView v-if="module === 'bug'" :project-id="activeProject" />
+      <PlanView v-if="module === 'plan'" :project-id="activeProject" />
+      <DocView v-if="module === 'doc'" :project-id="activeProject" />
+      <WikiView v-if="module === 'wiki'" :project-id="activeProject" />
+      <DashView v-if="module === 'dash'" :project-id="activeProject" />
+      <MemberTrackView v-if="module === 'members'" :project-id="activeProject" />
+    </div>
+
+    <template v-if="module === 'task'">
     <!-- 视图切换 -->
     <div class="tv-views">
       <button :class="{ on: view === 'list' }" @click="view = 'list'"><i class="fas fa-list"></i> 列表</button>
@@ -648,11 +680,18 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .task-view { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.tv-modules { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; flex-wrap: wrap; }
+.tv-modules button { border: none; background: transparent; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--dt-text-3); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 6px; }
+.tv-modules button:hover { background: #f0f3f6; }
+.tv-modules button.on { color: var(--dt-primary); font-weight: 700; box-shadow: inset 0 -2px 0 var(--dt-primary); }
+.tv-module-body { flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.tv-module-body > * { width: 100%; height: 100%; }
 .tv-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
 .tv-title { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .tv-actions { display: flex; gap: 8px; }

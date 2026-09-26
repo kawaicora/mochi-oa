@@ -1079,6 +1079,108 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'task:decideExtension', { companyId, taskId, extensionId, approved })
   }
+
+  // ─── TAPD 项目管理 ─────────
+  async reqList(companyId: number, projectId?: number): Promise<Ack & { data?: { requirements: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:list', { companyId, projectId: projectId ?? null })
+  }
+  async reqCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { requirement: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:create', payload)
+  }
+  async reqUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { requirement: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:update', payload)
+  }
+  async reqStatus(id: number, status: string): Promise<Ack & { data?: { requirement: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:status', { id, status })
+  }
+  async reqDelete(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:delete', { id })
+  }
+  async reqLinkTasks(id: number, taskIds: number[]): Promise<Ack & { data?: { linkedTaskIds: number[] } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'req:linkTasks', { id, taskIds })
+  }
+  async bugList(companyId: number, projectId?: number): Promise<Ack & { data?: { bugs: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'bug:list', { companyId, projectId: projectId ?? null })
+  }
+  async bugCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { bug: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'bug:create', payload)
+  }
+  async bugUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { bug: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'bug:update', payload)
+  }
+  async bugStatus(id: number, status: string): Promise<Ack & { data?: { bug: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'bug:status', { id, status })
+  }
+  async bugDelete(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'bug:delete', { id })
+  }
+  async planList(companyId: number, projectId?: number): Promise<Ack & { data?: { plans: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'plan:list', { companyId, projectId: projectId ?? null })
+  }
+  async planCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { plan: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'plan:create', payload)
+  }
+  async planUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { plan: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'plan:update', payload)
+  }
+  async planDelete(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'plan:delete', { id })
+  }
+  async docList(companyId: number, projectId?: number): Promise<Ack & { data?: { docs: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'doc:list', { companyId, projectId: projectId ?? null })
+  }
+  async docCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { doc: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'doc:create', payload)
+  }
+  async docUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { doc: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'doc:update', payload)
+  }
+  async docDelete(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'doc:delete', { id })
+  }
+  async wikiList(companyId: number, projectId?: number): Promise<Ack & { data?: { pages: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'wiki:list', { companyId, projectId: projectId ?? null })
+  }
+  async wikiCreate(payload: Record<string, unknown>): Promise<Ack & { data?: { page: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'wiki:create', payload)
+  }
+  async wikiUpdate(payload: Record<string, unknown>): Promise<Ack & { data?: { page: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'wiki:update', payload)
+  }
+  async wikiDelete(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'wiki:delete', { id })
+  }
+  async pmDashboard(companyId: number, projectId?: number): Promise<Ack & { data?: { stats: Record<string, unknown> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'pm:dashboard', { companyId, projectId: projectId ?? null })
+  }
+  async pmMemberTracking(companyId: number, projectId?: number): Promise<Ack & { data?: { members: Array<Record<string, unknown>> } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'pm:memberTracking', { companyId, projectId: projectId ?? null })
+  }
 }
 
 export const serverClient = new ServerClient()

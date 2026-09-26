@@ -206,6 +206,33 @@ const api = {
   serverTaskRequestExtension: (taskId: number, dt: string, reason: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskRequestExtension, taskId, dt, reason),
   serverTaskDecideExtension: (companyId: number, taskId: number, extensionId: number, approved: boolean): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskDecideExtension, companyId, taskId, extensionId, approved),
 
+  // TAPD 项目管理
+  serverReqList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqList, companyId, projectId),
+  serverReqCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqCreate, payload),
+  serverReqUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqUpdate, payload),
+  serverReqStatus: (id: number, status: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqStatus, id, status),
+  serverReqDelete: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqDelete, id),
+  serverReqLinkTasks: (id: number, taskIds: number[]): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReqLinkTasks, id, taskIds),
+  serverBugList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverBugList, companyId, projectId),
+  serverBugCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverBugCreate, payload),
+  serverBugUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverBugUpdate, payload),
+  serverBugStatus: (id: number, status: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverBugStatus, id, status),
+  serverBugDelete: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverBugDelete, id),
+  serverPlanList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPlanList, companyId, projectId),
+  serverPlanCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPlanCreate, payload),
+  serverPlanUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPlanUpdate, payload),
+  serverPlanDelete: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPlanDelete, id),
+  serverDocList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverDocList, companyId, projectId),
+  serverDocCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverDocCreate, payload),
+  serverDocUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverDocUpdate, payload),
+  serverDocDelete: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverDocDelete, id),
+  serverWikiList: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverWikiList, companyId, projectId),
+  serverWikiCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverWikiCreate, payload),
+  serverWikiUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverWikiUpdate, payload),
+  serverWikiDelete: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverWikiDelete, id),
+  serverPmDashboard: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPmDashboard, companyId, projectId),
+  serverPmMemberTracking: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPmMemberTracking, companyId, projectId),
+
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverUpload, filePath, companyId ?? 0),
