@@ -16,8 +16,8 @@ class VideoStream {
   private placeholderStream: MediaStream | null = null
   private placeholderTimer: number | null = null
 
-  // 频谱头像流（无摄像头时的本地视频轨）
-  private voiceStreamCache: { stream: MediaStream; stop: () => void } | null = null
+  // 频谱+头像流（无摄像头时的默认视频轨）
+  private divStreamCache: { stream: MediaStream; stop: () => void } | null = null
 
   // 静音空音频
   private silentAudioCtx: AudioContext | null = null
@@ -148,26 +148,26 @@ class VideoStream {
     }
   }
 
-  // ─── 频谱头像流（无摄像头时的默认视频轨）─────────────────
+  // ─── 频谱 + 头像（无摄像头时的默认视频轨）──────────────
 
   /**
-   * 创建"头像+频谱"视频流（离屏 canvas）：圆形头像 + 左右声道实时环形频谱。
-   * 无摄像头时作为视频轨发送给远端；同一本地音频轨复用同一流。
-   * @returns MediaStream | null（audioStream 无音频轨或 captureStream 失败时为 null）
+   * 生成"头像+频谱"视频流（canvas）：圆形头像 + 左右声道实时环形频谱。
+   * 不绘制名字；无摄像头时作为视频轨，本地与远端同步显示。
    */
-  GetVoiceStream(
+  getDivStream(
     audioStream: MediaStream | null,
-    opts: { size?: number; nick?: string; avatar?: string } = {}
+    opts: { size?: number; avatar?: string } = {}
   ): MediaStream | null {
     const track = audioStream?.getAudioTracks()[0]
     if (!track) return null
-    if (this.voiceStreamCache) return this.voiceStreamCache.stream
+    if (this.divStreamCache) return this.divStreamCache.stream
 
-    const size = opts.size ?? 180
+    const h = opts.size ?? 180
+    const w = Math.round((h * 16) / 9)
     const dpr = window.devicePixelRatio || 1
     const canvas = document.createElement('canvas')
-    canvas.width = size * dpr
-    canvas.height = size * dpr
+    canvas.width = w * dpr
+    canvas.height = h * dpr
     const g = canvas.getContext('2d')!
     let raf = 0
     let running = true
@@ -201,25 +201,35 @@ class VideoStream {
     }
 
     if (opts.avatar) {
-      avatarImg = new Image()
-      avatarImg.crossOrigin = 'anonymous'
-      avatarImg.onload = () => { /* 加载完成后下一帧自动重绘 */ }
-      avatarImg.src = opts.avatar
+      // 优先 fetch 转 blob（安全不污染 canvas）；失败回退 crossOrigin img
+      void fetch(opts.avatar)
+        .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('bad'))))
+        .then((blob) => {
+          const img = new Image()
+          img.onload = () => { avatarImg = img }
+          img.src = URL.createObjectURL(blob)
+        })
+        .catch(() => {
+          const img = new Image()
+          img.crossOrigin = 'anonymous'
+          img.onload = () => { avatarImg = img }
+          img.src = opts.avatar ?? ''
+        })
     }
 
     // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
     const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string): void => {
-      const inner = size / 2 - 7
-      const outer = size / 2 - 1
+      const inner = h / 2 - 13
+      const outer = h / 2 - 3
       const n = Math.min(data.length, 64)
       for (let i = 0; i < n; i++) {
         const v = data[i] / 255
         const len = inner + v * (outer - inner)
         const a = startA + (i / n) * (endA - startA)
-        const x1 = size / 2 + Math.cos(a) * inner
-        const y1 = size / 2 + Math.sin(a) * inner
-        const x2 = size / 2 + Math.cos(a) * len
-        const y2 = size / 2 + Math.sin(a) * len
+        const x1 = w / 2 + Math.cos(a) * inner
+        const y1 = h / 2 + Math.sin(a) * inner
+        const x2 = w / 2 + Math.cos(a) * len
+        const y2 = h / 2 + Math.sin(a) * len
         g.strokeStyle = color.replace('ALPHA', (0.35 + v * 0.65).toFixed(2))
         g.lineWidth = 3
         g.lineCap = 'round'
@@ -233,16 +243,11 @@ class VideoStream {
     const draw = (): void => {
       if (!running) return
       g.setTransform(dpr, 0, 0, dpr, 0, 0)
-      g.clearRect(0, 0, size, size)
-      const cx = size / 2
-      const cy = size / 2
-      const faceR = size / 2 - 16
-      // 头像圆底
-      g.beginPath()
-      g.arc(cx, cy, faceR, 0, Math.PI * 2)
-      g.fillStyle = '#2d2d44'
-      g.fill()
-      // 头像：图片（圆形裁剪）或人像剪影
+      g.clearRect(0, 0, w, h)
+      const cx = w / 2
+      const cy = h / 2
+      const faceR = Math.round(h * 0.36)
+      // 中间：有头像 → 绘制头像图；无头像 → 蓝色渐变圆（不绘制名字）
       if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
         g.save()
         g.beginPath()
@@ -251,13 +256,12 @@ class VideoStream {
         g.drawImage(avatarImg, cx - faceR, cy - faceR, faceR * 2, faceR * 2)
         g.restore()
       } else {
-        g.fillStyle = '#8888aa'
+        const grad = g.createLinearGradient(cx - faceR, cy - faceR, cx + faceR, cy + faceR)
+        grad.addColorStop(0, '#1677ff')
+        grad.addColorStop(1, '#5cb6ff')
         g.beginPath()
-        g.arc(cx, cy - faceR * 0.4, faceR * 0.42, 0, Math.PI * 2)
-        g.fill()
-        g.beginPath()
-        g.arc(cx, cy + faceR * 0.62, faceR * 0.7, Math.PI * 1.06, Math.PI * -0.06)
-        g.closePath()
+        g.arc(cx, cy, faceR, 0, Math.PI * 2)
+        g.fillStyle = grad
         g.fill()
       }
       // 左右声道频谱环
@@ -289,9 +293,9 @@ class VideoStream {
       analyserL?.disconnect()
       analyserR?.disconnect()
       if (audioCtx) void audioCtx.close()
-      if (this.voiceStreamCache) this.voiceStreamCache = null
+      if (this.divStreamCache) this.divStreamCache = null
     }
-    this.voiceStreamCache = { stream, stop }
+    this.divStreamCache = { stream, stop }
     return stream
   }
 
