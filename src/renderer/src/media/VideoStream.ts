@@ -192,10 +192,10 @@ class VideoStream {
       splitter = audioCtx.createChannelSplitter(2)
       source.connect(splitter)
       analyserL = audioCtx.createAnalyser()
-      analyserL.fftSize = 2048
+      analyserL.fftSize = 1024
       analyserL.smoothingTimeConstant = 0.8
       analyserR = audioCtx.createAnalyser()
-      analyserR.fftSize = 2048
+      analyserR.fftSize = 1024
       analyserR.smoothingTimeConstant = 0.8
       splitter.connect(analyserL, 0)
       splitter.connect(analyserR, 1)
@@ -222,7 +222,7 @@ class VideoStream {
       const outer = faceR + 55
       // 只绘制 1-8000Hz：按采样率换算 FFT bin 数（fftSize=2048，48000Hz→约342bin）
       const rate = audioCtx?.sampleRate ?? 48000
-      const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 2048)))
+      const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 1024)))
       for (let i = 0; i < n; i++) {
         const v = Math.min(1, (data[i] / 255) * 1.5)
         const len = inner + v * (outer - inner)
