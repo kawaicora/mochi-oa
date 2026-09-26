@@ -15,7 +15,7 @@ function nameOf(): string {
   return decodeURIComponent(seg)
 }
 
-/** 本地缓存路径 → fetch app-file → blob → 可 seek 的 objectURL（app-file range 支持差，故转 blob） */
+/** 本地缓存路径 → 主进程 IPC 读文件字节 → blob → 可 seek 的 objectURL（绕开 app-file 协议） */
 async function load(): Promise<void> {
   const path = app.localCache[props.m.id]?.path
   if (!path) {
@@ -23,14 +23,13 @@ async function load(): Promise<void> {
     return
   }
   try {
-    const res = await fetch('app-file:///' + encodeURIComponent(path))
-    if (!res.ok) {
+    const r = await window.pantry.readAudioFile(path)
+    if (!r.ok || !r.data) {
       src.value = ''
       return
     }
-    const blob = await res.blob()
     if (objUrl) URL.revokeObjectURL(objUrl)
-    objUrl = URL.createObjectURL(blob)
+    objUrl = URL.createObjectURL(new Blob([r.data]))
     src.value = objUrl
   } catch {
     src.value = ''

@@ -70,13 +70,13 @@ function notify(a: Alarm): void {
   }
 }
 
-/** 播放本地音乐：fetch app-file 协议读成 blob → Audio 播放（绕开 registerFileProtocol 对音频 range 流请求支持不足的问题） */
+/** 播放本地音乐：主进程 IPC 读文件字节 → blob → Audio（绕开 app-file 协议对音频支持不稳的问题） */
 async function playRing(ring: string): Promise<void> {
   if (!ring) return
   try {
-    const res = await fetch(ringUrl(ring))
-    if (!res.ok) return
-    const blob = await res.blob()
+    const r = await window.pantry.readAudioFile(ring)
+    if (!r.ok || !r.data) return
+    const blob = new Blob([r.data])
     const objUrl = URL.createObjectURL(blob)
     const audio = new Audio(objUrl)
     audio.volume = 1

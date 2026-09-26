@@ -254,6 +254,7 @@ const api = {
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
   runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
+  readAudioFile: (path: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> => ipcRenderer.invoke(IpcChannels.audioReadFile, path),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)
 }
 

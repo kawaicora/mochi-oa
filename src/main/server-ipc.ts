@@ -6,7 +6,7 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { IpcChannels, IpcEvents } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig, saveServerConfig } from './server-config'
@@ -367,6 +367,17 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       child.on('error', () => {})
       child.unref()
       return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  // 读取本地音频文件字节（渲染层 blob 播放；绕开 app-file 协议对音频支持不稳的问题）
+  ipcMain.handle(IpcChannels.audioReadFile, async (_e, path) => {
+    if (typeof path !== 'string' || !path) return { ok: false, error: '路径无效' }
+    try {
+      const buf = await readFile(path)
+      return { ok: true, data: buf.buffer }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
