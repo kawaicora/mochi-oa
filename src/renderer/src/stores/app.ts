@@ -599,9 +599,19 @@ export const useAppStore = defineStore('app', () => {
       pendingUploads.value = pendingUploads.value.filter((x) => x.clientId !== clientId)
     }, 4000)
   }
+  /** 判断是否本地音频文件路径（粘贴发送时识别为 audio，而非纯文本） */
+  function isAudioFilePath(s: string): boolean {
+    if (!/\\.(mp3|wav|flac|aac|ogg|oga|opus|weba|m4a|m4b|wma|ac3|aiff|aif|au|amr|alac|mka|mid|midi|cda|cue)$/i.test(s)) return false
+    if (/^file:\/\//i.test(s)) return true
+    if (/^[a-zA-Z]:[\\/]/.test(s)) return true
+    if (/^\/[^/]/.test(s)) return true
+    return false
+  }
   async function sendText(text: string): Promise<boolean> {
     const s = selected.value
     if (!s || !text.trim()) return false
+    // 粘贴的是本地音频文件路径（而非纯文本）→ 走 sendFile 格式检查并记为对应音频格式
+    if (isAudioFilePath(text.trim())) return sendFile(text.trim())
     const ack =
       s.kind === 'group' && s.groupId
         ? await window.pantry.serverChatSend(s.groupId, text.trim(), 'text')
