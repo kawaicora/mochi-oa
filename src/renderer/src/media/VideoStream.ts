@@ -240,7 +240,7 @@ class VideoStream {
       }
     }
 
-    const draw = (): void => {
+    const drawFrame = (): void => {
       if (!running) return
       g.setTransform(dpr, 0, 0, dpr, 0, 0)
       g.clearRect(0, 0, w, h)
@@ -271,9 +271,14 @@ class VideoStream {
         drawHalf(dataL, Math.PI / 2, (Math.PI * 3) / 2, 'rgba(56,132,255,ALPHA)')
         drawHalf(dataR, -Math.PI / 2, Math.PI / 2, 'rgba(0,200,180,ALPHA)')
       }
-      raf = requestAnimationFrame(draw)
     }
-    raf = requestAnimationFrame(draw)
+    const loop = (): void => {
+      drawFrame()
+      raf = requestAnimationFrame(loop)
+    }
+    // captureStream 前同步先画一帧：确保发送流 ssrc 建立时即有画面，避免 No sending stream
+    drawFrame()
+    raf = requestAnimationFrame(loop)
 
     let stream: MediaStream
     try {
