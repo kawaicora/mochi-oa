@@ -182,6 +182,7 @@ class RtcEngine {
       const offer = await pc.createOffer()
       offer.sdp = EnforceStereo(offer.sdp ?? '')
       await pc.setLocalDescription(offer)
+      console.log('[RtcEngine] [发送offer] user=' + userId, 'sdpLen=' + (offer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'offer', sdp: offer.sdp ?? '' })
     } catch (err) {
       console.error('[RtcEngine] createOffer failed:', err)
@@ -215,6 +216,7 @@ class RtcEngine {
   }
 
   private async _handleOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
+    console.log('[RtcEngine] [收到offer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + pc.signalingState)
     try {
       // 若已有未完成的 remote offer，先回滚
       if (pc.signalingState === 'have-remote-offer') {
@@ -232,6 +234,7 @@ class RtcEngine {
   }
 
   private async _handleAnswer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
+    console.log('[RtcEngine] [收到answer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + pc.signalingState)
     try {
       // 仅当本地有未解决的 offer 时才接受 answer
       if (pc.signalingState === 'have-local-offer') {
@@ -245,6 +248,7 @@ class RtcEngine {
 
   private async _handleIce(pc: RTCPeerConnection, userId: number, signal: Extract<RtcSignalPayload, { type: 'ice' }>): Promise<void> {
     // 远端描述尚未 set：先缓存，待 offer/answer 处理完成后统一补加，避免 addIceCandidate 报 remote description was null
+    console.log('[RtcEngine] [收到ICE] user=' + userId, signal.candidate, 'cached=' + (pc.remoteDescription === null), 'sig=' + pc.signalingState)
     if (!pc.remoteDescription) {
       this._pendingIceArr(userId).push({
         candidate: signal.candidate,
