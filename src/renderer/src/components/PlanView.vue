@@ -31,12 +31,29 @@ const fmt = (s: string): string => { if (!s) return ''; const d = new Date(s); r
 
 const showCreate = ref(false)
 const cf = ref({ name: '', description: '', startTime: '', dueTime: '' })
+const plan = 'mochi:oa:plan:create-draft'
+// 草稿缓存：输入实时写本地；提交成功后清除
+watch(
+  cf,
+  () => { if (showCreate.value) { try { localStorage.setItem(plan, JSON.stringify(cf.value)) } catch { /* 忽略 */ } } },
+  { deep: true }
+)
+// 打开创建弹窗时恢复上次未提交草稿
+watch(showCreate, (v) => {
+  if (!v) return
+  try {
+    const d = JSON.parse(localStorage.getItem(plan) ?? 'null')
+    if (d) cf.value = { ...cf.value, ...d }
+  } catch { /* 忽略损坏草稿 */ }
+})
+
 async function submitCreate(): Promise<void> {
   const f = cf.value
   if (!f.name.trim()) { err.value = '计划名称不能为空'; return }
   if (!f.startTime || !f.dueTime) { err.value = '请填写开始与结束时间'; return }
   const r = await app.createPlan({ projectId: props.projectId, name: f.name.trim(), description: f.description.trim(), startTime: f.startTime, dueTime: f.dueTime })
   if (!r.ok) { err.value = r.error || '创建失败'; return }
+  try { localStorage.removeItem(plan) } catch { /* 忽略 */ }
   showCreate.value = false
   cf.value = { name: '', description: '', startTime: '', dueTime: '' }
   await load()

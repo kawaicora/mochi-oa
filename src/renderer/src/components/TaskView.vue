@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import ReqView from './ReqView.vue'
@@ -109,6 +109,8 @@ async function refresh(): Promise<void> {
 }
 
 // ─── 创建任务 ───
+// 创建任务草稿缓存：输入实时写本地，下次打开恢复；提交成功后清除
+const TASK_DRAFT_KEY = 'mochi:oa:task:create-draft'
 const showCreate = ref(false)
 const createForm = ref({ title: '', description: '', projectId: 0 as number, startTime: '', dueTime: '' })
 const createAssign = ref<Array<{ userId: number; content: string }>>([{ userId: 0, content: '' }])
@@ -118,8 +120,26 @@ function openCreate(): void {
   createErr.value = ''
   createForm.value = { title: '', description: '', projectId: activeProject.value, startTime: '', dueTime: '' }
   createAssign.value = [{ userId: 0, content: '' }]
+  // 恢复上次未提交的草稿
+  try {
+    const d = JSON.parse(localStorage.getItem(TASK_DRAFT_KEY) ?? 'null')
+    if (d) {
+      if (d.form) createForm.value = { ...createForm.value, ...d.form }
+      if (Array.isArray(d.assigns)) createAssign.value = d.assigns
+    }
+  } catch { /* 忽略损坏的草稿 */ }
   showCreate.value = true
 }
+// 输入时实时写本地缓存（仅弹窗打开时）
+watch(
+  [createForm, createAssign],
+  () => {
+    if (showCreate.value) {
+      try { localStorage.setItem(TASK_DRAFT_KEY, JSON.stringify({ form: createForm.value, assigns: createAssign.value })) } catch { /* 忽略 */ }
+    }
+  },
+  { deep: true }
+)
 function toIso(lt: string): string {
   if (!lt) return ''
   const d = new Date(lt)
@@ -134,6 +154,7 @@ async function submitCreate(): Promise<void> {
   const assigns = createAssign.value.filter((a) => a.userId > 0).map((a) => ({ userId: a.userId, content: a.content.trim() }))
   const r = await app.createTask({ projectId: f.projectId || undefined, title: f.title.trim(), description: f.description.trim(), startTime: st, dueTime: dt, images: [], assignments: assigns })
   if (!r.ok) { createErr.value = r.error || '创建失败'; return }
+  try { localStorage.removeItem(TASK_DRAFT_KEY) } catch { /* 忽略 */ }
   showCreate.value = false
   await loadTasks()
 }

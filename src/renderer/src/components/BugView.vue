@@ -36,11 +36,28 @@ const fmtTime = (s: string): string => { if (!s) return ''; const d = new Date(s
 
 const showCreate = ref(false)
 const cf = ref({ title: '', description: '', severity: 'normal', priority: 'middle', handlerId: 0, foundVersion: '' })
+const bug = 'mochi:oa:bug:create-draft'
+// 草稿缓存：输入实时写本地；提交成功后清除
+watch(
+  cf,
+  () => { if (showCreate.value) { try { localStorage.setItem(bug, JSON.stringify(cf.value)) } catch { /* 忽略 */ } } },
+  { deep: true }
+)
+// 打开创建弹窗时恢复上次未提交草稿
+watch(showCreate, (v) => {
+  if (!v) return
+  try {
+    const d = JSON.parse(localStorage.getItem(bug) ?? 'null')
+    if (d) cf.value = { ...cf.value, ...d }
+  } catch { /* 忽略损坏草稿 */ }
+})
+
 async function submitCreate(): Promise<void> {
   const f = cf.value
   if (!f.title.trim()) { err.value = '标题不能为空'; return }
   const r = await app.createBug({ projectId: props.projectId, title: f.title.trim(), description: f.description.trim(), severity: f.severity, priority: f.priority, handlerId: f.handlerId || undefined, foundVersion: f.foundVersion.trim() })
   if (!r.ok) { err.value = r.error || '创建失败'; return }
+  try { localStorage.removeItem(bug) } catch { /* 忽略 */ }
   showCreate.value = false
   cf.value = { title: '', description: '', severity: 'normal', priority: 'middle', handlerId: 0, foundVersion: '' }
   await load()

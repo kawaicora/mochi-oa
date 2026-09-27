@@ -43,12 +43,29 @@ const fmt = (s: string): string => { if (!s) return ''; const d = new Date(s); r
 // ── 创建 ──
 const showCreate = ref(false)
 const cf = ref({ title: '', description: '', category: 'uncategorized', priority: 'middle', handlerId: 0, startTime: '', dueTime: '' })
+const req = 'mochi:oa:req:create-draft'
+// 草稿缓存：输入实时写本地；提交成功后清除
+watch(
+  cf,
+  () => { if (showCreate.value) { try { localStorage.setItem(req, JSON.stringify(cf.value)) } catch { /* 忽略 */ } } },
+  { deep: true }
+)
+// 打开创建弹窗时恢复上次未提交草稿
+watch(showCreate, (v) => {
+  if (!v) return
+  try {
+    const d = JSON.parse(localStorage.getItem(req) ?? 'null')
+    if (d) cf.value = { ...cf.value, ...d }
+  } catch { /* 忽略损坏草稿 */ }
+})
+
 async function submitCreate(): Promise<void> {
   const f = cf.value
   if (!f.title.trim()) { err.value = '标题不能为空'; return }
   if (!f.startTime || !f.dueTime) { err.value = '请填写开始与结束时间'; return }
   const r = await app.createRequirement({ projectId: props.projectId, title: f.title.trim(), description: f.description.trim(), category: f.category, priority: f.priority, handlerId: f.handlerId || undefined, startTime: f.startTime, dueTime: f.dueTime })
   if (!r.ok) { err.value = r.error || '创建失败'; return }
+  try { localStorage.removeItem(req) } catch { /* 忽略 */ }
   showCreate.value = false
   cf.value = { title: '', description: '', category: 'uncategorized', priority: 'middle', handlerId: 0, startTime: '', dueTime: '' }
   await load()
