@@ -185,17 +185,18 @@ class VideoStream {
     let dataL = new Uint8Array(0)
     let dataR = new Uint8Array(0)
     let avatarImg: HTMLImageElement | null = null
-
+    let chunk = 4096;
+    let limitTopHz = 4000;
     try {
       audioCtx = new AudioContext()
       source = audioCtx.createMediaStreamSource(new MediaStream([track]))
       splitter = audioCtx.createChannelSplitter(2)
       source.connect(splitter)
       analyserL = audioCtx.createAnalyser()
-      analyserL.fftSize = 2048
+      analyserL.fftSize = chunk
       analyserL.smoothingTimeConstant = 0.0
       analyserR = audioCtx.createAnalyser()
-      analyserR.fftSize = 2048
+      analyserR.fftSize = chunk
       analyserR.smoothingTimeConstant = 0.0
       splitter.connect(analyserL, 0)
       splitter.connect(analyserR, 1)
@@ -217,12 +218,10 @@ class VideoStream {
 
     // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
     const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string, faceR: number): void => {
-      // 用满全部 fft 数据（1024 柱）；幅度范围拉大 + 增益，让频谱明显
       const inner = faceR + 2
       const outer = faceR + 80
-      // 只绘制 1-8000Hz：按采样率换算 FFT bin 数（fftSize=2048，48000Hz→约342bin）
       const rate = audioCtx?.sampleRate ?? 48000
-      const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 1024)))
+      const n = Math.min(data.length, Math.max(1, Math.floor((limitTopHz / rate) * chunk)))
       for (let i = 0; i < n; i++) {
         const v = data[i] / 255//Math.min(1, (data[i] / 255) * 1.5)
         const len = inner + v * (outer - inner)
@@ -231,8 +230,8 @@ class VideoStream {
         const y1 = h / 2 + Math.sin(a) * inner
         const x2 = w / 2 + Math.cos(a) * len
         const y2 = h / 2 + Math.sin(a) * len
-        g.strokeStyle = color.replace('ALPHA', (0.35 + v * 0.65).toFixed(2))
-        g.lineWidth = 5
+        g.strokeStyle = color.replace('ALPHA', (0.2 + v * 0.65).toFixed(2))
+        g.lineWidth = 4
         g.lineCap = 'round'
         g.beginPath()
         g.moveTo(x1, y1)

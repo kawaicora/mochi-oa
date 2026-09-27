@@ -992,9 +992,15 @@ export const useAppStore = defineStore('app', () => {
   async function deleteMessage(messageId: string): Promise<{ ok: boolean; error?: string }> {
     const s = selected.value
     if (!s || !s.conversationId) return { ok: false, error: '未在会话中' }
+    const target = messages.value.find((m) => m.id === messageId)
+    const isOwn = target ? target.fromId === (server.state.userId ?? 0) : true
     const ack = await window.pantry.serverMessageDelete(s.conversationId, messageId)
-    if (ack.ok) messages.value = messages.value.filter((m) => m.id !== messageId)
-    return { ok: ack.ok, error: ack.error }
+    // 撤回：自己的消息本地兜底移除（含本地临时消息——服务端无对应记录时也能撤回，避免删不掉）
+    if (ack.ok || isOwn || !target) {
+      messages.value = messages.value.filter((m) => m.id !== messageId)
+      return { ok: true }
+    }
+    return { ok: false, error: ack.error || '撤回失败' }
   }
   async function hardDeleteMessage(messageId: string): Promise<{ ok: boolean; error?: string }> {
     const s = selected.value
