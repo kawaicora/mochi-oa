@@ -9,6 +9,7 @@ import DocView from './DocView.vue'
 import WikiView from './WikiView.vue'
 import DashView from './DashView.vue'
 import MemberTrackView from './MemberTrackView.vue'
+import DateTimeInput from './DateTimeInput.vue'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -607,8 +608,8 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
           <div class="tv-form-sec">
             <label class="tv-lab">时间安排</label>
             <div class="tv-two">
-              <div><label class="tv-lab">开始时间 <i class="req">*</i></label><input v-model="createForm.startTime" type="datetime-local" class="srv-input" /></div>
-              <div><label class="tv-lab">预期结束时间 <i class="req">*</i></label><input v-model="createForm.dueTime" type="datetime-local" class="srv-input" /></div>
+              <div><label class="tv-lab">开始时间 <i class="req">*</i></label><DateTimeInput v-model="createForm.startTime" /></div>
+              <div><label class="tv-lab">预期结束时间 <i class="req">*</i></label><DateTimeInput v-model="createForm.dueTime" /></div>
             </div>
           </div>
           <div class="tv-form-sec">
@@ -653,7 +654,7 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
         <div class="modal-head">申请延期</div>
         <div class="modal-body">
           <label class="tv-lab">新截止时间</label>
-          <input v-model="extModal.requestedDueTime" type="datetime-local" class="srv-input" />
+          <DateTimeInput v-model="extModal.requestedDueTime" />
           <label class="tv-lab">延期原因（必填）</label>
           <textarea v-model="extModal.reason" class="srv-input" rows="3" placeholder="延期原因"></textarea>
         </div>

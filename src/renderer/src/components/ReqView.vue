@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
+import DateTimeInput from './DateTimeInput.vue'
 import { useServerStore } from '../stores/server'
 
 const props = defineProps<{ projectId?: number }>()
@@ -115,8 +116,8 @@ async function onDelete(r: Req): Promise<void> {
           <label class="pm-lab">处理人</label>
           <select v-model.number="cf.handlerId" class="srv-select"><option :value="0">不指派</option><option v-for="m in app.members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option></select>
           <div class="pm-two">
-            <div><label class="pm-lab">预计开始 <i class="req">*</i></label><input v-model="cf.startTime" type="datetime-local" class="srv-input" /></div>
-            <div><label class="pm-lab">预计结束 <i class="req">*</i></label><input v-model="cf.dueTime" type="datetime-local" class="srv-input" /></div>
+            <div><label class="pm-lab">预计开始 <i class="req">*</i></label><DateTimeInput v-model="cf.startTime" /></div>
+            <div><label class="pm-lab">预计结束 <i class="req">*</i></label><DateTimeInput v-model="cf.dueTime" /></div>
           </div>
           <label class="pm-lab">描述</label>
           <textarea v-model="cf.description" class="srv-input" rows="3" placeholder="需求描述"></textarea>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
+import DateTimeInput from './DateTimeInput.vue'
 
 const props = defineProps<{ projectId?: number }>()
 const app = useAppStore()
@@ -128,8 +129,8 @@ const wl = (w: { s: Date; e: Date }): string => `${w.s.getMonth() + 1}.${w.s.get
           <label class="pm-lab">计划名称 <i class="req">*</i></label>
           <input v-model="cf.name" class="srv-input" placeholder="计划名称" />
           <div class="pm-two">
-            <div><label class="pm-lab">开始 <i class="req">*</i></label><input v-model="cf.startTime" type="datetime-local" class="srv-input" /></div>
-            <div><label class="pm-lab">结束 <i class="req">*</i></label><input v-model="cf.dueTime" type="datetime-local" class="srv-input" /></div>
+            <div><label class="pm-lab">开始 <i class="req">*</i></label><DateTimeInput v-model="cf.startTime" /></div>
+            <div><label class="pm-lab">结束 <i class="req">*</i></label><DateTimeInput v-model="cf.dueTime" /></div>
           </div>
           <label class="pm-lab">描述</label>
           <textarea v-model="cf.description" class="srv-input" rows="3" placeholder="计划描述"></textarea>
