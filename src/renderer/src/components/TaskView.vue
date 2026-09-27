@@ -327,10 +327,21 @@ function projectName(id: number | null): string {
   return p ? p.name : '未归属'
 }
 
-// ─── 甘特图：按周刻度时间轴，任务条横跨 开始→结束 ───
-interface GanttWeek { start: Date; end: Date }
+// ─── 甘特图：按天刻度时间轴，固定像素精确对齐，日/月/年三层标注 ───
+const GANTT_DAY_W = 44 // 每格宽度 px
+interface GanttDay { d: Date; label: string; left: number }
+interface GanttSpan { label: string; left: number; width: number }
 interface GanttRow { t: Task; left: number; width: number }
-const gantt = computed(() => {
+interface GanttData {
+  days: GanttDay[]
+  months: GanttSpan[]
+  years: GanttSpan[]
+  rows: GanttRow[]
+  todayPx: number
+  axisW: number
+}
+const floorDay = (x: number): Date => { const d = new Date(x); d.setHours(0, 0, 0, 0); return d }
+const gantt = computed<GanttData | null>(() => {
   if (!tasks.value.length) return null
   let min = Infinity, max = -Infinity
   for (const t of tasks.value) {
@@ -339,29 +350,51 @@ const gantt = computed(() => {
     if (Number.isFinite(e) && e > max) max = e
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return null
-  const start = new Date(min)
-  start.setHours(0, 0, 0, 0)
-  const cursor = new Date(start)
-  cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7)) // 对齐到周一
-  const weeks: GanttWeek[] = []
-  while (cursor <= new Date(max)) {
-    const ws = new Date(cursor)
-    const we = new Date(cursor); we.setDate(we.getDate() + 6)
-    weeks.push({ start: ws, end: we })
-    cursor.setDate(cursor.getDate() + 7)
+  const now0 = floorDay(Date.now())
+  if (now0.getTime() < min) min = now0.getTime()
+  if (now0.getTime() > max) max = now0.getTime()
+  const start = floorDay(min)
+  const end = floorDay(max)
+  const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1
+  const axisW = totalDays * GANTT_DAY_W
+  // 每天一格
+  const days: GanttDay[] = []
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i)
+    days.push({ d, label: `${d.getMonth() + 1}.${d.getDate()}`, left: i * GANTT_DAY_W })
   }
-  if (!weeks.length) return null
-  const t0 = weeks[0].start.getTime()
-  const t1 = weeks[weeks.length - 1].end.getTime() + 86400000
-  const total = t1 - t0
+  // 月标注：每月 1 号起 merge 到当月最后一天
+  const months: GanttSpan[] = []
+  for (let i = 0; i < totalDays; i++) {
+    const d = days[i].d
+    if (d.getDate() === 1) {
+      const mDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+      const span = Math.min(mDays, totalDays - i)
+      months.push({ label: `${d.getMonth() + 1}月`, left: days[i].left, width: span * GANTT_DAY_W })
+      i += span - 1
+    }
+  }
+  // 年标注：每年 1 月 1 日起 merge 到年底
+  const years: GanttSpan[] = []
+  for (let i = 0; i < totalDays; i++) {
+    const d = days[i].d
+    if (d.getMonth() === 0 && d.getDate() === 1) {
+      const yDays = Math.round((new Date(d.getFullYear() + 1, 0, 1).getTime() - d.getTime()) / 86400000)
+      const span = Math.min(yDays, totalDays - i)
+      years.push({ label: `${d.getFullYear()}年`, left: days[i].left, width: span * GANTT_DAY_W })
+      i += span - 1
+    }
+  }
   const rows: GanttRow[] = tasks.value.map((t) => {
-    const s = Math.max(Date.parse(t.startTime), t0)
-    const e = Math.min(Date.parse(t.dueTime), t1)
-    return { t, left: ((s - t0) / total) * 100, width: Math.max(((e - s) / total) * 100, 2) }
+    const s0 = floorDay(Math.max(Date.parse(t.startTime), start.getTime()))
+    const e0 = floorDay(Math.min(Date.parse(t.dueTime), end.getTime()))
+    const left = ((s0.getTime() - start.getTime()) / 86400000) * GANTT_DAY_W
+    const width = Math.max((((e0.getTime() - s0.getTime()) / 86400000) + 1) * GANTT_DAY_W, 8)
+    return { t, left, width }
   }).sort((a, b) => Date.parse(a.t.startTime) - Date.parse(b.t.startTime))
-  return { weeks, rows, todayPct: Math.max(0, Math.min(100, ((Date.now() - t0) / total) * 100)) }
+  const todayPx = ((now0.getTime() - start.getTime()) / 86400000) * GANTT_DAY_W
+  return { days, months, years, rows, todayPx, axisW }
 })
-const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDate()} - ${w.end.getMonth() + 1}.${w.end.getDate()}`
 </script>
 
 <template>
@@ -466,24 +499,24 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
       </table>
     </div>
 
-    <!-- 甘特图视图 -->
+    <!-- 甘特图视图：按天刻度，日/月/年三层时间轴，精确对齐 -->
     <div v-if="view === 'gantt'" class="tv-gantt">
       <div v-if="!gantt" class="tv-empty">没有可绘制的时间范围</div>
-      <template v-else>
-        <div class="tg-head">
-          <div class="tg-label-col"></div>
-          <div class="tg-axis">
-            <div v-for="w in gantt.weeks" :key="w.start.getTime()" class="tg-week">{{ wl(w) }}</div>
-          </div>
+      <div v-else class="tg-scroll">
+        <div class="tg-axis" :style="{ width: gantt.axisW + 'px' }">
+          <div class="tg-head-label">任务</div>
+          <div v-for="y in gantt.years" :key="'y' + y.left" class="tg-axis-year" :style="{ left: y.left + 'px', width: y.width + 'px' }">{{ y.label }}</div>
+          <div v-for="m in gantt.months" :key="'m' + m.left" class="tg-axis-month" :style="{ left: m.left + 'px', width: m.width + 'px' }">{{ m.label }}</div>
+          <div v-for="d in gantt.days" :key="'d' + d.d.getTime()" class="tg-axis-day" :style="{ left: d.left + 'px', width: GANTT_DAY_W + 'px' }">{{ d.label }}</div>
         </div>
-        <div v-for="r in gantt.rows" :key="r.t.id" class="tg-row">
+        <div v-for="r in gantt.rows" :key="r.t.id" class="tg-row" :style="{ width: gantt.axisW + 'px' }">
           <div class="tg-label">{{ r.t.title }}</div>
           <div class="tg-track">
-            <div class="tg-today" :style="{ left: gantt.todayPct + '%' }"></div>
-            <div class="tg-bar" :class="`lvl-${colorOf(r.t)}`" :style="{ left: r.left + '%', width: r.width + '%' }" @click="openTask(r.t)"></div>
+            <div class="tg-today" :style="{ left: gantt.todayPx + 'px' }"></div>
+            <div class="tg-bar" :class="`lvl-${colorOf(r.t)}`" :style="{ left: r.left + 'px', width: r.width + 'px' }" @click="openTask(r.t)"></div>
           </div>
         </div>
-      </template>
+      </div>
     </div>
 
     <!-- 详情面板 -->
@@ -736,19 +769,25 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
 .tv-t-title { font-weight: 600; max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
 
 /* 甘特图 */
-.tv-gantt { flex: 1; overflow: auto; padding: 12px 18px; }
-.tg-head, .tg-row { display: flex; align-items: center; }
-.tg-label-col { width: 220px; flex-shrink: 0; }
-.tg-axis { flex: 1; display: flex; border-bottom: 1px solid var(--dt-border-light); }
-.tg-week { flex: 1; min-width: 96px; font-size: 11px; color: var(--dt-text-4); padding: 6px 8px; border-right: 1px solid var(--dt-border-light); white-space: nowrap; }
-.tg-row { border-bottom: 1px solid var(--dt-border-light); }
-.tg-label { width: 220px; flex-shrink: 0; font-size: 13px; font-weight: 600; padding: 10px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-gantt { flex: 1; overflow: hidden; padding: 12px 18px; display: flex; }
+.tg-scroll { overflow: auto; width: 100%; height: 100%; }
+.tg-axis { position: relative; height: 64px; border-bottom: 1px solid var(--dt-border-light); }
+.tg-head-label,
+.tg-label { position: sticky; left: 0; width: 220px; flex-shrink: 0; background: #fff; z-index: 3; box-sizing: border-box; }
+.tg-head-label { height: 64px; font-size: 13px; font-weight: 600; color: var(--dt-text-3); display: flex; align-items: center; padding: 0 12px; border-right: 1px solid var(--dt-border-light); }
+.tg-axis-year,
+.tg-axis-month { position: absolute; height: 20px; font-size: 11px; font-weight: 600; color: var(--dt-text-4); display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.tg-axis-year { top: 0; border-bottom: 1px solid var(--dt-border-light); background: #f7f8fa; }
+.tg-axis-month { top: 20px; border-bottom: 1px solid var(--dt-border-light); background: #fbfcfe; }
+.tg-axis-day { position: absolute; top: 40px; height: 24px; font-size: 10px; color: var(--dt-text-4); display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-right: 1px solid #f1f3f5; }
+.tg-row { position: relative; border-bottom: 1px solid var(--dt-border-light); display: flex; }
+.tg-label { height: 40px; font-size: 13px; font-weight: 600; padding: 0 12px; display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid var(--dt-border-light); }
 .tg-track { flex: 1; position: relative; height: 40px; }
-.tg-bar { position: absolute; top: 12px; height: 16px; border-radius: 4px; cursor: pointer; min-width: 4px; }
+.tg-bar { position: absolute; top: 12px; height: 16px; border-radius: 4px; cursor: pointer; min-width: 6px; z-index: 1; }
 .tg-bar.lvl-green { background: rgba(47, 187, 107, 0.7); }
 .tg-bar.lvl-yellow { background: rgba(230, 162, 60, 0.85); }
 .tg-bar.lvl-red { background: rgba(230, 69, 69, 0.85); }
-.tg-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #d92b3a; opacity: 0.5; z-index: 1; }
+.tg-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #d92b3a; opacity: 0.5; z-index: 2; }
 .tv-list { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
 .tv-board { flex: 1; overflow: auto; padding: 12px 18px; display: flex; gap: 12px; align-items: flex-start; }
 .tv-col { flex: 1 1 0; min-width: 250px; max-width: 330px; background: #f3f5f7; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; }
