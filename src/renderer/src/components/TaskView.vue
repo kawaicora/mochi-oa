@@ -589,7 +589,7 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
     </div>
 
     <!-- 创建任务 modal -->
-    <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false">
+    <div v-if="showCreate" class="modal-mask"">
       <div class="modal tv-create">
         <div class="modal-head">新建任务</div>
         <div class="modal-body">
@@ -633,7 +633,7 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
     </div>
 
     <!-- 状态变更 modal -->
-    <div v-if="statusModal" class="modal-mask" @click.self="statusModal = null">
+    <div v-if="statusModal" class="modal-mask"">
       <div class="modal tv-create">
         <div class="modal-head">{{ statusModal.status === 'completed' ? '完成任务' : statusModal.status === 'in_progress' ? '开始进行' : '状态变更' }}</div>
         <div class="modal-body">
@@ -648,7 +648,7 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
     </div>
 
     <!-- 延期 modal -->
-    <div v-if="extModal" class="modal-mask" @click.self="extModal = null">
+    <div v-if="extModal" class="modal-mask"">
       <div class="modal tv-create">
         <div class="modal-head">申请延期</div>
         <div class="modal-body">
@@ -665,7 +665,7 @@ const wl = (w: GanttWeek): string => `${w.start.getMonth() + 1}.${w.start.getDat
     </div>
 
     <!-- 提醒设置 modal -->
-    <div v-if="remindModal" class="modal-mask" @click.self="remindModal = null">
+    <div v-if="remindModal" class="modal-mask"">
       <div class="modal tv-create">
         <div class="modal-head">提醒设置</div>
         <div class="modal-body">
