@@ -556,7 +556,7 @@ export const useAppStore = defineStore('app', () => {
     return { ok: ack.ok, error: ack.error, assignment: d<{ assignment: TaskAssignment }>(ack)?.assignment }
   }
   async function addTaskComment(taskId: number, content: string, images?: string[]): Promise<{ ok: boolean; error?: string; comment?: TaskComment }> {
-    const ack = await window.pantry.serverTaskComment(taskId, content, images ?? [])
+    const ack = await window.pantry.serverTaskComment(taskId, content, (images ?? []).map((x) => String(x)))
     return { ok: ack.ok, error: ack.error, comment: d<{ comment: TaskComment }>(ack)?.comment }
   }
   async function addTaskIssue(taskId: number, title: string, content: string): Promise<{ ok: boolean; error?: string; issue?: TaskIssue }> {

@@ -246,10 +246,15 @@ async function addComment(): Promise<void> {
   const text = commentText.value.trim()
   const imgs = commentImages.value
   if (!text && imgs.length === 0) return
-  const r = await app.addTaskComment(detail.value.task.id, text, imgs)
-  commentText.value = ''
-  commentImages.value = []
-  if (r.ok) await refresh()
+  try {
+    const r = await app.addTaskComment(detail.value.task.id, text, imgs)
+    commentText.value = ''
+    commentImages.value = []
+    if (r.ok) await refresh()
+    else err.value = r.error || '留言发送失败'
+  } catch {
+    err.value = '留言发送失败'
+  }
 }
 
 // QA
