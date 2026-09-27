@@ -395,6 +395,26 @@ const gantt = computed<GanttData | null>(() => {
   const todayPx = ((now0.getTime() - start.getTime()) / 86400000) * GANTT_DAY_W
   return { days, months, years, rows, todayPx, axisW }
 })
+// 甘特图拖拽平移：按住任意处左右拖动，表头与任务条同步滑动
+const tgScroll = ref<HTMLElement | null>(null)
+let tgDrag = { active: false, startX: 0, startScroll: 0 }
+function tgDown(e: MouseEvent): void {
+  const el = tgScroll.value
+  if (!el) return
+  tgDrag = { active: true, startX: e.clientX, startScroll: el.scrollLeft }
+  el.classList.add('tg-dragging')
+}
+function tgMove(e: MouseEvent): void {
+  const el = tgScroll.value
+  if (!el || !tgDrag.active) return
+  el.scrollLeft = tgDrag.startScroll - (e.clientX - tgDrag.startX)
+}
+function tgUp(): void {
+  if (tgDrag.active) {
+    tgDrag.active = false
+    tgScroll.value?.classList.remove('tg-dragging')
+  }
+}
 </script>
 
 <template>
@@ -502,7 +522,7 @@ const gantt = computed<GanttData | null>(() => {
     <!-- 甘特图视图：按天刻度，日/月/年三层时间轴，精确对齐 -->
     <div v-if="view === 'gantt'" class="tv-gantt">
       <div v-if="!gantt" class="tv-empty">没有可绘制的时间范围</div>
-      <div v-else class="tg-scroll">
+      <div v-else ref="tgScroll" class="tg-scroll" @mousedown="tgDown" @mousemove="tgMove" @mouseup="tgUp" @mouseleave="tgUp">
         <div class="tg-axis" :style="{ width: gantt.axisW + 'px' }">
           <div class="tg-head-label">任务</div>
           <div v-for="y in gantt.years" :key="'y' + y.left" class="tg-axis-year" :style="{ left: y.left + 'px', width: y.width + 'px' }">{{ y.label }}</div>
@@ -770,7 +790,8 @@ const gantt = computed<GanttData | null>(() => {
 
 /* 甘特图 */
 .tv-gantt { flex: 1; overflow: hidden; padding: 12px 18px; display: flex; }
-.tg-scroll { overflow: auto; width: 100%; height: 100%; }
+.tg-scroll { overflow: auto; width: 100%; height: 100%; cursor: grab; user-select: none; }
+.tg-scroll.tg-dragging { cursor: grabbing; }
 .tg-axis { position: relative; height: 64px; border-bottom: 1px solid var(--dt-border-light); }
 .tg-head-label,
 .tg-label { position: sticky; left: 0; width: 220px; flex-shrink: 0; background: #fff; z-index: 3; box-sizing: border-box; }
