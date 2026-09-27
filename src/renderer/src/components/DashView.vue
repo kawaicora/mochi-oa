@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 
 const props = defineProps<{ projectId?: number }>()
@@ -13,7 +13,22 @@ async function load(): Promise<void> {
   try { stats.value = await app.fetchDashboard(props.projectId) } catch { err.value = '加载仪表盘失败' }
 }
 watch(() => props.projectId, () => void load())
-onMounted(load)
+let offSync: (() => void) | null = null
+function onSync(d: { companyId?: number; projectId?: number | null }): void {
+  if (d.companyId && app.activeCompanyId && d.companyId !== app.activeCompanyId) return
+  const pid = d.projectId ?? null
+  if (props.projectId && pid && props.projectId !== pid) return
+  void load()
+}
+let offSync2: (() => void) | null = null
+function onSync2(d: { companyId?: number; projectId?: number | null }): void {
+  if (d.companyId && app.activeCompanyId && d.companyId !== app.activeCompanyId) return
+  const pid = d.projectId ?? null
+  if (props.projectId && pid && props.projectId !== pid) return
+  void load()
+}
+onMounted(() => { void load(); offSync = window.pantry.onRequirementsUpdated(onSync), window.pantry.onBugsUpdated(onSync) })
+onUnmounted(() => { offSync?.() })
 
 const REQ = { planning: '待规划', in_progress: '进行中', done: '完成', closed: '已关闭' }
 const SEV = { minor: '轻微', normal: '一般', major: '严重', critical: '致命' }

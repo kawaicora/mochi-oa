@@ -304,6 +304,11 @@ const api = {
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
   onTasksUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.tasksUpdated, l),
   onProjectsUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.projectsUpdated, l),
+  onRequirementsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.requirementsUpdated, l),
+  onBugsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.bugsUpdated, l),
+  onPlansUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.plansUpdated, l),
+  onDocsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.docsUpdated, l),
+  onWikiUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.wikiUpdated, l),
   runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
   readAudioFile: (path: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> => ipcRenderer.invoke(IpcChannels.audioReadFile, path),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)

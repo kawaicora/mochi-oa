@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 
 const props = defineProps<{ projectId?: number }>()
@@ -12,7 +12,13 @@ async function load(): Promise<void> {
   try { list.value = await app.fetchMemberTracking(props.projectId) } catch { err.value = '加载成员跟踪失败' }
 }
 watch(() => props.projectId, () => void load())
-onMounted(load)
+let offSync: (() => void) | null = null
+function onSync(d: { companyId?: number }): void {
+  if (d.companyId && app.activeCompanyId && d.companyId !== app.activeCompanyId) return
+  void load()
+}
+onMounted(() => { void load(); offSync = window.pantry.onTasksUpdated(onSync) })
+onUnmounted(() => { offSync?.() })
 
 function rate(m: M): number { return m.total ? Math.round((m.completed / m.total) * 100) : 0 }
 </script>

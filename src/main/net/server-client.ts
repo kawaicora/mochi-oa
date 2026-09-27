@@ -287,6 +287,11 @@ export class ServerClient extends EventEmitter {
     socket.on('holiday:updated', () => this.emit('holidaysUpdated'))
     socket.on('task:tasksUpdated', (d: { companyId?: number }) => this.emit('tasksUpdated', d))
     socket.on('task:projectsUpdated', (d: { companyId?: number }) => this.emit('projectsUpdated', d))
+    socket.on('req:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('requirementsUpdated', d))
+    socket.on('bug:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('bugsUpdated', d))
+    socket.on('plan:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('plansUpdated', d))
+    socket.on('doc:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('docsUpdated', d))
+    socket.on('wiki:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('wikiUpdated', d))
   }
 
   disconnect(): void {

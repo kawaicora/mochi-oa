@@ -74,6 +74,11 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('holidaysUpdated', () => broadcastToAllWindows(IpcEvents.holidaysUpdated, {}))
   serverClient.on('tasksUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.tasksUpdated, d ?? {}))
   serverClient.on('projectsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.projectsUpdated, d ?? {}))
+  serverClient.on('requirementsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.requirementsUpdated, d ?? {}))
+  serverClient.on('bugsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.bugsUpdated, d ?? {}))
+  serverClient.on('plansUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.plansUpdated, d ?? {}))
+  serverClient.on('docsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.docsUpdated, d ?? {}))
+  serverClient.on('wikiUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.wikiUpdated, d ?? {}))
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {

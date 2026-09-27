@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 
@@ -23,7 +23,15 @@ async function load(): Promise<void> {
   loading.value = false
 }
 watch(() => props.projectId, () => void load())
-onMounted(load)
+let offSync: (() => void) | null = null
+function onSync(d: { companyId?: number; projectId?: number | null }): void {
+  if (d.companyId && app.activeCompanyId && d.companyId !== app.activeCompanyId) return
+  const pid = d.projectId ?? null
+  if (props.projectId && pid && props.projectId !== pid) return
+  void load()
+}
+onMounted(() => { void load(); offSync = window.pantry.onRequirementsUpdated(onSync) })
+onUnmounted(() => { offSync?.() })
 
 const meId = computed(() => server.state.userId ?? 0)
 const isAdmin = computed(() => app.companies.find((c) => c.company.id === app.activeCompanyId)?.role === 'owner' || app.companies.find((c) => c.company.id === app.activeCompanyId)?.role === 'admin')
