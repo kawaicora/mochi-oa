@@ -171,8 +171,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.serverDmHistory, withUserId, beforeTs ?? null, limit ?? null),
   serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder'): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverDmSend, toUserId, content, kind ?? null),
-  serverMessageDelete: (conversationId: number, messageId: string): Promise<Ack> =>
-    ipcRenderer.invoke(IpcChannels.serverMessageDelete, conversationId, messageId),
+  serverMessageDelete: (conversationId: number, messageId: string, content?: string): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.serverMessageDelete, conversationId, messageId, content ?? ''),
   serverMessageHardDelete: (conversationId: number, messageId: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverMessageHardDelete, conversationId, messageId),
 

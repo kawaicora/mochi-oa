@@ -256,8 +256,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverDmSend, (_e, toUserId, content, kind) =>
     serverClient.sendDmMessage(Number(toUserId) || 0, String(content), kind === 'image' || kind === 'file' || kind === 'video' || kind === 'folder' ? kind : 'text')
   )
-  ipcMain.handle(IpcChannels.serverMessageDelete, (_e, conversationId, messageId) =>
-    serverClient.deleteMessage(Number(conversationId) || 0, String(messageId))
+  ipcMain.handle(IpcChannels.serverMessageDelete, (_e, conversationId, messageId, content) =>
+    serverClient.deleteMessage(Number(conversationId) || 0, String(messageId), String(content ?? ''))
   )
   ipcMain.handle(IpcChannels.serverMessageHardDelete, (_e, conversationId, messageId) =>
     serverClient.hardDeleteMessage(Number(conversationId) || 0, String(messageId))

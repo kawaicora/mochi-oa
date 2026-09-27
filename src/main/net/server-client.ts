@@ -744,9 +744,9 @@ export class ServerClient extends EventEmitter {
 
   // ─── 删除 ───────────────────────────────────────────────
 
-  async deleteMessage(conversationId: number, messageId: string): Promise<Ack> {
+  async deleteMessage(conversationId: number, messageId: string, content = ''): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'message:delete', { conversationId, messageId })
+    return emitWithAck(this.socket, 'message:delete', { conversationId, messageId, content })
   }
 
   async hardDeleteMessage(conversationId: number, messageId: string): Promise<Ack> {

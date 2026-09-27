@@ -995,7 +995,7 @@ export const useAppStore = defineStore('app', () => {
     const target = messages.value.find((m) => m.id === messageId)
     const isOwn = target ? target.fromId === (server.state.userId ?? 0) : true
     const myId = server.state.userId ?? 0
-    const ack = await window.pantry.serverMessageDelete(s.conversationId, messageId)
+    const ack = await window.pantry.serverMessageDelete(s.conversationId, messageId, target?.content ?? '')
     // 撤回：自己的消息本地兜底移除（含本地临时消息）；若存在同内容重复条目（同一图片本地+服务端各一条）一并移除
     if (ack.ok || isOwn || !target) {
       messages.value = messages.value.filter((m) => {
