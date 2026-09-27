@@ -422,7 +422,11 @@ function tgUp(): void {
   }
 }
 // 窗口平移（无限滑动）：滚动到前后边缘时平移 12 个月，内容整体位移 + scrollLeft 补偿，视觉无感
+let lastShift = 0
 function moveWin(dir: 1 | -1): void {
+  const now = Date.now()
+  if (now - lastShift < 1200) return
+  lastShift = now
   const el = tgScroll.value
   if (!el) return
   const cur = el.scrollLeft
@@ -906,8 +910,15 @@ function tgScrollHandler(): void {
 .tv-ext-pending { margin-left: auto; display: flex; gap: 4px; }
 .tv-ext-state.approved { color: #2fbb6b; font-weight: 600; }
 .tv-ext-state.rejected { color: #d92b3a; font-weight: 600; }
-.tv-comment-box { display: flex; gap: 6px; align-items: flex-end; margin-bottom: 10px; }
-.tv-comment-box textarea { flex: 1; resize: none; }
+.tv-comment-box { display: flex; gap: 6px; align-items: flex-end; margin-bottom: 10px; flex-wrap: wrap; }
+.tv-comment-box textarea { flex: 1 1 220px; resize: none; min-height: 52px; }
+.tv-comment-pre { display: flex; gap: 6px; flex-wrap: wrap; }
+.tv-comment-pre a { display: inline-block; }
+.tv-comment-pre img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+.tv-comment-ops { display: flex; gap: 6px; align-items: center; }
+.tv-comment-imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.tv-comment-imgs a { display: inline-block; }
+.tv-comment-imgs img { max-width: 220px; max-height: 160px; object-fit: cover; border-radius: 8px; }
 .tv-comment { font-size: 13px; padding: 6px 0; border-bottom: 1px dashed var(--dt-border-light); display: flex; gap: 8px; flex-wrap: wrap; }
 .tv-comment-text { width: 100%; color: var(--dt-text-2); }
 .tv-issue-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
