@@ -293,6 +293,19 @@ export const useAppStore = defineStore('app', () => {
     if (activeCompanyId.value) void refreshMembers()
     void refreshConversations()
   })
+  // 会话已读/置顶他端同步：增量更新指定会话，避免全量刷新覆盖本地新消息未读自增
+  window.pantry.onServerConversationsUpdated((d) => {
+    const p = (d ?? {}) as { conversationId?: number; unread?: number; pinned?: boolean }
+    const id = Number(p.conversationId)
+    if (!Number.isInteger(id) || id <= 0) return
+    const item = conversations.value.find((c) => c.conversationId === id)
+    if (!item) return
+    if (typeof p.unread === 'number') item.unread = Math.max(0, p.unread)
+    if (typeof p.pinned === 'boolean') {
+      item.pinned = p.pinned
+      conversations.value.sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
+    }
+  })
 
   // ─── 计算属性 ───
   const activeCompany = computed(() => {
