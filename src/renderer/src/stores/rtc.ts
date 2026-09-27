@@ -10,7 +10,7 @@ import type {
   RtcRoom
 } from '@shared/server-types'
 import type { NotifTarget } from '@shared/ipc'
-import VideoStream from '@renderer/media/VideoStream'
+import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 
@@ -358,6 +358,14 @@ export const useRtcStore = defineStore('rtc', () => {
       )
       engine?.replaceTrack(newTrack, 'video')
     } catch (e) {
+      if (e instanceof CameraUnavailableError) {
+        // 无可用摄像头 → 回退频谱头像，不弹错误窗
+        const t = VideoStream.GetAvatarVideoTrack()
+        await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
+        engine?.replaceTrack(t, 'video')
+        activeCall.value.isCameraOff = true
+        return
+      }
       error.value = '切换摄像头失败'
       // 回退状态
       activeCall.value.isCameraOff = !activeCall.value.isCameraOff
@@ -404,11 +412,23 @@ export const useRtcStore = defineStore('rtc', () => {
         engine?.replaceTrack(track, 'audio')
       }
       if (p.cameraId) {
-        const ms = await VideoStream.GetCameraStream(p.cameraId)
-        const track = ms.getVideoTracks()[0] ?? null
-        await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
-        engine?.replaceTrack(track, 'video')
-        activeCall.value.isCameraOff = p.cameraId === 'default'
+        try {
+          const ms = await VideoStream.GetCameraStream(p.cameraId)
+          const track = ms.getVideoTracks()[0] ?? null
+          await VideoStream.UpdateVideoStream(new MediaStream(track ? [track] : []))
+          engine?.replaceTrack(track, 'video')
+          activeCall.value.isCameraOff = p.cameraId === 'default'
+        } catch (err) {
+          if (err instanceof CameraUnavailableError) {
+            // 无可用摄像头 → 回退频谱头像，不弹错误窗
+            const t = VideoStream.GetAvatarVideoTrack()
+            await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
+            engine?.replaceTrack(t, 'video')
+            activeCall.value.isCameraOff = true
+          } else {
+            throw err
+          }
+        }
       }
       if (p.audioOutId) {
         document.querySelectorAll('video').forEach((el) => VideoStream.SetSinkId(el as HTMLVideoElement, p.audioOutId))

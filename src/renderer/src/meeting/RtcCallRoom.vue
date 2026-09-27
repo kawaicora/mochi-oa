@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import VideoStream from '@renderer/media/VideoStream'
+import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 import UserAvatar from '@renderer/components/UserAvatar.vue'
@@ -116,7 +116,16 @@ async function applyDevicesFromPanel(p: {
       document.querySelectorAll('video').forEach((el) => VideoStream.SetSinkId(el as HTMLVideoElement, p.audioOutId))
     }
     showDevices.value = false
-  } catch {
+  } catch (err) {
+    if (err instanceof CameraUnavailableError) {
+      // 无可用摄像头 → 回退频谱头像，不弹错误窗
+      const t = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+      await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
+      localPreview.value = VideoStream.stream
+      engine?.replaceTrack(t, 'video')
+      isCameraOff.value = true
+      return
+    }
     error.value = '设备切换失败'
   }
 }
@@ -167,7 +176,17 @@ async function switchCamera(deviceId: string): Promise<void> {
       localPreview.value = VideoStream.stream
     engine?.replaceTrack(track, 'video')
     currentCam.value = deviceId
-  } catch {
+  } catch (err) {
+    if (err instanceof CameraUnavailableError) {
+      // 无可用摄像头 → 回退频谱头像，不弹错误窗
+      const t = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+      await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
+      localPreview.value = VideoStream.stream
+      engine?.replaceTrack(t, 'video')
+      isCameraOff.value = true
+      currentCam.value = 'default'
+      return
+    }
     error.value = '摄像头切换失败'
   }
 }

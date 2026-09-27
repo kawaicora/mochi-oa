@@ -4,6 +4,13 @@
  * 空视频轨由 canvas 实时绘制占位图，不依赖外部图片资源。
  */
 
+export class CameraUnavailableError extends Error {
+  constructor() {
+    super('没有可用的摄像头')
+    this.name = 'CameraUnavailableError'
+  }
+}
+
 class VideoStream {
   /** 当前本地流（绑定到 RTCPeerConnection 和本地预览 video 元素） */
   public stream: MediaStream = new MediaStream()
@@ -74,21 +81,34 @@ class VideoStream {
 
   // ─── 采集 ─────────────────────────────────────────────
 
-  /** 摄像头：deviceId 可选（"default"=不指定，用系统默认）；直接采原始分辨率，不做降级/重采样 */
+  /**
+   * 摄像头：deviceId 可选（"default"=不指定）。
+   * 优先级：目标设备 → 系统默认 → 自动尝试其它可用摄像头；
+   * 全部失败抛 CameraUnavailableError（调用方可回退到频谱头像流，而不是只弹错误窗）。
+   */
   async GetCameraStream(deviceId?: string): Promise<MediaStream> {
     const wantExact = !!deviceId && deviceId !== 'default'
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: wantExact ? { deviceId: { exact: deviceId } } : true,
-        audio: false
-      })
-    } catch (e) {
-      if (wantExact) {
-        // 指定设备不可用（如另一台电脑无此设备）→ 回退系统默认
-        return navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    const pick = async (video: MediaTrackConstraints | boolean): Promise<MediaStream | null> => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ video, audio: false })
+      } catch {
+        return null
       }
-      throw e
     }
+    if (wantExact) {
+      const s = await pick({ deviceId: { exact: deviceId } })
+      if (s) return s
+    }
+    const def = await pick(true)
+    if (def) return def
+    // 保底：逐个尝试枚举到的其它摄像头，直到没有可用为止
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')
+    for (const cam of cams) {
+      if (cam.deviceId === 'default' || (wantExact && cam.deviceId === deviceId)) continue
+      const s = await pick({ deviceId: { exact: cam.deviceId } })
+      if (s) return s
+    }
+    throw new CameraUnavailableError()
   }
 
   /** 麦克风：deviceId 可选；默认 48kHz / 16bit / 2ch 无处理（乐队/演出级音质） */
@@ -299,6 +319,11 @@ class VideoStream {
     }
     this.divStreamCache = { stream, stop }
     return stream
+  }
+
+  /** 无可用摄像头时的统一回退视频轨：优先频谱头像流，空视频流兜底 */
+  GetAvatarVideoTrack(): MediaStreamTrack | null {
+    return this.GetVoiceAvatarStream(this.stream)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
   }
 
   // ─── 空轨占位 ──────────────────────────────────────────
