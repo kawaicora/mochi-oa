@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import ReqView from './ReqView.vue'
@@ -327,8 +327,14 @@ function projectName(id: number | null): string {
   return p ? p.name : '未归属'
 }
 
-// ─── 甘特图：按天刻度时间轴，固定像素精确对齐，日/月/年三层标注 ───
-const GANTT_DAY_W = 44 // 每格宽度 px
+// ─── 甘特图：按天刻度，动态窗口无限滑动，日/月/年三层标注（窗口起点对齐月初） ───
+const GANTT_DAY_W = 44      // 每格宽度 px
+const GANTT_WIN = 730       // 窗口天数（恒定，靠平移实现“无限”滑动）
+const GANTT_SHIFT_M = 12    // 每次平移的月数（保持月初对齐）
+const GANTT_EDGE = 180      // 距边缘多少天触发平移
+const dayNo = (d: Date): number => Math.floor(d.getTime() / 86400000)
+const startOfMonth = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), 1)
+const floorDay = (x: number): Date => { const d = new Date(x); d.setHours(0, 0, 0, 0); return d }
 interface GanttDay { d: Date; label: string; left: number }
 interface GanttSpan { label: string; left: number; width: number }
 interface GanttRow { t: Task; left: number; width: number }
@@ -340,62 +346,62 @@ interface GanttData {
   todayPx: number
   axisW: number
 }
-const floorDay = (x: number): Date => { const d = new Date(x); d.setHours(0, 0, 0, 0); return d }
+// 窗口起点：任务加载后对齐到 min(最早任务, 今天) 所在月 1 日；否则今天所在月
+const winStart = ref<Date>(startOfMonth(new Date()))
+const winDays = ref(GANTT_WIN)
+let winInited = false
+watch(
+  () => tasks.value,
+  (list) => {
+    if (winInited || !list.length) return
+    let min = Infinity
+    for (const t of list) {
+      const s = Date.parse(t.startTime)
+      if (Number.isFinite(s) && s < min) min = s
+    }
+    if (!Number.isFinite(min)) return
+    winStart.value = startOfMonth(new Date(Math.min(min, Date.now())))
+    winInited = true
+  },
+  { immediate: true }
+)
 const gantt = computed<GanttData | null>(() => {
   if (!tasks.value.length) return null
-  let min = Infinity, max = -Infinity
-  for (const t of tasks.value) {
-    const s = Date.parse(t.startTime), e = Date.parse(t.dueTime)
-    if (Number.isFinite(s) && s < min) min = s
-    if (Number.isFinite(e) && e > max) max = e
-  }
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
-  const now0 = floorDay(Date.now())
-  if (now0.getTime() < min) min = now0.getTime()
-  if (now0.getTime() > max) max = now0.getTime()
-  const start = floorDay(min)
-  const end = floorDay(max)
-  const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1
-  const axisW = totalDays * GANTT_DAY_W
-  // 每天一格
+  const start = winStart.value
+  const sNo = dayNo(start)
   const days: GanttDay[] = []
-  for (let i = 0; i < totalDays; i++) {
+  for (let i = 0; i < winDays.value; i++) {
     const d = new Date(start); d.setDate(d.getDate() + i)
     days.push({ d, label: `${d.getMonth() + 1}.${d.getDate()}`, left: i * GANTT_DAY_W })
   }
-  // 月标注：每月 1 号起 merge 到当月最后一天
   const months: GanttSpan[] = []
-  for (let i = 0; i < totalDays; i++) {
+  const years: GanttSpan[] = []
+  for (let i = 0; i < winDays.value; i++) {
     const d = days[i].d
     if (d.getDate() === 1) {
-      const mDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-      const span = Math.min(mDays, totalDays - i)
+      const span = Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), winDays.value - i)
       months.push({ label: `${d.getMonth() + 1}月`, left: days[i].left, width: span * GANTT_DAY_W })
       i += span - 1
-    }
-  }
-  // 年标注：每年 1 月 1 日起 merge 到年底
-  const years: GanttSpan[] = []
-  for (let i = 0; i < totalDays; i++) {
-    const d = days[i].d
-    if (d.getMonth() === 0 && d.getDate() === 1) {
-      const yDays = Math.round((new Date(d.getFullYear() + 1, 0, 1).getTime() - d.getTime()) / 86400000)
-      const span = Math.min(yDays, totalDays - i)
-      years.push({ label: `${d.getFullYear()}年`, left: days[i].left, width: span * GANTT_DAY_W })
-      i += span - 1
+      if (d.getMonth() === 0) {
+        const yDays = Math.round((new Date(d.getFullYear() + 1, 0, 1).getTime() - d.getTime()) / 86400000)
+        const yspan = Math.min(yDays, winDays.value - i)
+        years.push({ label: `${d.getFullYear()}年`, left: days[i].left, width: yspan * GANTT_DAY_W })
+        i += yspan - 1
+      }
+      continue
     }
   }
   const rows: GanttRow[] = tasks.value.map((t) => {
-    const s0 = floorDay(Math.max(Date.parse(t.startTime), start.getTime()))
-    const e0 = floorDay(Math.min(Date.parse(t.dueTime), end.getTime()))
-    const left = ((s0.getTime() - start.getTime()) / 86400000) * GANTT_DAY_W
-    const width = Math.max((((e0.getTime() - s0.getTime()) / 86400000) + 1) * GANTT_DAY_W, 8)
+    const s0 = floorDay(Date.parse(t.startTime))
+    const e0 = floorDay(Date.parse(t.dueTime))
+    const left = (dayNo(s0) - sNo) * GANTT_DAY_W
+    const width = Math.max((dayNo(e0) - dayNo(s0) + 1) * GANTT_DAY_W, 8)
     return { t, left, width }
   }).sort((a, b) => Date.parse(a.t.startTime) - Date.parse(b.t.startTime))
-  const todayPx = ((now0.getTime() - start.getTime()) / 86400000) * GANTT_DAY_W
-  return { days, months, years, rows, todayPx, axisW }
+  const todayPx = (dayNo(floorDay(Date.now())) - sNo) * GANTT_DAY_W
+  return { days, months, years, rows, todayPx, axisW: winDays.value * GANTT_DAY_W }
 })
-// 甘特图拖拽平移：按住任意处左右拖动，表头与任务条同步滑动
+// 拖拽平移：按住任意处左右拖动，表头与任务条同步滑动
 const tgScroll = ref<HTMLElement | null>(null)
 let tgDrag = { active: false, startX: 0, startScroll: 0 }
 function tgDown(e: MouseEvent): void {
@@ -414,6 +420,30 @@ function tgUp(): void {
     tgDrag.active = false
     tgScroll.value?.classList.remove('tg-dragging')
   }
+}
+// 窗口平移（无限滑动）：滚动到前后边缘时平移 12 个月，内容整体位移 + scrollLeft 补偿，视觉无感
+function moveWin(dir: 1 | -1): void {
+  const el = tgScroll.value
+  if (!el) return
+  const cur = el.scrollLeft
+  const oldNo = dayNo(winStart.value)
+  const ns = new Date(winStart.value)
+  ns.setMonth(ns.getMonth() + dir * GANTT_SHIFT_M)
+  winStart.value = ns
+  const deltaPx = (dayNo(ns) - oldNo) * GANTT_DAY_W
+  nextTick(() => {
+    const t = tgScroll.value
+    if (!t) return
+    const maxS = Math.max(0, t.scrollWidth - t.clientWidth)
+    t.scrollLeft = Math.min(Math.max(0, cur - deltaPx), maxS)
+  })
+}
+function tgScrollHandler(): void {
+  const el = tgScroll.value
+  if (!el) return
+  const maxScroll = el.scrollWidth - el.clientWidth
+  if (el.scrollLeft > maxScroll - GANTT_EDGE * GANTT_DAY_W) moveWin(1)
+  else if (el.scrollLeft < GANTT_EDGE * GANTT_DAY_W) moveWin(-1)
 }
 </script>
 
@@ -522,7 +552,7 @@ function tgUp(): void {
     <!-- 甘特图视图：按天刻度，日/月/年三层时间轴，精确对齐 -->
     <div v-if="view === 'gantt'" class="tv-gantt">
       <div v-if="!gantt" class="tv-empty">没有可绘制的时间范围</div>
-      <div v-else ref="tgScroll" class="tg-scroll" @mousedown="tgDown" @mousemove="tgMove" @mouseup="tgUp" @mouseleave="tgUp">
+      <div v-else ref="tgScroll" class="tg-scroll" @mousedown="tgDown" @mousemove="tgMove" @mouseup="tgUp" @mouseleave="tgUp" @scroll="tgScrollHandler">
         <div class="tg-axis" :style="{ width: gantt.axisW + 'px' }">
           <div class="tg-head-label">任务</div>
           <div v-for="y in gantt.years" :key="'y' + y.left" class="tg-axis-year" :style="{ left: y.left + 'px', width: y.width + 'px' }">{{ y.label }}</div>
@@ -532,8 +562,8 @@ function tgUp(): void {
         <div v-for="r in gantt.rows" :key="r.t.id" class="tg-row" :style="{ width: gantt.axisW + 'px' }">
           <div class="tg-label">{{ r.t.title }}</div>
           <div class="tg-track">
-            <div class="tg-today" :style="{ left: gantt.todayPx + 'px' }"></div>
-            <div class="tg-bar" :class="`lvl-${colorOf(r.t)}`" :style="{ left: r.left + 'px', width: r.width + 'px' }" @click="openTask(r.t)"></div>
+            <div v-if="gantt.todayPx >= 0 && gantt.todayPx <= gantt.axisW" class="tg-today" :style="{ left: gantt.todayPx + 'px' }"></div>
+            <div v-if="r.width > 0 && r.left < gantt.axisW && r.left + r.width > 0" class="tg-bar" :class="`lvl-${colorOf(r.t)}`" :style="{ left: r.left + 'px', width: r.width + 'px' }" @click="openTask(r.t)"></div>
           </div>
         </div>
       </div>
