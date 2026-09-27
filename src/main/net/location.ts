@@ -1,9 +1,11 @@
+import os from 'node:os'
+
 let cached: { ip: string; location: string } | null = null
 
 /**
  * 获取本机公网 IP 与归属地（用于登录记录 / 用户名后显示登录归属地）。
- * 依次尝试 pconline（国内直连，GBK）、ipify、ipinfo.io；全部失败返回空串。
- * 注意：不再用局域网 IP 兜底——NAT 后的 192.168.x 不是公网 IP，会误导归属地展示。
+ * 依次尝试 pconline（国内直连，GBK）、ipify、ipinfo.io；全部失败回退本机局域网 IPv4 兜底，
+ * 保证内网/隔离网络环境下登录会话仍有可识别的 IP 展示。
  */
 export async function getClientLocation(): Promise<{ ip: string; location: string }> {
   if (cached) return cached
@@ -46,6 +48,18 @@ export async function getClientLocation(): Promise<{ ip: string; location: strin
       }
     } catch {
       /* ignore */
+    }
+  }
+  // 4) 内网兜底：公网接口全失败时取本机局域网 IPv4（NAT/隔离网络下仍有可识别 IP）
+  if (!ip) {
+    const ifs = os.networkInterfaces()
+    outer: for (const list of Object.values(ifs)) {
+      for (const i of list ?? []) {
+        if (i.family === 'IPv4' && !i.internal) {
+          ip = i.address
+          break outer
+        }
+      }
     }
   }
   cached = { ip: (ip ?? '').trim(), location }
