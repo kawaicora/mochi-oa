@@ -879,28 +879,14 @@ const closeWin = () => window.pantry.closeWindow()
   gap: 8px;
 }
 .srv-select {
-  height: 36px;
-  border: 1px solid #e5e6eb;
-  border-radius: 6px;
-  padding: 0 8px;
-  background: #fff;
-  font-size: 13px;
-  color: #333;
-  outline: none;
+  /* 视觉统一走全局基元 */
 }
 .srv-input {
-  height: 36px;
-  border: 1px solid #e5e6eb;
-  border-radius: 6px;
-  padding: 0 12px;
-  font-size: 13px;
-  color: #333;
-  outline: none;
   width: 0;
   flex: 1;
 }
 .srv-input:focus {
-  border-color: var(--dt-blue);
+  border-color: var(--dt-primary);
 }
 .srv-port {
   flex: 0 0 90px;
