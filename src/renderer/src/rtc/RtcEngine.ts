@@ -134,15 +134,19 @@ class RtcEngine {
    * 替换后对每个 PC 重新协商（createOffer → setLocalDescription → onSignal）。
    */
   replaceTrack(track: MediaStreamTrack | null, kind: 'audio' | 'video'): void {
-    this.peers.forEach((pc) => {
+    this.peers.forEach((pc, userId) => {
+      console.log('[RtcEngine] [replaceTrack] user=' + userId, 'kind=' + kind, 'track=' + (track ? track.id : 'null'), 'senders=' + pc.getSenders().length, 'sig=' + pc.signalingState)
       const senders = pc.getSenders()
+      let replaced = 0
       for (const sender of senders) {
         if (sender.track?.kind === kind) {
           void sender.replaceTrack(track)
+          replaced++
         }
       }
-      // 重新协商
-      void this._renegotiate(pc)
+      console.log('[RtcEngine] [replaceTrack] user=' + userId, 'replaced=' + replaced)
+      // 重新协商（发 offer）
+      void this._renegotiate(pc, userId)
     })
   }
 
@@ -275,13 +279,18 @@ class RtcEngine {
     }
   }
 
-  private async _renegotiate(pc: RTCPeerConnection): Promise<void> {
+  private async _renegotiate(pc: RTCPeerConnection, userId: number): Promise<void> {
+    console.log('[RtcEngine] [renegotiate] user=' + userId, 'sig=' + pc.signalingState, 'ice=' + pc.iceConnectionState)
     try {
       // 仅在 stable 状态下发起新 offer
-      if (pc.signalingState !== 'stable') return
+      if (pc.signalingState !== 'stable') {
+        console.log('[RtcEngine] [renegotiate] user=' + userId, '跳过（非stable）sig=' + pc.signalingState)
+        return
+      }
       const offer = await pc.createOffer()
       offer.sdp = EnforceStereo(offer.sdp ?? '')
       await pc.setLocalDescription(offer)
+      console.log('[RtcEngine] [发送offer(renegotiate)] user=' + userId, 'sdpLen=' + (offer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'offer', sdp: offer.sdp ?? '' })
     } catch (err) {
       console.error('[RtcEngine] renegotiate failed:', err)
