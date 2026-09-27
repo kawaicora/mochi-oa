@@ -254,6 +254,14 @@ async function notifyIfUnfocused(title: string, body: string, target?: NotifTarg
 
 // ─── 进入房间 ─────────────────────────────────────────────
 async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: RtcIceServer[], _kind: RtcKind): Promise<void> {
+  console.log(
+    '[RTC] 通话开始 enterRoom',
+    'kind=' + _kind,
+    'meetingNo=' + roomInfo.id,
+    'peers=' + roomPeers.length,
+    'iceServers=' +
+      (iceServers.map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)) + (s.username && s.credential ? '(@auth)' : '')).join(' | ') || '(none)')
+  )
   room.value = roomInfo
   peers.value = [...roomPeers]
 

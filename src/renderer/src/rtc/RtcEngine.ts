@@ -51,6 +51,12 @@ class RtcEngine {
     this.onSignal = opts.onSignal
     this.onRemoteStream = opts.onRemoteStream
     this.onPeerDisconnected = opts.onPeerDisconnected
+    console.log(
+      '[RtcEngine] 初始化',
+      'room=' + this.roomId,
+      'iceServers=' +
+        (this.iceServers.map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)) + (s.username && s.credential ? '(@auth)' : '')).join(' | ') || '(none)')
+    )
   }
 
   // ─── 建立连接 ──────────────────────────────────────────
@@ -70,6 +76,14 @@ class RtcEngine {
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
     this.peers.set(userId, pc)
+    console.log(
+      '[RtcEngine] [addPeer] user=' + userId,
+      '创建PC',
+      'ice=' +
+        (this.iceServers.map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)) + (s.username && s.credential ? '(@auth)' : '')).join(' | ') || '(none)'),
+      'localTracks=' + this.localStream.getTracks().length,
+      'sig=' + pc.signalingState
+    )
 
     // 把本地流每条轨道加到 PC
     this.localStream.getTracks().forEach((track) => {
@@ -85,6 +99,7 @@ class RtcEngine {
   // ─── 处理对端信令 ─────────────────────────────────────
 
   handleSignal(fromUserId: number, signal: RtcSignalPayload): void {
+    console.log('[RtcEngine] [signal] from=' + fromUserId, 'type=' + signal.type, 'hasPc=' + this.peers.has(fromUserId))
     let pc = this.peers.get(fromUserId)
 
     // 对端发来 offer 但本地还没有 PC（说明对端先发起），先创建一个
