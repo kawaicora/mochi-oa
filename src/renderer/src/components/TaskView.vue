@@ -327,11 +327,12 @@ function projectName(id: number | null): string {
   return p ? p.name : '未归属'
 }
 
-// ─── 甘特图：按天刻度，动态窗口无限滑动，日/月/年三层标注（窗口起点对齐月初） ───
+// ─── 甘特图：虚拟滑动窗口（只渲染可视区+前后buffer），日/月/年从月初/1月标注，切换/点击任务聚焦 ───
 const GANTT_DAY_W = 44      // 每格宽度 px
-const GANTT_WIN = 730       // 窗口天数（恒定，靠平移实现“无限”滑动）
-const GANTT_SHIFT_M = 12    // 每次平移的月数（保持月初对齐）
-const GANTT_EDGE = 180      // 距边缘多少天触发平移
+const GANTT_WIN = 1460      // 内容窗口天数（供滚动，约 4 年）
+const GANTT_SHIFT_M = 12    // 每次平移月数（保持月初对齐）
+const GANTT_EDGE = 60       // 距内容边缘多少天触发平移
+const GANTT_BUFFER = 90     // 可视区前后多渲染的天数（缓冲，避免来不及）
 const dayNo = (d: Date): number => Math.floor(d.getTime() / 86400000)
 const startOfMonth = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), 1)
 const floorDay = (x: number): Date => { const d = new Date(x); d.setHours(0, 0, 0, 0); return d }
@@ -346,49 +347,39 @@ interface GanttData {
   todayPx: number
   axisW: number
 }
-// 窗口起点：任务加载后对齐到 min(最早任务, 今天) 所在月 1 日；否则今天所在月
+// 初始定位到今天所在月（不跳到最早任务，避免出现 1997）
 const winStart = ref<Date>(startOfMonth(new Date()))
 const winDays = ref(GANTT_WIN)
-let winInited = false
-watch(
-  () => tasks.value,
-  (list) => {
-    if (winInited || !list.length) return
-    let min = Infinity
-    for (const t of list) {
-      const s = Date.parse(t.startTime)
-      if (Number.isFinite(s) && s < min) min = s
-    }
-    if (!Number.isFinite(min)) return
-    winStart.value = startOfMonth(new Date(Math.min(min, Date.now())))
-    winInited = true
-  },
-  { immediate: true }
-)
+// 虚拟滑动窗口：viewStart 相对 winStart 的天偏移，viewDays 可视天数
+const viewStart = ref(0)
+const viewDays = ref(60)
+const ganttLoading = ref(false)
 const gantt = computed<GanttData | null>(() => {
   if (!tasks.value.length) return null
   const start = winStart.value
   const sNo = dayNo(start)
+  // 只渲染可视区 + 前后 buffer 的天
+  const rs = Math.max(0, viewStart.value - GANTT_BUFFER)
+  const re = Math.min(winDays.value, viewStart.value + viewDays.value + GANTT_BUFFER)
+  if (rs >= re) return null
   const days: GanttDay[] = []
-  for (let i = 0; i < winDays.value; i++) {
+  for (let i = rs; i < re; i++) {
     const d = new Date(start); d.setDate(d.getDate() + i)
     days.push({ d, label: `${d.getMonth() + 1}.${d.getDate()}`, left: i * GANTT_DAY_W })
   }
+  // 月份标注：可视区内每月 1 日起（交界处单独绘制），跨月合并到月末
   const months: GanttSpan[] = []
   const years: GanttSpan[] = []
-  for (let i = 0; i < winDays.value; i++) {
-    const d = days[i].d
+  for (const dd of days) {
+    const d = dd.d
     if (d.getDate() === 1) {
+      const i = dayNo(d) - sNo
       const span = Math.min(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), winDays.value - i)
-      months.push({ label: `${d.getMonth() + 1}月`, left: days[i].left, width: span * GANTT_DAY_W })
-      i += span - 1
+      months.push({ label: `${d.getMonth() + 1}月`, left: i * GANTT_DAY_W, width: span * GANTT_DAY_W })
       if (d.getMonth() === 0) {
         const yDays = Math.round((new Date(d.getFullYear() + 1, 0, 1).getTime() - d.getTime()) / 86400000)
-        const yspan = Math.min(yDays, winDays.value - i)
-        years.push({ label: `${d.getFullYear()}年`, left: days[i].left, width: yspan * GANTT_DAY_W })
-        i += yspan - 1
+        years.push({ label: `${d.getFullYear()}年`, left: i * GANTT_DAY_W, width: Math.min(yDays, winDays.value - i) * GANTT_DAY_W })
       }
-      continue
     }
   }
   const rows: GanttRow[] = tasks.value.map((t) => {
@@ -401,7 +392,7 @@ const gantt = computed<GanttData | null>(() => {
   const todayPx = (dayNo(floorDay(Date.now())) - sNo) * GANTT_DAY_W
   return { days, months, years, rows, todayPx, axisW: winDays.value * GANTT_DAY_W }
 })
-// 拖拽平移：按住任意处左右拖动，表头与任务条同步滑动
+// 拖拽平移
 const tgScroll = ref<HTMLElement | null>(null)
 let tgDrag = { active: false, startX: 0, startScroll: 0 }
 function tgDown(e: MouseEvent): void {
@@ -416,12 +407,9 @@ function tgMove(e: MouseEvent): void {
   el.scrollLeft = tgDrag.startScroll - (e.clientX - tgDrag.startX)
 }
 function tgUp(): void {
-  if (tgDrag.active) {
-    tgDrag.active = false
-    tgScroll.value?.classList.remove('tg-dragging')
-  }
+  if (tgDrag.active) { tgDrag.active = false; tgScroll.value?.classList.remove('tg-dragging') }
 }
-// 窗口平移（无限滑动）：滚动到前后边缘时平移 12 个月，内容整体位移 + scrollLeft 补偿，视觉无感
+// 窗口平移（无限滑动）：滚动到边缘平移 12 个月，scrollLeft 补偿保持视口；任务多时显示加载中
 let lastShift = 0
 function moveWin(dir: 1 | -1): void {
   const now = Date.now()
@@ -435,20 +423,47 @@ function moveWin(dir: 1 | -1): void {
   ns.setMonth(ns.getMonth() + dir * GANTT_SHIFT_M)
   winStart.value = ns
   const deltaPx = (dayNo(ns) - oldNo) * GANTT_DAY_W
+  if (tasks.value.length > 20) ganttLoading.value = true
   nextTick(() => {
     const t = tgScroll.value
     if (!t) return
     const maxS = Math.max(0, t.scrollWidth - t.clientWidth)
     t.scrollLeft = Math.min(Math.max(0, cur - deltaPx), maxS)
+    if (tasks.value.length > 20) setTimeout(() => { ganttLoading.value = false }, 200)
   })
 }
 function tgScrollHandler(): void {
   const el = tgScroll.value
   if (!el) return
+  const vd = Math.ceil(el.clientWidth / GANTT_DAY_W) + 2
+  viewDays.value = Math.max(viewDays.value, vd)
+  viewStart.value = Math.max(0, Math.floor(el.scrollLeft / GANTT_DAY_W))
   const maxScroll = el.scrollWidth - el.clientWidth
   if (el.scrollLeft > maxScroll - GANTT_EDGE * GANTT_DAY_W) moveWin(1)
   else if (el.scrollLeft < GANTT_EDGE * GANTT_DAY_W) moveWin(-1)
 }
+// 聚焦：把甘特图滚动到指定日期（点击任务 / 切到甘特图时）
+function focusGanttTo(day: Date): void {
+  const targetNo = dayNo(floorDay(day.getTime()))
+  const sNo = dayNo(winStart.value)
+  if (targetNo < sNo || targetNo >= sNo + winDays.value) {
+    winStart.value = startOfMonth(new Date(targetNo * 86400000))
+    viewStart.value = 0
+  }
+  nextTick(() => {
+    const el = tgScroll.value
+    if (!el) return
+    const s2 = dayNo(winStart.value)
+    el.scrollLeft = Math.max(0, (targetNo - s2) * GANTT_DAY_W - (el.clientWidth - GANTT_DAY_W) / 2)
+  })
+}
+// 切到甘特图视图时聚焦：当前打开的任务，否则聚焦今天
+watch(view, (v) => {
+  if (v !== 'gantt') return
+  const t = detail.value?.task
+  if (t && t.startTime) focusGanttTo(new Date(Date.parse(t.startTime)))
+  else focusGanttTo(new Date())
+})
 </script>
 
 <template>
@@ -571,6 +586,7 @@ function tgScrollHandler(): void {
           </div>
         </div>
       </div>
+      <div v-if="ganttLoading" class="tg-loading">正在加载…</div>
     </div>
 
     <!-- 详情面板 -->
@@ -823,7 +839,8 @@ function tgScrollHandler(): void {
 .tv-t-title { font-weight: 600; max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
 
 /* 甘特图 */
-.tv-gantt { flex: 1; overflow: hidden; padding: 12px 18px; display: flex; }
+.tv-gantt { flex: 1; overflow: hidden; padding: 12px 18px; display: flex; position: relative; }
+.tg-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.7); color: var(--dt-text-3); font-size: 13px; z-index: 5; }
 .tg-scroll { overflow: auto; width: 100%; height: 100%; cursor: grab; user-select: none; }
 .tg-scroll.tg-dragging { cursor: grabbing; }
 .tg-axis { position: relative; height: 64px; border-bottom: 1px solid var(--dt-border-light); }
