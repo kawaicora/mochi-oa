@@ -193,10 +193,10 @@ class VideoStream {
       source.connect(splitter)
       analyserL = audioCtx.createAnalyser()
       analyserL.fftSize = 2048
-      analyserL.smoothingTimeConstant = 0.8
+      analyserL.smoothingTimeConstant = 0.0
       analyserR = audioCtx.createAnalyser()
       analyserR.fftSize = 2048
-      analyserR.smoothingTimeConstant = 0.8
+      analyserR.smoothingTimeConstant = 0.0
       splitter.connect(analyserL, 0)
       splitter.connect(analyserR, 1)
       if (audioCtx.state === 'suspended') void audioCtx.resume()
@@ -219,7 +219,7 @@ class VideoStream {
     const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string, faceR: number): void => {
       // 用满全部 fft 数据（1024 柱）；幅度范围拉大 + 增益，让频谱明显
       const inner = faceR + 2
-      const outer = faceR + 55
+      const outer = faceR + 80
       // 只绘制 1-8000Hz：按采样率换算 FFT bin 数（fftSize=2048，48000Hz→约342bin）
       const rate = audioCtx?.sampleRate ?? 48000
       const n = Math.min(data.length, Math.max(1, Math.floor((8000 / rate) * 1024)))

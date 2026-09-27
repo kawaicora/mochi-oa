@@ -14,7 +14,8 @@ const server = useServerStore()
 type TaskStatus = 'created' | 'in_progress' | 'completed' | 'pending_extension' | 'extended' | 'overdue'
 interface Task { id: number; companyId: number; projectId: number | null; title: string; description: string; startTime: string; dueTime: string; completedTime: string | null; status: TaskStatus; isOverdue: boolean; reminderYellow: number; reminderRed: number; images: string[]; createdBy: number; createdAt: string; updatedAt: string }
 interface Assignment { id: number; taskId: number; userId: number; content: string; status: 'created' | 'in_progress' | 'completed'; completedAt: string | null; username?: string; nick?: string; avatar?: string }
-interface Comment { id: number; taskId: number; userId: number; content: string; images: string[]; createdAt: string; username?: string; nick?: string }
+interface Att { kind: 'image' | 'video' | 'audio' | 'folder' | 'file'; url: string; name: string }
+interface Comment { id: number; taskId: number; userId: number; content: string; attachments: Att[]; createdAt: string; username?: string; nick?: string }
 interface Issue { id: number; taskId: number; userId: number; title: string; content: string; status: 'open' | 'resolved'; createdAt: string; username?: string; nick?: string }
 interface Extension { id: number; taskId: number; userId: number; requestedDueTime: string; reason: string; status: 'pending' | 'approved' | 'rejected'; decidedBy: number | null; decidedAt: string | null; createdAt: string; username?: string; nick?: string }
 interface Log { id: number; taskId: number; userId: number; fromStatus: string; toStatus: string; note: string; createdAt: string; username?: string; nick?: string }
@@ -136,24 +137,55 @@ async function submitRemind(): Promise<void> {
 
 // ─── 留言（对话流：文字 + 图片）───
 const commentText = ref('')
-const commentImages = ref<string[]>([])
-async function onPickCommentImage(): Promise<void> {
-  const path = await window.pantry.pickFile('image')
-  if (!path) return
-  const clientId = `task-cm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-  const up = await window.pantry.serverUploadChunked(path, clientId, app.activeCompanyId ?? 0)
-  if (up.ok && up.url) commentImages.value.push(up.url)
-  else err.value = up.error || '图片上传失败'
+const commentAtts = ref<Att[]>([])
+const baseName = (p: string): string => p.replace(/\\/g, '/').split('/').pop() ?? p
+async function uploadPaths(paths: string[], kind: Att['kind']): Promise<void> {
+  for (const path of paths) {
+    const clientId = `task-att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const up = await window.pantry.serverUploadChunked(path, clientId, app.activeCompanyId ?? 0)
+    if (up.ok && up.url) commentAtts.value.push({ kind, url: up.url, name: baseName(path) })
+    else err.value = up.error || '上传失败'
+  }
+}
+async function onPickImages(): Promise<void> {
+  const paths = await window.pantry.pickFiles('image')
+  if (paths && paths.length) await uploadPaths(paths, 'image')
+}
+async function onPickVideos(): Promise<void> {
+  const paths = await window.pantry.pickFiles('video')
+  if (paths && paths.length) await uploadPaths(paths, 'video')
+}
+async function onPickFiles(): Promise<void> {
+  const paths = await window.pantry.pickFiles()
+  if (paths && paths.length) await uploadPaths(paths, 'file')
+}
+async function onPickFolder(): Promise<void> {
+  const folderPath = await window.pantry.pickFolder()
+  if (!folderPath) return
+  const files = await window.pantry.serverListFolderFiles(folderPath)
+  if (!files.length) return
+  const root = folderPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const folderName = root.split('/').pop() ?? '文件夹'
+  for (const f of files) {
+    const rel = f.replace(/\\/g, '/')
+    const relDir = rel.startsWith(root) ? rel.slice(root.length).replace(/^\/+/, '') : ''
+    const dirOnly = relDir.split('/').slice(0, -1).join('/')
+    const relPath = folderName ? [folderName, dirOnly].filter(Boolean).join('/') : dirOnly
+    const clientId = `task-att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const up = await window.pantry.serverUploadChunked(f, clientId, app.activeCompanyId ?? 0, relPath)
+    if (up.ok && up.url) commentAtts.value.push({ kind: 'folder', url: up.url, name: folderName })
+    else { err.value = up.error || '文件夹上传失败'; break }
+  }
 }
 async function addComment(): Promise<void> {
   if (!detail.value) return
   const text = commentText.value.trim()
-  const imgs = commentImages.value
-  if (!text && imgs.length === 0) return
+  const atts = commentAtts.value
+  if (!text && atts.length === 0) return
   try {
-    const r = await app.addTaskComment(detail.value.task.id, text, imgs)
+    const r = await app.addTaskComment(detail.value.task.id, text, atts)
     commentText.value = ''
-    commentImages.value = []
+    commentAtts.value = []
     if (!r.ok) { err.value = r.error || '留言发送失败'; return }
     await refresh()
   } catch {
@@ -265,11 +297,18 @@ onMounted(async () => {
         <div v-if="detailTab === 'comments'" class="twin-tab">
           <div class="twin-comment-box">
             <textarea v-model="commentText" class="srv-input" rows="2" placeholder="输入留言…（可附图）" @keydown.ctrl.enter="addComment"></textarea>
-            <div v-if="commentImages.length" class="twin-pre">
-              <a v-for="(im, i) in commentImages" :key="i" @click.prevent="commentImages.splice(i, 1)"><img :src="im" /></a>
+            <div v-if="commentAtts.length" class="twin-pre">
+              <div v-for="(at, i) in commentAtts" :key="i" class="twin-pre-item" @click="commentAtts.splice(i, 1)">
+                <img v-if="at.kind === 'image'" :src="at.url" />
+                <video v-else-if="at.kind === 'video'" :src="at.url"></video>
+                <i v-else :class="at.kind === 'folder' ? 'fas fa-folder' : 'far fa-file-alt'"></i>
+              </div>
             </div>
             <div class="twin-ops">
-              <button class="twin-img" @click="onPickCommentImage"><i class="fas fa-image"></i> 附图</button>
+              <button class="twin-img" title="多选图片" @click="onPickImages"><i class="fas fa-image"></i> 图片</button>
+              <button class="twin-img" title="多选视频" @click="onPickVideos"><i class="fas fa-file-video"></i> 视频</button>
+              <button class="twin-img" title="多选文件/模型" @click="onPickFiles"><i class="fas fa-paperclip"></i> 文件</button>
+              <button class="twin-img" title="发送文件夹" @click="onPickFolder"><i class="fas fa-folder-open"></i> 文件夹</button>
               <button class="dt-btn dt-btn-primary" @click="addComment"><i class="fas fa-paper-plane"></i> 发送</button>
             </div>
           </div>
@@ -277,8 +316,12 @@ onMounted(async () => {
             <span class="twin-log-u">{{ who(c.username, c.nick) }}</span>
             <span class="twin-log-t">{{ fmt(c.createdAt) }}</span>
             <div v-if="c.content" class="twin-c-text">{{ c.content }}</div>
-            <div v-if="c.images && c.images.length" class="twin-imgs">
-              <a v-for="(im, i) in c.images" :key="i" :href="im" target="_blank"><img :src="im" /></a>
+            <div v-if="c.attachments && c.attachments.length" class="twin-imgs">
+              <template v-for="(at, i) in c.attachments" :key="i">
+                <a v-if="at.kind === 'image'" :href="at.url" target="_blank"><img :src="at.url" /></a>
+                <video v-else-if="at.kind === 'video'" :src="at.url" controls></video>
+                <a v-else class="twin-att" :href="at.url" target="_blank"><i :class="at.kind === 'folder' ? 'fas fa-folder' : 'far fa-file-alt'"></i>{{ at.name || at.url }}</a>
+              </template>
             </div>
           </div>
           <div v-if="!detail.comments.length" class="twin-empty">还没有留言</div>
@@ -403,6 +446,13 @@ html, body, #app, .twin { height: 100%; margin: 0; }
 .twin-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .twin-images, .twin-imgs { display: flex; gap: 8px; flex-wrap: wrap; }
 .twin-images img, .twin-imgs img { max-width: 200px; max-height: 150px; object-fit: cover; border-radius: 8px; }
+.twin-imgs video { max-width: 320px; max-height: 200px; border-radius: 8px; }
+.twin-att { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f6f8fa; border: 1px solid var(--dt-border-light); border-radius: 8px; color: var(--dt-text-2); text-decoration: none; font-size: 12px; }
+.twin-att i { font-size: 16px; color: var(--dt-primary); }
+.twin-pre-item { width: 56px; height: 56px; border-radius: 6px; overflow: hidden; border: 1px dashed var(--dt-border-strong); cursor: pointer; display: flex; align-items: center; justify-content: center; background: #fafafa; }
+.twin-pre-item img { width: 100%; height: 100%; object-fit: cover; }
+.twin-pre-item video { width: 100%; height: 100%; object-fit: cover; }
+.twin-pre-item i { font-size: 20px; color: var(--dt-text-3); }
 .twin-tabs { display: flex; gap: 4px; margin-top: 12px; border-bottom: 1px solid var(--dt-border-light); }
 .twin-tabs button { border: none; background: transparent; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--dt-text-3); border-radius: 6px 6px 0 0; }
 .twin-tabs button.on { color: var(--dt-primary); font-weight: 700; box-shadow: inset 0 -2px 0 var(--dt-primary); }

@@ -147,6 +147,7 @@ export const IpcChannels = {
   serverUploadChunked: 'server:uploadChunked',
   /** 打开系统文件选择框，返回所选文件路径（用于发送图片/文件） */
   filePick: 'file:pick',
+  filePickMulti: 'file:pickMulti',
   /** 读取本地文件字节（音频 blob 播放用，绕开 app-file 协议） */
   audioReadFile: 'file:readAudioBytes',
   /** 打开系统文件夹选择框，返回所选目录路径（用于发送文件夹） */

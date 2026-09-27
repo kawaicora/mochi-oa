@@ -202,7 +202,7 @@ const api = {
   serverTaskAddAssignment: (taskId: number, userId: number, content: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskAddAssignment, taskId, userId, content),
   serverTaskRemoveAssignment: (id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskRemoveAssignment, id),
   serverTaskSetAssignmentStatus: (id: number, status: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskSetAssignmentStatus, id, status),
-  serverTaskComment: (taskId: number, content: string, images?: string[]): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskComment, taskId, content, images ?? []),
+  serverTaskComment: (taskId: number, content: string, attachments?: Array<{ kind: string; url: string; name: string }>): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskComment, taskId, content, attachments ?? []),
   serverTaskAddIssue: (taskId: number, title: string, content: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskAddIssue, taskId, title, content),
   serverTaskResolveIssue: (issueId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskResolveIssue, issueId),
   serverTaskRequestExtension: (taskId: number, dt: string, reason: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverTaskRequestExtension, taskId, dt, reason),
@@ -241,6 +241,7 @@ const api = {
   serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
     ipcRenderer.invoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? ''),
   pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePick, filter ?? null),
+  pickFiles: (filter?: 'image' | 'video' | 'audio'): Promise<string[]> => ipcRenderer.invoke(IpcChannels.filePickMulti, filter ?? null),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePickFolder),
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     ipcRenderer.invoke(IpcChannels.serverListFolderFiles, folderPath),

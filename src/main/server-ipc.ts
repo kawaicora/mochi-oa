@@ -290,7 +290,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverTaskAddAssignment, (_e, taskId, userId, content) => serverClient.taskAddAssignment(Number(taskId) || 0, Number(userId) || 0, String(content ?? '')))
   ipcMain.handle(IpcChannels.serverTaskRemoveAssignment, (_e, id) => serverClient.taskRemoveAssignment(Number(id) || 0))
   ipcMain.handle(IpcChannels.serverTaskSetAssignmentStatus, (_e, id, status) => serverClient.taskSetAssignmentStatus(Number(id) || 0, String(status)))
-  ipcMain.handle(IpcChannels.serverTaskComment, (_e, taskId, content, images) => serverClient.taskComment(Number(taskId) || 0, String(content ?? ''), Array.isArray(images) ? images.filter((x): x is string => typeof x === 'string') : []))
+  ipcMain.handle(IpcChannels.serverTaskComment, (_e, taskId, content, attachments) => serverClient.taskComment(Number(taskId) || 0, String(content ?? ''), Array.isArray(attachments) ? attachments : []))
   ipcMain.handle(IpcChannels.serverTaskAddIssue, (_e, taskId, title, content) => serverClient.taskAddIssue(Number(taskId) || 0, String(title ?? ''), String(content ?? '')))
   ipcMain.handle(IpcChannels.serverTaskResolveIssue, (_e, issueId) => serverClient.taskResolveIssue(Number(issueId) || 0))
   ipcMain.handle(IpcChannels.serverTaskRequestExtension, (_e, taskId, dt, reason) => serverClient.taskRequestExtension(Number(taskId) || 0, String(dt), String(reason ?? '')))
@@ -466,6 +466,21 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       properties: ['openDirectory']
     })
     return Promise.resolve(res.canceled ? null : res.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IpcChannels.filePickMulti, async (e, filter) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    let filters: Electron.FileFilter[]
+    if (filter === 'image') filters = [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
+    else if (filter === 'video') filters = [{ name: '视频', extensions: ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v', 'flv'] }]
+    else if (filter === 'audio') filters = [{ name: '音频', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac', 'wma'] }]
+    else filters = [{ name: '所有文件', extensions: ['*'] }]
+    const res = await dialog.showOpenDialog(win ?? undefined as unknown as BrowserWindow, {
+      title: '选择文件（可多选）',
+      properties: ['openFile', 'multiSelections'],
+      filters
+    })
+    return Promise.resolve(res.canceled ? [] : res.filePaths ?? [])
   })
 
   // 递归枚举文件夹内所有文件（用于发送文件夹）
