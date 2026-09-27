@@ -994,10 +994,15 @@ export const useAppStore = defineStore('app', () => {
     if (!s || !s.conversationId) return { ok: false, error: '未在会话中' }
     const target = messages.value.find((m) => m.id === messageId)
     const isOwn = target ? target.fromId === (server.state.userId ?? 0) : true
+    const myId = server.state.userId ?? 0
     const ack = await window.pantry.serverMessageDelete(s.conversationId, messageId)
-    // 撤回：自己的消息本地兜底移除（含本地临时消息——服务端无对应记录时也能撤回，避免删不掉）
+    // 撤回：自己的消息本地兜底移除（含本地临时消息）；若存在同内容重复条目（同一图片本地+服务端各一条）一并移除
     if (ack.ok || isOwn || !target) {
-      messages.value = messages.value.filter((m) => m.id !== messageId)
+      messages.value = messages.value.filter((m) => {
+        if (m.id === messageId) return false
+        if (ack.ok && target && isOwn && m.fromId === myId && m.kind === target.kind && m.content === target.content) return false
+        return true
+      })
       return { ok: true }
     }
     return { ok: false, error: ack.error || '撤回失败' }
