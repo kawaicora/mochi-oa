@@ -64,28 +64,63 @@ onBeforeUnmount(() => {
   <input ref="el" class="srv-input" :placeholder="placeholder || (time !== false ? '选择时间' : '选择日期')" readonly />
 </template>
 
+
 <style scoped>
 :global(.flatpickr-calendar) {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
-  border-radius: 10px;
-  border: 1px solid var(--dt-border-light);
-  font-family: var(--dt-font);
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  font-size: 13px;
+  font-family: inherit;
+  width: 284px;
   overflow: hidden;
+  background: #fff;
 }
-:global(.flatpickr-day.selected),
-:global(.flatpickr-day.selected:hover) {
+:global(.flatpickr-calendar.arrowTop:before) { border-bottom-color: #e5e7eb; }
+:global(.flatpickr-calendar.arrowTop:after) { border-bottom-color: #fff; }
+:global(.flatpickr-months) { padding: 12px 10px 2px; }
+:global(.flatpickr-current-month) { font-size: 14px; font-weight: 700; color: #1f2937; }
+:global(.flatpickr-current-month .cur-month:hover) { background: transparent; }
+:global(.flatpickr-monthDropdown-months) { font-size: 14px; font-weight: 700; color: #1f2937; }
+:global(.flatpickr-prev-month), :global(.flatpickr-next-month) { border-radius: 6px; top: 12px; }
+:global(.flatpickr-prev-month:hover), :global(.flatpickr-next-month:hover) { background: #f3f4f6; color: var(--dt-primary); }
+:global(.flatpickr-weekdays) { padding: 6px 8px 2px; }
+:global(.flatpickr-weekday) { color: #6b7280; font-size: 11px; font-weight: 600; }
+:global(.flatpickr-days) { padding: 2px 8px 8px; }
+:global(.flatpickr-day) {
+  border: none;
+  border-radius: 8px;
+  color: #374151;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+:global(.flatpickr-day:hover) { background: #eef2ff; color: var(--dt-primary); }
+:global(.flatpickr-day.selected), :global(.flatpickr-day.selected:hover) {
   background: var(--dt-primary);
-  border-color: var(--dt-primary);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.35);
+  font-weight: 600;
 }
+:global(.flatpickr-day.today) { border: 1px solid var(--dt-primary); color: var(--dt-primary); }
+:global(.flatpickr-day.today.selected) { color: #fff; }
+:global(.flatpickr-day.prevMonthDay), :global(.flatpickr-day.nextMonthDay) { color: #d1d5db; }
+:global(.flatpickr-time) { border-top: 1px solid #f3f4f6; padding: 10px; }
+:global(.flatpickr-time input) { font-size: 13px; color: #374151; border-radius: 6px; }
+:global(.flatpickr-time input:hover), :global(.flatpickr-time input:focus) { background: #f9fafb; }
+:global(.flatpickr-time .flatpickr-am-pm) { font-weight: 600; color: #6b7280; }
 :global(.flatpickr-confirm) {
   color: var(--dt-primary);
-  font-weight: 600;
-  border-top: 1px solid var(--dt-border-light);
+  font-weight: 700;
+  border-top: 1px solid #f3f4f6;
+  padding: 11px 0;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
 }
-:global(.flatpickr-confirm:hover) {
-  background: var(--dt-active);
-}
-:global(.flatpickr-clear) {
-  color: var(--dt-danger);
-}
+:global(.flatpickr-confirm:hover) { background: #eef2ff; }
+:global(.flatpickr-clear) { color: #dc2626; font-weight: 600; }
+:global(.flatpickr-clear:hover) { background: #fef2f2; }
 </style>
+
