@@ -220,7 +220,12 @@ class RtcEngine {
     try {
       // 若已有未完成的 remote offer，先回滚
       if (pc.signalingState === 'have-remote-offer') {
-        await pc.setRemoteDescription({ type: 'rollback' })
+        // 检查后状态可能已被并发 offer 变更（如已是 stable）→ rollback 失败时忽略，继续尝试 set 新 offer
+        try {
+          await pc.setRemoteDescription({ type: 'rollback' })
+        } catch {
+          /* ignore：状态已变，交由下方 setRemoteDescription 决定 */
+        }
       }
       await pc.setRemoteDescription({ type: 'offer', sdp })
       await this._flushPendingIce(userId, pc)
