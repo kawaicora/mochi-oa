@@ -120,3 +120,160 @@ button {
 .dt-btn-block {
   width: 100%;
 }
+
+/* ================= 统一表单基元（全局兜底，组件未 scoped 定义时生效） ================= */
+/* 输入框 / 下拉 / 文本域 */
+.srv-input,
+.srv-select,
+.srv-textarea {
+  height: 38px;
+  width: 100%;
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--dt-text);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  box-sizing: border-box;
+}
+.srv-textarea {
+  height: auto;
+  min-height: 84px;
+  padding: 10px 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.srv-input:hover,
+.srv-select:hover,
+.srv-textarea:hover {
+  border-color: #c9cdd4;
+}
+.srv-input:focus,
+.srv-select:focus,
+.srv-textarea:focus {
+  border-color: var(--dt-primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+}
+.srv-input::placeholder,
+.srv-textarea::placeholder {
+  color: var(--dt-text-4);
+}
+.srv-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2386909c' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  cursor: pointer;
+}
+.srv-select:disabled {
+  background-color: #f7f8fa;
+  color: var(--dt-text-4);
+  cursor: not-allowed;
+}
+
+/* 模态框 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: dt-fade 0.16s ease;
+}
+@keyframes dt-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  min-width: 320px;
+  max-width: 92vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  animation: dt-pop 0.16s ease;
+  overflow: hidden;
+}
+@keyframes dt-pop {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-head {
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--dt-text);
+  border-bottom: 1px solid var(--dt-border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--dt-border-light);
+  flex-shrink: 0;
+}
+
+/* 字段：标签 / 必填 / 间距 / 布局 */
+.srv-field {
+  margin-bottom: 18px;
+}
+.srv-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dt-text-2);
+  margin-bottom: 7px;
+}
+.req {
+  color: #e64545;
+  font-style: normal;
+  margin-left: 2px;
+}
+.srv-row {
+  display: flex;
+  gap: 14px;
+}
+.srv-row > * {
+  flex: 1;
+  min-width: 0;
+}
+.srv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.srv-hint {
+  font-size: 12px;
+  color: var(--dt-text-3);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.srv-err {
+  font-size: 12px;
+  color: #d92b3a;
+  margin-top: 8px;
+  background: #fff1f0;
+  border: 1px solid #ffd4d2;
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.5;
+}
