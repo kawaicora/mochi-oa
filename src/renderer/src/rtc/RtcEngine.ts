@@ -103,10 +103,10 @@ class RtcEngine {
         void this._handleOffer(pc, fromUserId, signal.sdp)
         break
       case 'answer':
-        void this._handleAnswer(pc, signal.sdp)
+        void this._handleAnswer(pc, fromUserId, signal.sdp)
         break
       case 'ice':
-        void this._handleIce(pc, signal)
+        void this._handleIce(pc, fromUserId, signal)
         break
     }
   }
@@ -188,6 +188,32 @@ class RtcEngine {
     }
   }
 
+  // 远端 SDP（offer/answer）未 set 时先到/后到的 ICE candidate 会因 remoteDescription=null 被 addIceCandidate 拒绝；
+  // 这里按 userId 缓存，待远端描述 set 完成后统一补加。
+  private _pendingIce = new Map<number, RTCIceCandidateInit[]>()
+
+  private _pendingIceArr(userId: number): RTCIceCandidateInit[] {
+    let arr = this._pendingIce.get(userId)
+    if (!arr) {
+      arr = []
+      this._pendingIce.set(userId, arr)
+    }
+    return arr
+  }
+
+  private async _flushPendingIce(userId: number, pc: RTCPeerConnection): Promise<void> {
+    const arr = this._pendingIce.get(userId)
+    if (!arr || arr.length === 0) return
+    this._pendingIce.delete(userId)
+    for (const c of arr) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(c))
+      } catch (err) {
+        console.error('[RtcEngine] flushPendingIce failed:', err)
+      }
+    }
+  }
+
   private async _handleOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
     try {
       // 若已有未完成的 remote offer，先回滚
@@ -195,6 +221,7 @@ class RtcEngine {
         await pc.setRemoteDescription({ type: 'rollback' })
       }
       await pc.setRemoteDescription({ type: 'offer', sdp })
+      await this._flushPendingIce(userId, pc)
       const answer = await pc.createAnswer()
       answer.sdp = EnforceStereo(answer.sdp ?? '')
       await pc.setLocalDescription(answer)
@@ -204,18 +231,28 @@ class RtcEngine {
     }
   }
 
-  private async _handleAnswer(pc: RTCPeerConnection, sdp: string): Promise<void> {
+  private async _handleAnswer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
     try {
       // 仅当本地有未解决的 offer 时才接受 answer
       if (pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription({ type: 'answer', sdp })
+        await this._flushPendingIce(userId, pc)
       }
     } catch (err) {
       console.error('[RtcEngine] handleAnswer failed:', err)
     }
   }
 
-  private async _handleIce(pc: RTCPeerConnection, signal: Extract<RtcSignalPayload, { type: 'ice' }>): Promise<void> {
+  private async _handleIce(pc: RTCPeerConnection, userId: number, signal: Extract<RtcSignalPayload, { type: 'ice' }>): Promise<void> {
+    // 远端描述尚未 set：先缓存，待 offer/answer 处理完成后统一补加，避免 addIceCandidate 报 remote description was null
+    if (!pc.remoteDescription) {
+      this._pendingIceArr(userId).push({
+        candidate: signal.candidate,
+        sdpMid: signal.sdpMid ?? undefined,
+        sdpMLineIndex: signal.sdpMLineIndex ?? undefined
+      })
+      return
+    }
     try {
       await pc.addIceCandidate(
         new RTCIceCandidate({
