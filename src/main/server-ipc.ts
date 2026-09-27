@@ -31,6 +31,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('userProfileUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.userProfileUpdated, d))
   serverClient.on('messageDeleted', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessageDeleted, d))
   serverClient.on('conversationsUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverConversationsUpdated, d))
+  serverClient.on('chatReadReceipt', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverChatReadReceipt, d))
   serverClient.on('sessionNewDevice', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionNewDevice, d))
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
 
@@ -241,8 +242,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverConversationPin, (_e, conversationId, pinned) =>
     serverClient.pinConversation(Number(conversationId) || 0, pinned === true)
   )
-  ipcMain.handle(IpcChannels.serverConversationRead, (_e, conversationId) =>
-    serverClient.markConversationRead(Number(conversationId) || 0)
+  ipcMain.handle(IpcChannels.serverConversationRead, (_e, conversationId, lastMessageId) =>
+    serverClient.markConversationRead(Number(conversationId) || 0, lastMessageId ? Number(lastMessageId) : null)
   )
   ipcMain.handle(IpcChannels.serverChatHistory, (_e, groupId, beforeTs, limit) =>
     serverClient.groupHistory(Number(groupId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)

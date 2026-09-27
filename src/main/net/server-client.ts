@@ -252,6 +252,7 @@ export class ServerClient extends EventEmitter {
     socket.on('user:profileUpdated', (d: { user: { id: number; username: string; nick: string; avatar: string; email: string; phone: string; extra: string } }) => this.emit('userProfileUpdated', d))
     socket.on('message:deleted', (d: ServerMessageDeleted) => this.emit('messageDeleted', d))
     socket.on('conversations:updated', (d: unknown) => this.emit('conversationsUpdated', d))
+    socket.on('chat:readReceipt', (d: unknown) => this.emit('chatReadReceipt', d))
 
     // 多会话推送：新设备登录 → 本端弹窗提醒；本端会话被踢/过期 → 清 token 回登录页
     socket.on('auth:newDeviceLogin', (d: { sessionId: number; device: string; ip: string; at: string }) =>
@@ -737,9 +738,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ pinned: boolean }>(this.socket, 'conversation:pin', { conversationId, pinned })
   }
 
-  async markConversationRead(conversationId: number): Promise<Ack> {
+  async markConversationRead(conversationId: number, lastMessageId?: number | null): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'conversation:read', { conversationId })
+    return emitWithAck(this.socket, 'conversation:read', { conversationId, lastMessageId: lastMessageId && lastMessageId > 0 ? lastMessageId : null })
   }
 
   // ─── 删除 ───────────────────────────────────────────────

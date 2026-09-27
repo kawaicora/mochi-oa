@@ -161,8 +161,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.serverConversations, type ?? null),
   serverConversationPin: (conversationId: number, pinned: boolean): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverConversationPin, conversationId, pinned),
-  serverConversationRead: (conversationId: number): Promise<Ack> =>
-    ipcRenderer.invoke(IpcChannels.serverConversationRead, conversationId),
+  serverConversationRead: (conversationId: number, lastMessageId?: number | null): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.serverConversationRead, conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null),
   serverChatHistory: (groupId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverChatHistory, groupId, beforeTs ?? null, limit ?? null),
   serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder'): Promise<Ack> =>
@@ -280,6 +280,8 @@ const api = {
   onServerMessageDeleted: (l: (d: ServerMessageDeleted) => void) =>
     subscribe<ServerMessageDeleted>(IpcEvents.serverMessageDeleted, l),
   onServerConversationsUpdated: (l: (d: unknown) => void) => subscribe<unknown>(IpcEvents.serverConversationsUpdated, l),
+  onServerChatReadReceipt: (l: (d: { conversationId: number; userId: number; lastReadMessageId: number | null }) => void) =>
+    subscribe<{ conversationId: number; userId: number; lastReadMessageId: number | null }>(IpcEvents.serverChatReadReceipt, l),
   onServerSessionNewDevice: (l: (d: NewDeviceLoginEvent) => void) =>
     subscribe<NewDeviceLoginEvent>(IpcEvents.serverSessionNewDevice, l),
   onServerSessionRevoked: (l: (d: SessionRevokedEvent) => void) =>

@@ -14,6 +14,7 @@ import type {
   Group,
   ServerGroupMember,
   ConversationItem,
+  ReadReceipt,
   FriendItem,
   OrgMember,
   ServerChatMessage,
@@ -35,6 +36,7 @@ export interface SelectedChat {
   dmUserId?: number
   name: string
   pinned: boolean
+  readReceipts?: ReadReceipt[]
 }
 
 export const useAppStore = defineStore('app', () => {
@@ -304,6 +306,24 @@ export const useAppStore = defineStore('app', () => {
     if (typeof p.pinned === 'boolean') {
       item.pinned = p.pinned
       conversations.value.sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
+    }
+  })
+
+  // 已读回执：他端读到某条消息 → 更新本地该会话/当前会话的已读位置，供消息"已读"标记渲染
+  window.pantry.onServerChatReadReceipt((ev) => {
+    const id = Number(ev.conversationId)
+    const item = conversations.value.find((c) => c.conversationId === id)
+    if (item) {
+      if (!Array.isArray(item.readReceipts)) item.readReceipts = []
+      const idx = item.readReceipts.findIndex((r) => r.userId === Number(ev.userId))
+      if (idx >= 0) item.readReceipts[idx]!.lastReadMessageId = ev.lastReadMessageId
+      else item.readReceipts.push({ userId: Number(ev.userId), lastReadMessageId: ev.lastReadMessageId })
+    }
+    if (selected.value && selected.value.conversationId === id) {
+      if (!Array.isArray(selected.value.readReceipts)) selected.value.readReceipts = []
+      const i2 = selected.value.readReceipts.findIndex((r) => r.userId === Number(ev.userId))
+      if (i2 >= 0) selected.value.readReceipts[i2]!.lastReadMessageId = ev.lastReadMessageId
+      else selected.value.readReceipts.push({ userId: Number(ev.userId), lastReadMessageId: ev.lastReadMessageId })
     }
   })
 
@@ -784,24 +804,34 @@ export const useAppStore = defineStore('app', () => {
 
   // ─── 会话/消息 ───
   async function openGroup(groupId: number, name: string): Promise<void> {
-    selected.value = { conversationId: 0, kind: 'group', groupId, name, pinned: false }
+    selected.value = { conversationId: 0, kind: 'group', groupId, name, pinned: false, readReceipts: [] }
     const conv = conversations.value.find((c) => c.groupId === groupId)
     if (conv && selected.value) {
       selected.value.conversationId = conv.conversationId
       selected.value.pinned = conv.pinned
+      selected.value.readReceipts = conv.readReceipts ? [...conv.readReceipts] : []
       void markRead(conv.conversationId)
     }
     await loadGroupHistory(groupId)
+    if (conv && selected.value) {
+      const lm = messages.value[messages.value.length - 1]
+      void markRead(conv.conversationId, lm && !String(lm.id).startsWith('local-') ? Number(lm.id) : null)
+    }
   }
   async function openDm(userId: number, name: string): Promise<void> {
-    selected.value = { conversationId: 0, kind: 'dm', dmUserId: userId, name, pinned: false }
+    selected.value = { conversationId: 0, kind: 'dm', dmUserId: userId, name, pinned: false, readReceipts: [] }
     const conv = conversations.value.find((c) => c.dmUserId === userId)
     if (conv && selected.value) {
       selected.value.conversationId = conv.conversationId
       selected.value.pinned = conv.pinned
+      selected.value.readReceipts = conv.readReceipts ? [...conv.readReceipts] : []
       void markRead(conv.conversationId)
     }
     await loadDmHistory(userId)
+    if (conv && selected.value) {
+      const lm = messages.value[messages.value.length - 1]
+      void markRead(conv.conversationId, lm && !String(lm.id).startsWith('local-') ? Number(lm.id) : null)
+    }
   }
   async function openConversation(item: ConversationItem): Promise<void> {
     if (item.type === 'group' && item.groupId) await openGroup(item.groupId, item.name)
@@ -983,9 +1013,9 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverConversationPin(conversationId, pinned)
     if (ack.ok) await refreshConversations()
   }
-  async function markRead(conversationId: number): Promise<void> {
+  async function markRead(conversationId: number, lastMessageId?: number | null): Promise<void> {
     if (conversationId <= 0) return
-    await window.pantry.serverConversationRead(conversationId)
+    await window.pantry.serverConversationRead(conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null)
     const item = conversations.value.find((c) => c.conversationId === conversationId)
     if (item) item.unread = 0
   }
@@ -1035,7 +1065,7 @@ export const useAppStore = defineStore('app', () => {
       if (idx >= 0) messages.value[idx] = msg
       else messages.value.push(msg)
       void ensureLocalPreview(msg)
-      if (inConv) void markRead(selected.value.conversationId)
+      if (inConv) void markRead(selected.value.conversationId, Number(msg.id) || null)
     }
     const conv = conversations.value.find((c) => c.conversationId === msg.conversationId)
     const preview =

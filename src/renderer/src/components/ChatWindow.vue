@@ -63,6 +63,24 @@ function fmtTime(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** 消息已读回执标记：仅自己发出的消息；私聊=对方是否已读，群聊=已读人数 */
+function readLabelOf(m: ServerChatMessage): string {
+  const sel = selected.value
+  if (!sel || m.fromId !== myId.value) return ''
+  const id = Number(m.id)
+  if (!Number.isFinite(id)) return ''
+  const receipts = sel.readReceipts ?? []
+  if (sel.kind === 'dm') {
+    const peer = receipts.find((r) => r.userId !== myId.value)
+    return peer && peer.lastReadMessageId && peer.lastReadMessageId >= id ? '已读' : '未读'
+  }
+  let n = 0
+  for (const r of receipts) {
+    if (r.userId !== myId.value && r.lastReadMessageId && r.lastReadMessageId >= id) n++
+  }
+  return n > 0 ? `已读 ${n}` : ''
+}
+
 async function onSend(): Promise<void> {
   if (!draft.value.trim() || sending.value) return
   sending.value = true
@@ -315,6 +333,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
             <div class="msg-meta">
               <span class="msg-nick">{{ m.fromId === myId ? '我' : m.nick || '' }}</span>
               <span class="msg-time">{{ fmtTime(m.ts) }}</span>
+              <span v-if="m.fromId === myId && readLabelOf(m)" class="msg-read" :class="{ unread: readLabelOf(m) === '未读' }">{{ readLabelOf(m) }}</span>
             </div>
             <div class="msg-bubble" @contextmenu.prevent="openMsgMenu($event, m.id)">
               <span v-if="m.kind === 'text'">{{ m.content }}</span>
@@ -538,6 +557,14 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 }
 .msg-time {
   font-size: 11px;
+  color: var(--dt-text-4);
+}
+.msg-read {
+  font-size: 10px;
+  color: #52c41a;
+  white-space: nowrap;
+}
+.msg-read.unread {
   color: var(--dt-text-4);
 }
 .msg-bubble {

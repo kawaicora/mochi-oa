@@ -223,6 +223,7 @@ export const IpcEvents = {
   serverPresence: 'server:event:presence',
   serverMessageDeleted: 'server:event:messageDeleted',
   serverConversationsUpdated: 'server:event:conversationsUpdated',
+  serverChatReadReceipt: 'server:event:chatReadReceipt',
   /** 新设备登录 → 本端弹窗提醒 */
   serverSessionNewDevice: 'server:event:sessionNewDevice',
   /** 会话被踢下线/过期 → 本端清 token 回登录页 */

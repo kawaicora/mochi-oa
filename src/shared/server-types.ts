@@ -137,6 +137,12 @@ export interface GroupInviteEvent {
 export type ConversationKind = 'group' | 'dm'
 
 /** 对话列表项（服务端 conversation:list 返回） */
+/** 会话内某成员的已读位置（已读回执） */
+export interface ReadReceipt {
+  userId: number
+  lastReadMessageId: number | null
+}
+
 export interface ConversationItem {
   conversationId: number
   type: ConversationKind
@@ -148,6 +154,8 @@ export interface ConversationItem {
   unread: number
   name: string
   avatar?: string
+  /** 会话内各成员已读位置（已读回执） */
+  readReceipts: ReadReceipt[]
 }
 
 /** 组织成员（公司/群/部门成员，含在线） */
