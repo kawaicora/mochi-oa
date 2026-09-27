@@ -169,9 +169,9 @@ async function onDelete(task: Task): Promise<void> {
 }
 
 // ─── 详情 ───
-async function openTask(task: Task): Promise<void> {
-  const dd = await app.fetchTaskDetail(task.id)
-  if (dd) { detail.value = dd; detailTab.value = 'activity' }
+function openTask(task: Task): void {
+  // 点击任务 → 打开独立详情窗口（含留言/问题/执行人/动态）
+  void window.pantry.openTaskWindow(task.id)
 }
 function closeDetail(): void { detail.value = null }
 
@@ -185,6 +185,15 @@ async function submitStatus(): Promise<void> {
   const r = await app.setTaskStatus(m.taskId, m.status, m.note.trim())
   statusModal.value = null
   if (!r.ok) { err.value = r.error || '状态变更失败'; return }
+  // 任务开始进行时，把未开始的执行人同步为进行中
+  if (m.status === 'in_progress') {
+    const dd = await app.fetchTaskDetail(m.taskId)
+    if (dd) {
+      for (const a of dd.assignments) {
+        if (a.status === 'created') await app.setAssignmentStatus(a.id, 'in_progress')
+      }
+    }
+  }
   await refresh()
 }
 

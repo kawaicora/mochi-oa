@@ -578,4 +578,19 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       void win.loadFile(join(__dirname, '../renderer/meeting.html'), { query })
     }
   })
+
+  // 打开独立任务详情窗口
+  ipcMain.handle(IpcChannels.openTaskWindow, (_e, taskId) => {
+    const win = new BrowserWindow({
+      width: 1100, height: 760, minWidth: 860, minHeight: 600,
+      resizable: true, autoHideMenuBar: true, backgroundColor: '#ffffff',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    const query: Record<string, string> = { taskId: String(taskId ?? 0) }
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/task.html?${new URLSearchParams(query).toString()}`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/task.html'), { query })
+    }
+  })
 }

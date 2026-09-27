@@ -194,6 +194,8 @@ export const IpcChannels = {
   winSetLoginMode: 'win:setLoginMode',
   /** 打开独立会议窗口 */
   openMeetingWindow: 'win:openMeeting',
+  /** 打开独立任务详情窗口 */
+  openTaskWindow: 'win:openTask',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */

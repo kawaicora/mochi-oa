@@ -48,6 +48,8 @@ const api = {
   setLoginMode: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winSetLoginMode),
   openMeetingWindow: (params: OpenMeetingWindowParams): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openMeetingWindow, params),
+  openTaskWindow: (taskId: number): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
   notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
