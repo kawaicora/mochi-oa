@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.5.9",
+  "version": "2.6.0",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -49,16 +49,18 @@
     "dev": "electron-vite dev",
     "dev:watch": "electron-vite dev --watch",
     "build": "electron-vite build",
+    "obf": "node tools/compile-bytenode.mjs",
     "preview": "electron-vite preview",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:win": "npm run build && npm run obf && electron-builder --win",
+    "dist:mac": "npm run build && npm run obf && electron-builder --mac",
+    "dist:linux": "npm run build && npm run obf && electron-builder --linux"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
+    "bytenode": "^1.7.0",
     "flatpickr": "^4.6.13",
     "flv.js": "^1.6.2",
     "lunar-javascript": "^1.7.7",
