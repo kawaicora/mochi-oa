@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -72,7 +72,7 @@
   "devDependencies": {
     "@types/three": "^0.186.0",
     "@vitejs/plugin-vue": "^5.0.5",
-    "electron": "^31.3.1",
+    "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.3",
