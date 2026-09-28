@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -77,6 +77,7 @@
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.3",
     "vite": "^5.3.1",
+    "vite-plugin-javascript-obfuscator": "^3.1.0",
     "vue-tsc": "^2.0.26"
   }
 }

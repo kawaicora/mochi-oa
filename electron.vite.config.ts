@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
-
+import javascriptObfuscator from 'vite-plugin-javascript-obfuscator'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
@@ -24,7 +24,28 @@ export default defineConfig({
         '@shared': resolve(__dirname, 'src/shared')
       }
     },
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      javascriptObfuscator({
+        // 指定需要混淆的文件，通常排除 node_modules
+        include: ['src/**/*.{js,ts,vue}'], 
+        exclude: ['node_modules/**'],
+        // 混淆选项，参考 javascript-obfuscator
+        options: {
+          compact: true, // 压缩代码
+          controlFlowFlattening: true, // 控制流扁平化（核心混淆手段）
+          controlFlowFlatteningThreshold: 0.75,
+          stringArray: true, // 字符串数组化
+          stringArrayEncoding: ['base64'], // 字符串 Base64 编码
+          stringArrayThreshold: 0.75,
+          identifierNamesGenerator: 'hexadecimal', // 变量名十六进制化
+          renameGlobals: false, // 不要重命名全局变量，防止破坏 Vue/Pinia
+          selfDefending: true, // 自我防御，防止格式化
+          debugProtection: true, // 防止调试
+          disableConsoleOutput: true, // 移除 console
+        }
+      })
+    ],
     build: {
       outDir: 'out/renderer',
       rollupOptions: {
