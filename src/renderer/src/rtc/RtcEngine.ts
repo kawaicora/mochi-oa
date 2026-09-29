@@ -86,15 +86,49 @@ class RtcEngine {
     )
 
     // 把本地流每条轨道加到 PC
+    const senders = [];
     this.localStream.getTracks().forEach((track) => {
-      pc.addTrack(track, this.localStream)
+      const sender = pc.addTrack(track, this.localStream)
+      // 只处理视频轨道，音频不需要设置分辨率/比特率策略
+      if (track.kind === 'video') {
+        configureVideoSender(sender).catch((err) => {
+          console.error('配置视频发送参数失败:', err)
+        })
+      }
     })
+    
+    // 2. 对每个视频 Sender 设置“禁止模糊”和“指定比特率”
+    async function configureVideoSender(sender: RTCRtpSender) {
+      const params = sender.getParameters();
+      
+      // 指定比特率 (Bitrate) ---
+      // 注意：encodings 是一个数组，通常 simulcast 未开启时只有一个元素
+      if (!params.encodings) params.encodings = [{}];
+      
+      // params.encodings[0].maxBitrate = 3_000_000; 
+      // 禁止画面模糊 (Degradation Preference) ---
+      // 'maintain-resolution': 优先保分辨率。带宽不足时，降低帧率（变卡），但保持清晰度（不糊）。
+      // 'maintain-framerate': 优先保流畅。带宽不足时，降低分辨率（变糊），但保持帧率（不卡）。
+      // 'balanced': 默认行为，两者权衡。
+      params.degradationPreference = 'maintain-resolution';
 
+      try {
+        await sender.setParameters(params);
+        console.log('视频参数已锁定：清晰');
+      } catch (e) {
+        console.error('设置参数失败:', e);
+      }
+    }
     this._bindPeerEvents(pc, userId)
 
     // 发起 offer
     void this._createOffer(userId, pc)
   }
+
+
+
+  
+
 
   // ─── 处理对端信令 ─────────────────────────────────────
 
