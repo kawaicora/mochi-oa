@@ -518,7 +518,11 @@ onMounted(async () => {
   try {
     const s = await window.pantry.serverGetState()
     myUserId.value = s.userId ?? 0
-    myNick.value = s.username ?? '我'
+    if (s.nick != undefined){
+      myNick.value = s.nick; 
+    } else {
+      myNick.value = s.username ?? '我'
+    }
     myAvatar.value = s.avatar ?? ''
   } catch {
     myNick.value = '我'
