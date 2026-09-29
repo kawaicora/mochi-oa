@@ -4,6 +4,8 @@
  * 空视频轨由 canvas 实时绘制占位图，不依赖外部图片资源。
  */
 
+import { VoiceAvatarSpectrum } from "./VoiceSpectrum"
+
 export class CameraUnavailableError extends Error {
   constructor() {
     super('没有可用的摄像头')
@@ -14,6 +16,14 @@ export class CameraUnavailableError extends Error {
 class VideoStream {
   /** 当前本地流（绑定到 RTCPeerConnection 和本地预览 video 元素） */
   public stream: MediaStream = new MediaStream()
+  public spectrum: VoiceAvatarSpectrum = new VoiceAvatarSpectrum({
+    fftSize: 4096,
+    naturalWeight: false,
+    gainDb: 0,
+    minDb: -80,
+    maxDb: 0,
+    fps: 30,
+  })
 
   private videoElement: HTMLVideoElement | null = null
 
@@ -167,163 +177,14 @@ class VideoStream {
       void el.setSinkId(deviceId).catch(() => { /* 忽略 */ })
     }
   }
+  
 
-  // ─── 频谱 + 头像（无摄像头时的默认视频轨）──────────────
 
-  /**
-   * 生成"头像+频谱"视频流（canvas）：圆形头像 + 左右声道实时环形频谱。
-   * 不绘制名字；无摄像头时作为视频轨，本地与远端同步显示。
-   */
-  GetVoiceAvatarStream(
-    audioStream: MediaStream | null,
-    opts: { size?: number; avatar?: string } = {}
-  ): MediaStream | null {
-    const track = audioStream?.getAudioTracks()[0]
-    if (!track) return null
-    if (this.divStreamCache) {
-      const cachedTrack = this.divStreamCache.stream.getVideoTracks()[0]
-      if (cachedTrack && cachedTrack.readyState !== 'ended') return this.divStreamCache.stream
-      // 旧轨道已结束 → 停掉并重建，避免本地/远程用死轨
-      this.divStreamCache.stop?.()
-      this.divStreamCache = null
-    }
-
-    const h = opts.size ?? 1080
-    const w = Math.round((h * 16) / 9)
-    const dpr = window.devicePixelRatio || 1
-    const canvas = document.createElement('canvas')
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    const g = canvas.getContext('2d')!
-    let raf = 0
-    let running = true
-    let audioCtx: AudioContext | null = null
-    let source: MediaStreamAudioSourceNode | null = null
-    let splitter: ChannelSplitterNode | null = null
-    let analyserL: AnalyserNode | null = null
-    let analyserR: AnalyserNode | null = null
-    let dataL = new Uint8Array(0)
-    let dataR = new Uint8Array(0)
-    let avatarImg: HTMLImageElement | null = null
-    let chunk = 4096;
-    let limitTopHz = 4000;
-    try {
-      audioCtx = new AudioContext()
-      source = audioCtx.createMediaStreamSource(new MediaStream([track]))
-      splitter = audioCtx.createChannelSplitter(2)
-      source.connect(splitter)
-      analyserL = audioCtx.createAnalyser()
-      analyserL.fftSize = chunk
-      analyserL.smoothingTimeConstant = 0.0
-      analyserR = audioCtx.createAnalyser()
-      analyserR.fftSize = chunk
-      analyserR.smoothingTimeConstant = 0.0
-      splitter.connect(analyserL, 0)
-      splitter.connect(analyserR, 1)
-      if (audioCtx.state === 'suspended') void audioCtx.resume()
-      dataL = new Uint8Array(analyserL.frequencyBinCount)
-      dataR = new Uint8Array(analyserR.frequencyBinCount)
-    } catch {
-      // 音频分析不可用：仍绘制静态头像
-    }
-
-    if (opts.avatar) {
-      // crossOrigin img 直接加载（服务端已返回 Access-Control-Allow-Origin），保证头像画进 canvas
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.onload = () => { avatarImg = img }
-      img.onerror = () => { avatarImg = null }
-      img.src = opts.avatar
-    }
-
-    // 半圆环频谱：把 data 均布到 [startA, endA]，径向高度随音量
-    const drawHalf = (data: Uint8Array, startA: number, endA: number, color: string, faceR: number): void => {
-      const inner = faceR + 2
-      const outer = faceR + 80
-      const rate = audioCtx?.sampleRate ?? 48000
-      const n = Math.min(data.length, Math.max(1, Math.floor((limitTopHz / rate) * chunk)))
-      for (let i = 0; i < n; i++) {
-        const v = data[i] / 255//Math.min(1, (data[i] / 255) * 1.5)
-        const len = inner + v * (outer - inner)
-        const a = startA + (i / n) * (endA - startA)
-        const x1 = w / 2 + Math.cos(a) * inner
-        const y1 = h / 2 + Math.sin(a) * inner
-        const x2 = w / 2 + Math.cos(a) * len
-        const y2 = h / 2 + Math.sin(a) * len
-        g.strokeStyle = color.replace('ALPHA', (0.2 + v * 0.65).toFixed(2))
-        g.lineWidth = 4
-        g.lineCap = 'round'
-        g.beginPath()
-        g.moveTo(x1, y1)
-        g.lineTo(x2, y2)
-        g.stroke()
-      }
-    }
-
-    const drawFrame = (): void => {
-      if (!running) return
-      g.setTransform(dpr, 0, 0, dpr, 0, 0)
-      g.clearRect(0, 0, w, h)
-      const cx = w / 2
-      const cy = h / 2
-      const faceR = Math.round(h * 0.36)
-      // 中间：有头像 → 绘制头像图；无头像 → 蓝色渐变圆（不绘制名字）
-      if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
-        g.save()
-        g.beginPath()
-        g.arc(cx, cy, faceR, 0, Math.PI * 2)
-        g.clip()
-        g.drawImage(avatarImg, cx - faceR, cy - faceR, faceR * 2, faceR * 2)
-        g.restore()
-      } else {
-        const grad = g.createLinearGradient(cx - faceR, cy - faceR, cx + faceR, cy + faceR)
-        grad.addColorStop(0, '#1677ff')
-        grad.addColorStop(1, '#5cb6ff')
-        g.beginPath()
-        g.arc(cx, cy, faceR, 0, Math.PI * 2)
-        g.fillStyle = grad
-        g.fill()
-      }
-      // 左右声道频谱环
-      if (analyserL && analyserR) {
-        analyserL.getByteFrequencyData(dataL)
-        analyserR.getByteFrequencyData(dataR)
-        drawHalf(dataL, Math.PI / 2, (Math.PI * 3) / 2, 'rgba(56,132,255,ALPHA)', faceR)
-        drawHalf(dataR, -Math.PI / 2, Math.PI / 2, 'rgba(0,200,180,ALPHA)', faceR)
-      }
-    }
-    // 用 setInterval 驱动绘制：requestAnimationFrame 在窗口最小化/不可见时会被浏览器暂停，
-    // 导致后台不更新、captureStream 无新帧、远程收不到数据；interval 后台持续运行
-    drawFrame()
-    raf = window.setInterval(drawFrame, 33)
-
-    let stream: MediaStream
-    try {
-      stream = canvas.captureStream(30)
-    } catch {
-      running = false
-      cancelAnimationFrame(raf)
-      if (audioCtx) void audioCtx.close()
-      return null
-    }
-
-    const stop = (): void => {
-      running = false
-      clearInterval(raf)
-      source?.disconnect()
-      splitter?.disconnect()
-      analyserL?.disconnect()
-      analyserR?.disconnect()
-      if (audioCtx) void audioCtx.close()
-      if (this.divStreamCache) this.divStreamCache = null
-    }
-    this.divStreamCache = { stream, stop }
-    return stream
-  }
 
   /** 无可用摄像头时的统一回退视频轨：优先频谱头像流，空视频流兜底 */
   GetAvatarVideoTrack(): MediaStreamTrack | null {
-    return this.GetVoiceAvatarStream(this.stream)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+
+    return this.spectrum.GetVoiceAvatarStream(this.stream)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
   }
 
   // ─── 空轨占位 ──────────────────────────────────────────

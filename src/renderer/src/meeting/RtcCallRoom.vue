@@ -78,7 +78,8 @@ function audioOpts(): { sampleRate: number; channelCount: number } {
 
 // 无摄像头状态（isCameraOff）的默认视频轨：本地频谱头像画面；不可用则空视频兜底
 function spectrumVideoTrack(): MediaStreamTrack | null {
-  return VideoStream.GetVoiceAvatarStream(VideoStream.stream, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
+  return VideoStream.spectrum.GetVoiceAvatarStream(VideoStream.stream, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
+  
 }
 
 // 设备面板「应用」→ 切换本端麦克风/扬声器/摄像头（对每个 PC replaceTrack 并重新协商）
@@ -274,7 +275,11 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     mic = VideoStream.GetEmptyAudioStream()
   }
   isCameraOff.value = true
-  const divStream = VideoStream.GetVoiceAvatarStream(mic, { avatar: myAvatar.value })
+  const divStream = VideoStream.spectrum.GetVoiceAvatarStream(mic, { avatar: myAvatar.value })
+
+
+
+
   const empty = VideoStream.GetEmptyVideoStream()
   const videoTrack = divStream?.getVideoTracks()[0] ?? empty.getVideoTracks()[0] ?? null
   const localStream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...mic.getTracks()])
