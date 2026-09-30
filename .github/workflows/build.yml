@@ -20,7 +20,7 @@ on:
 # CI 无代码签名证书：跳过 electron-builder 自动签名（Windows 打未签名包，mac 不因签名失败）
 env:
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
-
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
 jobs:
   build:
     name: Build ${{ matrix.os }}
