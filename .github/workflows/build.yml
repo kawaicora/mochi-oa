@@ -32,9 +32,9 @@ jobs:
           - os: windows-latest
             script: dist:win
             artifact_name: mochi-oa-win
-          - os: macos-latest
-            script: dist:mac
-            artifact_name: mochi-oa-mac
+          # - os: macos-latest
+          #   script: dist:mac
+          #   artifact_name: mochi-oa-mac
           - os: ubuntu-latest
             script: dist:linux
             artifact_name: mochi-oa-linux
