@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -54,9 +54,9 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
-    "dist:win": "npm run build && npm run obf && electron-builder --win",
-    "dist:mac": "npm run build && npm run obf && electron-builder --mac",
-    "dist:linux": "npm run build && npm run obf && electron-builder --linux"
+    "dist:win": "npm run build && npm run obf && electron-builder --win --publish never",
+    "dist:mac": "npm run build && npm run obf && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && npm run obf && electron-builder --linux --publish never"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
