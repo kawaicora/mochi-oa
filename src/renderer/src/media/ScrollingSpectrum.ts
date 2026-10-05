@@ -93,7 +93,7 @@ export class ScrollingSpectrum {
       scrollSpeed = 8,
       minDb = -80,
       maxDb = 0,
-      multiplier = 2.5,
+      multiplier = 2.0,
       background = '#0b0f1a',
       fps = 30,
       pianoWidthRatio = 0.08,
@@ -252,7 +252,7 @@ export class ScrollingSpectrum {
         this.ctx.fillRect(pianoX + pianoW * 0.3, top, pianoW * 0.55, hh)
       }
       // ========== 6. Cx八度标签 ==========
-      this.ctx.fillStyle = '#b0b0b0'
+      this.ctx.fillStyle = '#ff00FF'
       this.ctx.textBaseline = 'middle'
       this.ctx.font = '8px sans-serif'
       const octaves = [24, 36, 48, 60, 72, 84, 96, 108]
