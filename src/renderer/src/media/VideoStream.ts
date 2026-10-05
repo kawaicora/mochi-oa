@@ -5,6 +5,7 @@
  */
 
 import { VoiceAvatarSpectrum } from "./VoiceSpectrum"
+import { ScrollingSpectrum, ScrollingSpectrumOptions } from "./ScrollingSpectrum"
 
 export class CameraUnavailableError extends Error {
   constructor() {
@@ -24,6 +25,8 @@ class VideoStream {
     maxDb: 0,
     fps: 30,
   })
+
+  public scrollingSpectrum: ScrollingSpectrum = new ScrollingSpectrum()
 
   private videoElement: HTMLVideoElement | null = null
 
@@ -185,6 +188,16 @@ class VideoStream {
   GetAvatarVideoTrack(): MediaStreamTrack | null {
 
     return this.spectrum.GetVoiceAvatarStream(this.stream)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+  }
+
+  // ─── 滚动频谱 ─────────────────────────────────────────
+
+  /**
+   * 滚动频谱视频流（类 Wave Candy 瀑布频谱）。
+   * 用当前本地音频流分析并生成可发送给远端的视频轨；无音频轨时返回 null。
+   */
+  GetScrollingSpectrumStream(opts?: ScrollingSpectrumOptions): MediaStream | null {
+    return this.scrollingSpectrum.GetScrollingSpectrumStream(this.stream, opts)
   }
 
   // ─── 空轨占位 ──────────────────────────────────────────
