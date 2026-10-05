@@ -27,6 +27,20 @@ export interface ScrollingSpectrumOptions {
   background?: string
   /** Canvas 帧率（captureStream fps），默认 30 */
   fps?: number
+
+  /** 自然加权：按频率补偿人耳等响（低频提升），默认开启 */
+  naturalWeight?: boolean
+  /** 自然加权斜率（dB/倍频程，负值=频率越高衰减越多，低频相对提升），默认 -4 */
+  naturalWeightDbPerOctave?: number
+
+  /** 增强频率 / 背景优化：细化频率线 + 高频有效频率加强 + 背景弱频率去除，默认开启 */
+  enhancedFrequency?: boolean
+  /** 高频加强起始频率，默认 1000 Hz */
+  highBoostFromHz?: number
+  /** 高频最大加强 dB，默认 6 */
+  highBoostDb?: number
+  /** 背景弱频率门限（低于此 dB 不绘制，去除噪点）；缺省=minDb+8 自适应 */
+  noiseGateDb?: number
 }
 
 export class ScrollingSpectrum {
@@ -44,14 +58,20 @@ export class ScrollingSpectrum {
     const {
       width = 1280,
       height = 720,
-      fftSize = 2048,
-      scrollSpeed = 6,
-      minHz = 20,
-      maxHz = 16000,
-      minDb = -90,
-      maxDb = -10,
+      fftSize = 32768,
+      scrollSpeed = 10,
+      minHz = 50,
+      maxHz = 10000,
+      minDb = -20,
+      maxDb = -5,
       background = '#0b0f1a',
       fps = 30,
+      naturalWeight = true,
+      naturalWeightDbPerOctave = -4,
+      enhancedFrequency = true,
+      highBoostFromHz = 1000,
+      highBoostDb = 6,
+      noiseGateDb,
     } = opts
 
     const dpr = window.devicePixelRatio || 1
@@ -96,6 +116,19 @@ export class ScrollingSpectrum {
     let running = true
     let timer = 0
 
+    // 背景弱频率门限：增强频率时去除低于该 dB 的频率（无显式值时自适应 minDb 之上 8dB）
+    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 8) : -Infinity
+
+    // 细化频率线：按频率精确采样（相邻 bin 线性插值），避免取整导致的错位/色块
+    const sampleAt = (freq: number): number => {
+      const bp = (freq / rate) * binCount
+      if (bp < 0 || bp >= data.length) return 0
+      const i = Math.floor(bp)
+      const frac = bp - i
+      if (i + 1 < data.length) return data[i] * (1 - frac) + data[i + 1] * frac
+      return data[i]
+    }
+
     const drawFrame = (): void => {
       if (!running) return
       // 1) 整体左移（滚动）
@@ -110,11 +143,25 @@ export class ScrollingSpectrum {
       // 4) 在右侧新列绘制频谱瀑布：y=频率(对数，顶部高频底部低频)，颜色=幅度
       for (let py = 0; py < height; py++) {
         const freq = Math.exp(logMax - (py / height) * (logMax - logMin))
-        const bin = Math.round((freq / rate) * binCount)
-        if (bin < 0 || bin >= data.length) continue
-        const v = data[bin] / 255
-        if (v <= 0.005) continue
-        const db = minDb + v * (maxDb - minDb)
+        const raw = sampleAt(freq) / 255
+        if (raw <= 0.005) continue
+        const rawDb = minDb + raw * (maxDb - minDb)
+
+        // 背景弱频率去除：原始幅度低于门限不绘制
+        if (rawDb < gateDb) continue
+
+        let db = rawDb
+        // 自然加权：低频提升（频率每升高一倍频程衰减 naturalWeightDbPerOctave dB）
+        if (naturalWeight) {
+          const oct = Math.log2(freq / Math.max(1, minHz))
+          db += naturalWeightDbPerOctave * oct
+        }
+        // 增强频率：高频有效频率加强（超过起始频率后逐步加强 highBoostDb dB）
+        if (enhancedFrequency && freq > highBoostFromHz) {
+          const t = (freq - highBoostFromHz) / Math.max(1, maxHz - highBoostFromHz)
+          db += highBoostDb * t
+        }
+
         g.fillStyle = dbColor(db)
         g.fillRect(width - scrollSpeed, py, scrollSpeed, 1)
       }
