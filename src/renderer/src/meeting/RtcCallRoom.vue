@@ -91,6 +91,8 @@ function spectrumVideoTrack(): MediaStreamTrack | null {
 // ─── 语音画面样式菜单（右键切换 头像+频谱 / 滚动频谱）───
 function openSpectrumStyleMenu(e: MouseEvent): void {
   e.preventDefault()
+  // 仅语音画面（语音通话 / 关摄像头）允许切换样式；开着摄像头时忽略
+  if (room.value?.kind === 'video' && !isCameraOff.value) return
   showSpectrumStyleMenu.value = !showSpectrumStyleMenu.value
 }
 async function applySpectrumStyle(style: 'avatar' | 'scroll'): Promise<void> {
@@ -632,8 +634,8 @@ onBeforeUnmount(() => { cleanup() })
     <!-- 中央视频区 -->
     <div class="center-area">
       <div class="video-grid">
-        <!-- 本地 "我" -->
-        <div class="tile" :class="{ focused: focusedKey === 'me' }" @click="focusTile('me')">
+        <!-- 本地 "我"（右键切换语音画面样式：头像+频谱 / 滚动频谱） -->
+        <div class="tile" :class="{ focused: focusedKey === 'me' }" @click="focusTile('me')" @contextmenu.prevent="openSpectrumStyleMenu($event)">
           <video
             ref="localVideoRef"
             v-if="localHasVideo"
@@ -729,10 +731,6 @@ onBeforeUnmount(() => { cleanup() })
     <div class="control-bar">
       <button class="ctrl" :class="{ danger: isMuted }" title="左键静音/解除静音，右键切换麦克风" @click="toggleMute" @contextmenu.prevent="openMicMenu($event)">
         <i class="fas" :class="isMuted ? 'fa-microphone-slash' : 'fa-microphone'"></i>
-      </button>
-      <!-- 语音通话：右键切换画面样式（头像+频谱 / 滚动频谱） -->
-      <button v-if="room?.kind !== 'video'" class="ctrl" :class="{ on: showSpectrumStyleMenu }" title="右键切换画面样式（头像+频谱 / 滚动频谱）" @click="openSpectrumStyleMenu($event)" @contextmenu.prevent="openSpectrumStyleMenu($event)">
-        <i class="fas" :class="spectrumStyle === 'scroll' ? 'fa-wave-square' : 'fa-id-card'"></i>
       </button>
       <button v-if="room?.kind === 'video'" class="ctrl" :class="{ danger: isCameraOff }" title="左键开关摄像头，右键切换摄像头" @click="toggleCamera" @contextmenu.prevent="openCamMenu($event)">
         <i class="fas" :class="isCameraOff ? 'fa-video-slash' : 'fa-video'"></i>
