@@ -44,12 +44,12 @@ export class ScrollingSpectrum {
     const {
       width = 1280,
       height = 720,
-      fftSize = 2048,
+      fftSize = 32768,
       scrollSpeed = 6,
       minHz = 20,
       maxHz = 16000,
-      minDb = -90,
-      maxDb = -10,
+      minDb = -20,
+      maxDb = -0,
       background = '#0b0f1a',
       fps = 30,
     } = opts
@@ -85,12 +85,32 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // db → 热力色：蓝(弱)→青→绿→黄→红(强)
+    // 颜色映射表（Wave Candy 风格）：暗蓝 → 蓝 → 红 → 亮红 → 亮红黄
+    const COLOR_MAP: Array<[number, [number, number, number]]> = [
+      [0.0, [8, 16, 70]],      // 暗蓝
+      [0.4, [40, 70, 180]],    // 蓝
+      [0.55, [200, 50, 60]],   // 红
+      [0.8, [255, 120, 50]],   // 亮红
+      [1.0, [255, 240, 140]],  // 亮红黄
+    ]
+    // db → 能量 t → 颜色映射插值
     const dbColor = (db: number): string => {
       const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
-      const hue = (1 - t) * 240
-      const light = 30 + t * 50
-      return `hsl(${hue.toFixed(1)}, 100%, ${light.toFixed(1)}%)`
+      let lo = COLOR_MAP[0]
+      let hi = COLOR_MAP[COLOR_MAP.length - 1]
+      for (let i = 0; i < COLOR_MAP.length - 1; i++) {
+        if (t >= COLOR_MAP[i][0] && t <= COLOR_MAP[i + 1][0]) {
+          lo = COLOR_MAP[i]
+          hi = COLOR_MAP[i + 1]
+          break
+        }
+      }
+      const span = Math.max(1e-6, hi[0] - lo[0])
+      const f = (t - lo[0]) / span
+      const r = Math.round(lo[1][0] + (hi[1][0] - lo[1][0]) * f)
+      const g = Math.round(lo[1][1] + (hi[1][1] - lo[1][1]) * f)
+      const b = Math.round(lo[1][2] + (hi[1][2] - lo[1][2]) * f)
+      return `rgb(${r}, ${g}, ${b})`
     }
 
     let running = true
