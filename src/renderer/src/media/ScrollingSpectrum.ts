@@ -105,11 +105,11 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // db → 热力色：蓝(弱)→青→绿→黄→红(强)
+    // db → Wave Candy 配色：绿(120°)→黄(60°)→红(0°)，幅度越强越亮越红
     const dbColor = (db: number): string => {
       const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
-      const hue = (1 - t) * 240
-      const light = 30 + t * 50
+      const hue = 120 - t * 120
+      const light = 32 + t * 33
       return `hsl(${hue.toFixed(1)}, 100%, ${light.toFixed(1)}%)`
     }
 
