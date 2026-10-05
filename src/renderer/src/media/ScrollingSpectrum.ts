@@ -67,7 +67,7 @@ export class ScrollingSpectrum {
       background = '#0b0f1a',
       fps = 30,
       naturalWeight = true,
-      naturalWeightDbPerOctave = -4,
+      naturalWeightDbPerOctave = -2,
       enhancedFrequency = true,
       highBoostFromHz = 1000,
       highBoostDb = 6,
@@ -105,19 +105,20 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // db → Wave Candy 配色：绿(120°)→黄(60°)→红(0°)，幅度越强越亮越红
-    const dbColor = (db: number): string => {
-      const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
-      const hue = 120 - t * 120
-      const light = 32 + t * 33
+    // 颜色按频率配色（Wave Candy）：低频红(0°)→中频橙→高频黄(60°)；幅度只决定亮度
+    const freqColor = (freq: number, db: number): string => {
+      const hue = (Math.log(freq / Math.max(1, minHz)) / Math.log(maxHz / Math.max(1, minHz))) * 60
+      let amp = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
+      amp = Math.sqrt(amp)
+      const light = 18 + amp * 55
       return `hsl(${hue.toFixed(1)}, 100%, ${light.toFixed(1)}%)`
     }
 
     let running = true
     let timer = 0
 
-    // 背景弱频率门限：增强频率时去除低于该 dB 的频率（无显式值时自适应 minDb 之上 8dB）
-    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 8) : -Infinity
+    // 背景弱频率门限：增强频率时去除低于该 dB 的频率（无显式值时自适应 minDb 之上 4dB）
+    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 4) : -Infinity
 
     // 细化频率线：按频率精确采样（相邻 bin 线性插值），避免取整导致的错位/色块
     const sampleAt = (freq: number): number => {
@@ -162,7 +163,7 @@ export class ScrollingSpectrum {
           db += highBoostDb * t
         }
 
-        g.fillStyle = dbColor(db)
+        g.fillStyle = freqColor(freq, db)
         g.fillRect(width - scrollSpeed, py, scrollSpeed, 1)
       }
     }
