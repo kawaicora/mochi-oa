@@ -64,10 +64,10 @@ export class ScrollingSpectrum {
       maxHz = 10000,
       minDb = -20,
       maxDb = -5,
-      background = '#0b0f1a',
+      background = '#000000',
       fps = 30,
       naturalWeight = true,
-      naturalWeightDbPerOctave = -2,
+      naturalWeightDbPerOctave = -3,
       enhancedFrequency = true,
       highBoostFromHz = 1000,
       highBoostDb = 6,
@@ -92,6 +92,7 @@ export class ScrollingSpectrum {
       source = audioCtx.createMediaStreamSource(new MediaStream([track]))
       analyser = audioCtx.createAnalyser()
       analyser.fftSize = fftSize
+      // 如实反映连续声音：不做额外平滑，声音本身连续，持续音 FFT 输出即稳定
       analyser.smoothingTimeConstant = 0
       source.connect(analyser)
       rate = audioCtx.sampleRate
@@ -105,20 +106,20 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // 颜色按频率配色（Wave Candy）：低频红(0°)→中频橙→高频黄(60°)；幅度只决定亮度
-    const freqColor = (freq: number, db: number): string => {
-      const hue = (Math.log(freq / Math.max(1, minHz)) / Math.log(maxHz / Math.max(1, minHz))) * 60
+    // 颜色 hue 代表强度（Wave Candy 官方定义）：弱=红(0°)→橙→强=黄(60°)，低暗高亮
+    const energyColor = (db: number): string => {
       let amp = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
       amp = Math.sqrt(amp)
-      const light = 18 + amp * 55
+      const hue = amp * 60
+      const light = 20 + amp * 50
       return `hsl(${hue.toFixed(1)}, 100%, ${light.toFixed(1)}%)`
     }
 
     let running = true
     let timer = 0
 
-    // 背景弱频率门限：增强频率时去除低于该 dB 的频率（无显式值时自适应 minDb 之上 4dB）
-    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 4) : -Infinity
+    // 背景弱频率门限：仅去除绝对静音（无显式值时 minDb 之上 2dB），避免切断持续音导致断续
+    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 2) : -Infinity
 
     // 细化频率线：按频率精确采样（相邻 bin 线性插值），避免取整导致的错位/色块
     const sampleAt = (freq: number): number => {
@@ -163,7 +164,7 @@ export class ScrollingSpectrum {
           db += highBoostDb * t
         }
 
-        g.fillStyle = freqColor(freq, db)
+        g.fillStyle = energyColor(db)
         g.fillRect(width - scrollSpeed, py, scrollSpeed, 1)
       }
     }
