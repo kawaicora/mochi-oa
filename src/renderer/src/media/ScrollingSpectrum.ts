@@ -106,20 +106,18 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // 颜色 hue 代表强度（Wave Candy 官方定义）：弱=红(0°)→橙→强=黄(60°)，低暗高亮
-    const energyColor = (db: number): string => {
-      let amp = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
-      amp = Math.sqrt(amp)
-      const hue = amp * 60
-      const light = 20 + amp * 50
+    // 颜色按能量（Wave Candy 红黄蓝紫热力）：低=蓝紫(280°)→青→绿→黄→红(0°)，低暗高亮
+    const energyColor = (amp: number): string => {
+      const hue = 280 - amp * 280
+      const light = 25 + amp * 45
       return `hsl(${hue.toFixed(1)}, 100%, ${light.toFixed(1)}%)`
     }
 
     let running = true
     let timer = 0
 
-    // 背景弱频率门限：仅去除绝对静音（无显式值时 minDb 之上 2dB），避免切断持续音导致断续
-    const gateDb = enhancedFrequency ? (noiseGateDb !== undefined ? noiseGateDb : minDb + 2) : -Infinity
+    // 幅度 → dBFS（相对满幅 0dB）
+    const dbOf = (r: number): number => (r > 0 ? 20 * Math.log10(r / 255) : -120)
 
     // 细化频率线：按频率精确采样（相邻 bin 线性插值），避免取整导致的错位/色块
     const sampleAt = (freq: number): number => {
@@ -142,29 +140,31 @@ export class ScrollingSpectrum {
       // 3) 取当前帧频谱
       if (analyser) analyser.getByteFrequencyData(data)
 
-      // 4) 在右侧新列绘制频谱瀑布：y=频率(对数，顶部高频底部低频)，颜色=幅度
+      // 4) 自适应动态范围：相对当前帧峰值，低于峰值 60dB 归为背景（黑），避免窄范围铺满成糊
+      let peakRaw = 0
+      for (let i = 0; i < data.length; i++) if (data[i] > peakRaw) peakRaw = data[i]
+      const peakDb = dbOf(peakRaw)
+      const span = 60
+      const loDb = peakDb - span
+
+      // 5) 在右侧新列绘制频谱瀑布：y=频率(对数，顶部高频底部低频)，颜色=能量（红黄蓝紫）
       for (let py = 0; py < height; py++) {
         const freq = Math.exp(logMax - (py / height) * (logMax - logMin))
-        const raw = sampleAt(freq) / 255
-        if (raw <= 0.005) continue
-        const rawDb = minDb + raw * (maxDb - minDb)
+        const r = sampleAt(freq)
+        if (r <= 0) continue
+        let db = dbOf(r)
+        if (db < loDb) continue   // 低于动态范围 → 背景
 
-        // 背景弱频率去除：原始幅度低于门限不绘制
-        if (rawDb < gateDb) continue
-
-        let db = rawDb
         // 自然加权：低频提升（频率每升高一倍频程衰减 naturalWeightDbPerOctave dB）
-        if (naturalWeight) {
-          const oct = Math.log2(freq / Math.max(1, minHz))
-          db += naturalWeightDbPerOctave * oct
-        }
+        if (naturalWeight) db += naturalWeightDbPerOctave * Math.log2(freq / Math.max(1, minHz))
         // 增强频率：高频有效频率加强（超过起始频率后逐步加强 highBoostDb dB）
         if (enhancedFrequency && freq > highBoostFromHz) {
           const t = (freq - highBoostFromHz) / Math.max(1, maxHz - highBoostFromHz)
           db += highBoostDb * t
         }
 
-        g.fillStyle = energyColor(db)
+        const amp = Math.max(0, Math.min(1, (db - loDb) / span))
+        g.fillStyle = energyColor(amp)
         g.fillRect(width - scrollSpeed, py, scrollSpeed, 1)
       }
     }
