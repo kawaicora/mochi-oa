@@ -45,11 +45,11 @@ export class ScrollingSpectrum {
       width = 1280,
       height = 720,
       fftSize = 32768,
-      scrollSpeed = 6,
-      minHz = 20,
-      maxHz = 16000,
-      minDb = -20,
-      maxDb = -0,
+      scrollSpeed = 5,
+      minHz = 50,
+      maxHz = 10000,
+      minDb = -120,
+      maxDb = -10,
       background = '#0b0f1a',
       fps = 30,
     } = opts
@@ -85,32 +85,15 @@ export class ScrollingSpectrum {
     const logMin = Math.log(Math.max(1, minHz))
     const logMax = Math.log(Math.max(logMin + 1e-3, maxHz))
 
-    // 颜色映射表（Wave Candy 风格）：暗蓝 → 蓝 → 红 → 亮红 → 亮红黄
-    const COLOR_MAP: Array<[number, [number, number, number]]> = [
-      [0.0, [8, 16, 70]],      // 暗蓝
-      [0.4, [40, 70, 180]],    // 蓝
-      [0.55, [200, 50, 60]],   // 红
-      [0.8, [255, 120, 50]],   // 亮红
-      [1.0, [255, 240, 140]],  // 亮红黄
-    ]
-    // db → 能量 t → 颜色映射插值
+    // db → 能量 t → 三通道数学映射（无查表）：暗蓝(低)→红(中)→亮红黄(高)
     const dbColor = (db: number): string => {
       const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)))
-      let lo = COLOR_MAP[0]
-      let hi = COLOR_MAP[COLOR_MAP.length - 1]
-      for (let i = 0; i < COLOR_MAP.length - 1; i++) {
-        if (t >= COLOR_MAP[i][0] && t <= COLOR_MAP[i + 1][0]) {
-          lo = COLOR_MAP[i]
-          hi = COLOR_MAP[i + 1]
-          break
-        }
-      }
-      const span = Math.max(1e-6, hi[0] - lo[0])
-      const f = (t - lo[0]) / span
-      const r = Math.round(lo[1][0] + (hi[1][0] - lo[1][0]) * f)
-      const g = Math.round(lo[1][1] + (hi[1][1] - lo[1][1]) * f)
-      const b = Math.round(lo[1][2] + (hi[1][2] - lo[1][2]) * f)
-      return `rgb(${r}, ${g}, ${b})`
+      const r = 255 * Math.pow(t, 0.65)
+      const g = 255 * Math.pow(Math.max(0, t - 0.35) / 0.65, 1.2)
+      const b = 255 * Math.pow(Math.max(0, 1 - t * 1.5), 1.2)
+      // 低能整体压暗（暗蓝），高能拉亮
+      const lum = 0.2 + 0.8 * Math.pow(t, 0.7)
+      return `rgb(${Math.round(r * lum)}, ${Math.round(g * lum)}, ${Math.round(b * lum)})`
     }
 
     let running = true
@@ -132,7 +115,7 @@ export class ScrollingSpectrum {
         const freq = Math.exp(logMax - (py / height) * (logMax - logMin))
         const bin = Math.round((freq / rate) * binCount)
         if (bin < 0 || bin >= data.length) continue
-        const v = data[bin] / 255
+        const v = data[bin] / 255 * 1.8
         if (v <= 0.005) continue
         const db = minDb + v * (maxDb - minDb)
         g.fillStyle = dbColor(db)
