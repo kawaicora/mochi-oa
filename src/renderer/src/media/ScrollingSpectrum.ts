@@ -85,7 +85,7 @@ export class ScrollingSpectrum {
     let audioCtx: AudioContext | null = null
     let source: MediaStreamAudioSourceNode | null = null
     let analyser: AnalyserNode | null = null
-    let data = new Uint8Array(0)
+    let data = new Float32Array(0)
     let rate = 48000
     try {
       audioCtx = new AudioContext()
@@ -96,7 +96,8 @@ export class ScrollingSpectrum {
       analyser.smoothingTimeConstant = 0
       source.connect(analyser)
       rate = audioCtx.sampleRate
-      data = new Uint8Array(analyser.frequencyBinCount)
+      // 浮点 dBFS 频谱（-140~0 dB）：精度远高于 0-255 整数量化，频率线精细锐利
+      data = new Float32Array(analyser.frequencyBinCount)
       if (audioCtx.state === 'suspended') void audioCtx.resume()
     } catch {
       // 分析不可用：仍输出滚动频谱（空数据静默背景）
@@ -116,13 +117,10 @@ export class ScrollingSpectrum {
     let running = true
     let timer = 0
 
-    // 幅度 → dBFS（相对满幅 0dB）
-    const dbOf = (r: number): number => (r > 0 ? 20 * Math.log10(r / 255) : -120)
-
-    // 细化频率线：按频率精确采样（相邻 bin 线性插值），避免取整导致的错位/色块
+    // 细化频率线：按频率精确采样（相邻 bin 浮点 dB 线性插值），频率线精细锐利
     const sampleAt = (freq: number): number => {
       const bp = (freq / rate) * binCount
-      if (bp < 0 || bp >= data.length) return 0
+      if (bp < 0 || bp >= data.length) return -200
       const i = Math.floor(bp)
       const frac = bp - i
       if (i + 1 < data.length) return data[i] * (1 - frac) + data[i + 1] * frac
@@ -137,22 +135,20 @@ export class ScrollingSpectrum {
       g.fillStyle = background
       g.fillRect(width - scrollSpeed, 0, scrollSpeed, height)
 
-      // 3) 取当前帧频谱
-      if (analyser) analyser.getByteFrequencyData(data)
+      // 3) 取当前帧频谱（浮点 dBFS）
+      if (analyser) analyser.getFloatFrequencyData(data)
 
       // 4) 自适应动态范围：相对当前帧峰值，低于峰值 45dB 归为背景（黑），弱能量不显示→频率线分离清晰
-      let peakRaw = 0
-      for (let i = 0; i < data.length; i++) if (data[i] > peakRaw) peakRaw = data[i]
-      const peakDb = dbOf(peakRaw)
+      let peakDb = -200
+      for (let i = 0; i < data.length; i++) if (data[i] > peakDb) peakDb = data[i]
       const span = 45
-      const loDb = peakDb - span
+      // 门限下限 -90dBFS：静音/近静音帧（峰值极低）整体归为背景，避免误画
+      const loDb = Math.max(peakDb - span, -90)
 
       // 5) 在右侧新列绘制频谱瀑布：y=频率(对数，顶部高频底部低频)，颜色=能量（红黄蓝紫）
       for (let py = 0; py < height; py++) {
         const freq = Math.exp(logMax - (py / height) * (logMax - logMin))
-        const r = sampleAt(freq)
-        if (r <= 0) continue
-        let db = dbOf(r)
+        let db = sampleAt(freq)
         if (db < loDb) continue   // 低于动态范围 → 背景
 
         // 自然加权：低频提升（频率每升高一倍频程衰减 naturalWeightDbPerOctave dB）
