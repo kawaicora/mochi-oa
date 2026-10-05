@@ -37,6 +37,7 @@ const { white: WHITE_KEYS, black: BLACK_KEYS } = getMidiRangeKeys(MIDI_C1, MIDI_
 export class ScrollingSpectrum {
   private running = false
   private rafId: number | null = null
+  private intervalId: NodeJS.Timeout | null = null
   private audioCtx: AudioContext | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private analyser: AnalyserNode | null = null
@@ -65,7 +66,7 @@ export class ScrollingSpectrum {
       maxDb = 0,
       multiplier = 2.5,
       background = '#0b0f1a',
-      fps = 30,
+      fps = 15,
       pianoWidthRatio = 0.08,
       devicePixelRatio = window.devicePixelRatio ?? 1,
     } = opts
@@ -122,7 +123,7 @@ export class ScrollingSpectrum {
 
     const drawFrame = () => {
       if (!this.running || !this.canvas || !this.ctx || !this.offscreenCanvas || !this.offCtx) return
-      this.rafId = requestAnimationFrame(drawFrame)
+      // this.rafId = requestAnimationFrame(drawFrame)
       const cssW = width
       const cssH = height
       const pianoW = cssW * pianoWidthRatio
@@ -193,44 +194,48 @@ for (let i = 0; i < points.length - 1; i++) {
       // 清空钢琴区
       this.ctx.fillStyle = background
       this.ctx.fillRect(pianoX, 0, pianoW, cssH)
-      // ========== 4. 钢琴白键 ==========
+      // ========== 4. 钢琴白键【修复半格偏移】 ==========
       this.ctx.fillStyle = '#f5f5f5'
       for (const midi of WHITE_KEYS) {
-        const hz = midiToHz(midi)
-        const hzNext = midiToHz(midi + 1)
-        const py = freqToPy(hz, cssH)
-        const pyNext = freqToPy(hzNext, cssH)
-        const top = Math.min(py, pyNext)
-        const hh = Math.max(0, Math.abs(pyNext - py))
+        // 键区间：midi-0.5 ~ midi+0.5，对齐频率区间边界
+        const hzLow = midiToHz(midi - 0.5)
+        const hzHigh = midiToHz(midi + 0.5)
+        const pyLow = freqToPy(hzLow, cssH)
+        const pyHigh = freqToPy(hzHigh, cssH)
+        const top = Math.min(pyLow, pyHigh)
+        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
         if (hh < 0.1) continue
         this.ctx.fillRect(pianoX, top, pianoW, hh)
       }
-      // ========== 5. 钢琴黑键 ==========
+      // ========== 5. 钢琴黑键【修复半格偏移】 ==========
       this.ctx.fillStyle = '#1a1a1a'
       for (const midi of BLACK_KEYS) {
-        const hz = midiToHz(midi)
-        const hzNext = midiToHz(midi + 1)
-        const py = freqToPy(hz, cssH)
-        const pyNext = freqToPy(hzNext, cssH)
-        const top = Math.min(py, pyNext)
-        const hh = Math.max(0, Math.abs(pyNext - py))
+        const hzLow = midiToHz(midi - 0.5)
+        const hzHigh = midiToHz(midi + 0.5)
+        const pyLow = freqToPy(hzLow, cssH)
+        const pyHigh = freqToPy(hzHigh, cssH)
+        const top = Math.min(pyLow, pyHigh)
+        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
         if (hh < 0.1) continue
         this.ctx.fillRect(pianoX + pianoW * 0.3, top, pianoW * 0.55, hh)
       }
-      // ========== 6. Cx八度标签，固定8px字体 ==========
+      // ========== 6. Cx八度标签，文字放在音符区间中点 ==========
       this.ctx.fillStyle = '#b0b0b0'
       this.ctx.textBaseline = 'middle'
       this.ctx.font = '8px sans-serif'
       const octaves = [24, 36, 48, 60, 72, 84, 96, 108]
       for (const midi of octaves) {
-        const hz = midiToHz(midi)
-        const py = freqToPy(hz, cssH)
+        const hzMid = midiToHz(midi)
+        const pyMid = freqToPy(hzMid, cssH)
         const oct = (midi - 24) / 12 + 1
-        this.ctx.fillText(`C${oct}`, pianoX + pianoW * 0.72, py)
+        this.ctx.fillText(`C${oct}`, pianoX + pianoW * 0.72, pyMid)
       }
     }
     this.running = true
-    this.rafId = requestAnimationFrame(drawFrame)
+    // this.rafId = requestAnimationFrame(drawFrame)
+    this.intervalId = setInterval(() => {
+      if (this.running) drawFrame()
+    }, 1000 / fps)
     try {
       this.stream = this.canvas.captureStream(fps)
     } catch (e) {
@@ -262,9 +267,9 @@ for (let i = 0; i < points.length - 1; i++) {
 
   stop() {
     this.running = false
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId)
-      this.rafId = null
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
     }
     this.source?.disconnect()
     this.analyser?.disconnect()
