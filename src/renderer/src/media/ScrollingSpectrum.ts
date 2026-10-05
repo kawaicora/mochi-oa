@@ -37,7 +37,7 @@ export interface ScrollingSpectrumOptions {
   enhancedFrequency?: boolean
   /** 高频加强起始频率，默认 1000 Hz */
   highBoostFromHz?: number
-  /** 高频最大加强 dB，默认 6 */
+  /** 高频加强：自起始频率起每倍频程增强 dB（覆盖自然加权压制，使高频有效频率显示为红），默认 10 */
   highBoostDb?: number
   /** 背景弱频率门限（低于此 dB 不绘制，去除噪点）；缺省=minDb+8 自适应 */
   noiseGateDb?: number
@@ -70,7 +70,7 @@ export class ScrollingSpectrum {
       naturalWeightDbPerOctave = -3,
       enhancedFrequency = true,
       highBoostFromHz = 1000,
-      highBoostDb = 6,
+      highBoostDb = 10,
       noiseGateDb,
     } = opts
 
@@ -140,11 +140,11 @@ export class ScrollingSpectrum {
       // 3) 取当前帧频谱
       if (analyser) analyser.getByteFrequencyData(data)
 
-      // 4) 自适应动态范围：相对当前帧峰值，低于峰值 60dB 归为背景（黑），避免窄范围铺满成糊
+      // 4) 自适应动态范围：相对当前帧峰值，低于峰值 45dB 归为背景（黑），弱能量不显示→频率线分离清晰
       let peakRaw = 0
       for (let i = 0; i < data.length; i++) if (data[i] > peakRaw) peakRaw = data[i]
       const peakDb = dbOf(peakRaw)
-      const span = 60
+      const span = 45
       const loDb = peakDb - span
 
       // 5) 在右侧新列绘制频谱瀑布：y=频率(对数，顶部高频底部低频)，颜色=能量（红黄蓝紫）
@@ -157,14 +157,15 @@ export class ScrollingSpectrum {
 
         // 自然加权：低频提升（频率每升高一倍频程衰减 naturalWeightDbPerOctave dB）
         if (naturalWeight) db += naturalWeightDbPerOctave * Math.log2(freq / Math.max(1, minHz))
-        // 增强频率：高频有效频率加强（超过起始频率后逐步加强 highBoostDb dB）
+        // 增强频率：高频有效频率加强（自起始频率起每倍频程 +highBoostDb dB，覆盖自然加权压制，使高频显示为红）
         if (enhancedFrequency && freq > highBoostFromHz) {
-          const t = (freq - highBoostFromHz) / Math.max(1, maxHz - highBoostFromHz)
-          db += highBoostDb * t
+          const oct = Math.log2(freq / highBoostFromHz)
+          db += highBoostDb * oct
         }
 
         const amp = Math.max(0, Math.min(1, (db - loDb) / span))
-        g.fillStyle = energyColor(amp)
+        // 强 gamma：能量强弱分明，频率线锐利清晰（弱能量快速归黑）
+        g.fillStyle = energyColor(amp * amp)
         g.fillRect(width - scrollSpeed, py, scrollSpeed, 1)
       }
     }
