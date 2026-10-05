@@ -31,6 +31,9 @@ const isMuted = ref(false)
 const isCameraOff = ref(false)
 const isScreenSharing = ref(false)
 const isRecording = ref(false)
+// 语音画面样式：无摄像头时发送的视频画面（头像+频谱 / 滚动频谱）
+const spectrumStyle = ref<'avatar' | 'scroll'>('avatar')
+const showSpectrumStyleMenu = ref(false)
 // ─── 右键切换设备菜单（麦克风/摄像头）───
 const showMicMenu = ref(false)
 const showCamMenu = ref(false)
@@ -76,10 +79,29 @@ function audioOpts(): { sampleRate: number; channelCount: number } {
   }
 }
 
-// 无摄像头状态（isCameraOff）的默认视频轨：本地频谱头像画面；不可用则空视频兜底
+// 无摄像头状态（isCameraOff）的默认视频轨：按 spectrumStyle 生成（头像+频谱 / 滚动频谱）；不可用则空视频兜底
 function spectrumVideoTrack(): MediaStreamTrack | null {
+  if (spectrumStyle.value === 'scroll') {
+    return VideoStream.GetScrollingSpectrumStream()?.getVideoTracks()[0] ?? null
+  }
   return VideoStream.spectrum.GetVoiceAvatarStream(VideoStream.stream, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
   
+}
+
+// ─── 语音画面样式菜单（右键切换 头像+频谱 / 滚动频谱）───
+function openSpectrumStyleMenu(e: MouseEvent): void {
+  e.preventDefault()
+  showSpectrumStyleMenu.value = !showSpectrumStyleMenu.value
+}
+async function applySpectrumStyle(style: 'avatar' | 'scroll'): Promise<void> {
+  showSpectrumStyleMenu.value = false
+  if (spectrumStyle.value === style) return
+  spectrumStyle.value = style
+  // 用新样式替换当前视频轨（语音 / 关摄像头画面）
+  const t = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+  await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
+  localPreview.value = VideoStream.stream
+  engine?.replaceTrack(t, 'video')
 }
 
 // 设备面板「应用」→ 切换本端麦克风/扬声器/摄像头（对每个 PC replaceTrack 并重新协商）
@@ -275,13 +297,16 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     mic = VideoStream.GetEmptyAudioStream()
   }
   isCameraOff.value = true
-  const divStream = VideoStream.spectrum.GetVoiceAvatarStream(mic, { avatar: myAvatar.value })
-
-
-
+  // 初始语音画面：按 spectrumStyle 生成（头像+频谱 / 滚动频谱）
+  let videoTrack: MediaStreamTrack | null
+  if (spectrumStyle.value === 'scroll') {
+    videoTrack = VideoStream.scrollingSpectrum.GetScrollingSpectrumStream(mic)?.getVideoTracks()[0] ?? null
+  } else {
+    videoTrack = VideoStream.spectrum.GetVoiceAvatarStream(mic, { avatar: myAvatar.value })?.getVideoTracks()[0] ?? null
+  }
 
   const empty = VideoStream.GetEmptyVideoStream()
-  const videoTrack = divStream?.getVideoTracks()[0] ?? empty.getVideoTracks()[0] ?? null
+  if (!videoTrack) videoTrack = empty.getVideoTracks()[0] ?? null
   const localStream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...mic.getTracks()])
   VideoStream.stream = localStream
   localPreview.value = localStream
@@ -705,6 +730,10 @@ onBeforeUnmount(() => { cleanup() })
       <button class="ctrl" :class="{ danger: isMuted }" title="左键静音/解除静音，右键切换麦克风" @click="toggleMute" @contextmenu.prevent="openMicMenu($event)">
         <i class="fas" :class="isMuted ? 'fa-microphone-slash' : 'fa-microphone'"></i>
       </button>
+      <!-- 语音通话：右键切换画面样式（头像+频谱 / 滚动频谱） -->
+      <button v-if="room?.kind !== 'video'" class="ctrl" :class="{ on: showSpectrumStyleMenu }" title="右键切换画面样式（头像+频谱 / 滚动频谱）" @click="openSpectrumStyleMenu($event)" @contextmenu.prevent="openSpectrumStyleMenu($event)">
+        <i class="fas" :class="spectrumStyle === 'scroll' ? 'fa-wave-square' : 'fa-id-card'"></i>
+      </button>
       <button v-if="room?.kind === 'video'" class="ctrl" :class="{ danger: isCameraOff }" title="左键开关摄像头，右键切换摄像头" @click="toggleCamera" @contextmenu.prevent="openCamMenu($event)">
         <i class="fas" :class="isCameraOff ? 'fa-video-slash' : 'fa-video'"></i>
       </button>
@@ -721,6 +750,13 @@ onBeforeUnmount(() => { cleanup() })
       <button class="ctrl hangup" title="结束" @click="leaveCall">
         <i class="fas fa-phone-slash"></i><span class="hangup-text">结束</span>
       </button>
+    </div>
+
+    <!-- 语音画面样式菜单（语音通话右键切换） -->
+    <div v-if="showSpectrumStyleMenu" class="dev-pop" @click.stop>
+      <div class="dev-pop-title">语音画面样式</div>
+      <button class="dev-pop-item" :class="{ cur: spectrumStyle === 'avatar' }" @click="applySpectrumStyle('avatar')"><i class="fas fa-id-card"></i> 头像 + 频谱</button>
+      <button class="dev-pop-item" :class="{ cur: spectrumStyle === 'scroll' }" @click="applySpectrumStyle('scroll')"><i class="fas fa-wave-square"></i> 滚动频谱</button>
     </div>
 
     <!-- 麦克风设备菜单（右键麦克风按钮，居中显示） -->
