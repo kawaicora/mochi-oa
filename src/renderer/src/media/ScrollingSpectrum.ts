@@ -93,7 +93,7 @@ export class ScrollingSpectrum {
       scrollSpeed = 8,
       minDb = -80,
       maxDb = 0,
-      multiplier = 3,
+      multiplier = 2.0,
       background = '#0b0f1a',
       fps = 30,
       pianoWidthRatio = 0.08,
@@ -138,66 +138,13 @@ export class ScrollingSpectrum {
       this.points.push({ py: 0, v: 0 })
     }
 
-
-    const pianoW = width * pianoWidthRatio
-    const pianoX = height - pianoW
-    const waterfallW = width - pianoW
-    //白键信息缓存，避免每帧重复计算
-
-
-    var pianoWhiteKeyInfoList :Array<{
-      top: number;
-      height: number;
-    }> = []
-    for (const midi of WHITE_KEYS) {
-        const hzLow = midiToHz(midi - 0.5)
-        const hzHigh = midiToHz(midi + 0.5)
-        const pyLow = this.freqToPy(hzLow, height)
-        const pyHigh = this.freqToPy(hzHigh, height)
-        const top = Math.min(pyLow, pyHigh)
-        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
-        if (hh < 0.1) continue
-        const pianoWhiteKeyInfo = {
-          // midi: midi,
-          // hzLow: hzLow,
-          // hzHigh: hzHigh,
-          // pyLow: pyLow,
-          // pyHigh: pyHigh,
-          top: top,
-          height: hh
-        }
-        
-        pianoWhiteKeyInfoList.push(pianoWhiteKeyInfo)
-    }
-    //黑键信息缓存，避免每帧重复计算
-    var pianoBlackKeyInfoList :Array<{
-      top: number;
-      height: number;
-    }> = []
-    for (const midi of BLACK_KEYS) {
-        const hzLow = midiToHz(midi - 0.5)
-        const hzHigh = midiToHz(midi + 0.5)
-        const pyLow = this.freqToPy(hzLow, height)
-        const pyHigh = this.freqToPy(hzHigh, height)
-        const top = Math.min(pyLow, pyHigh)
-        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
-        if (hh < 0.1) continue
-        const pianoBlackKeyInfo = {
-          // midi: midi,
-          // hzLow: hzLow,
-          // hzHigh: hzHigh,
-          // pyLow: pyLow,
-          // pyHigh: pyHigh,
-          top: top,
-          height: hh
-        }
-        
-        pianoBlackKeyInfoList.push(pianoBlackKeyInfo)
-    }
     const drawFrame = () => {
       if (!this.running || !this.canvas || !this.ctx || !this.offscreenCanvas || !this.offCtx) return
-   
-      
+      const cssW = width
+      const cssH = height
+      const pianoW = cssW * pianoWidthRatio
+      const pianoX = cssW - pianoW
+      const waterfallW = cssW - pianoW
       // ========== getByteFrequencyData 异常捕获 + 长度校验 ==========
       if (this.analyser) {
         if (this.data.length !== this.analyser.frequencyBinCount) {
@@ -212,12 +159,12 @@ export class ScrollingSpectrum {
       // ========== 1. 离屏画布：旧画面左移 ==========
       this.offCtx.drawImage(
         this.offscreenCanvas,
-        scrollSpeed, 0, waterfallW - scrollSpeed, height,
-        0, 0, waterfallW - scrollSpeed, height
+        scrollSpeed, 0, waterfallW - scrollSpeed, cssH,
+        0, 0, waterfallW - scrollSpeed, cssH
       )
       // 清空右侧新竖条区域
       this.offCtx.fillStyle = background
-      this.offCtx.fillRect(waterfallW - scrollSpeed, 0, scrollSpeed, height)
+      this.offCtx.fillRect(waterfallW - scrollSpeed, 0, scrollSpeed, cssH)
     
       // ========== 2. GC优化：复用预分配points数组，不再新建对象 ==========
       const halfW = scrollSpeed / 2
@@ -225,7 +172,7 @@ export class ScrollingSpectrum {
       for (let bin = 0; bin < binCount; bin++) {
         const v = this.data[bin] / 255 * multiplier
         const binFreq = (bin / binCount) * (this.sampleRate / 2)
-        const py = this.freqToPy(binFreq, height)
+        const py = this.freqToPy(binFreq, cssH)
         const p = this.points[bin]
         p.py = py
         p.v = v
@@ -279,16 +226,30 @@ export class ScrollingSpectrum {
       this.ctx.drawImage(this.offscreenCanvas, 0, 0)
       // 清空钢琴区
       this.ctx.fillStyle = background
-      this.ctx.fillRect(pianoX, 0, pianoW, height)
+      this.ctx.fillRect(pianoX, 0, pianoW, cssH)
       // ========== 4. 钢琴白键【修复半格偏移】 ==========
       this.ctx.fillStyle = '#f5f5f5'
-      for (const wInfo of pianoWhiteKeyInfoList) {
-        this.ctx.fillRect(pianoX, wInfo.top, pianoW, wInfo.height)
+      for (const midi of WHITE_KEYS) {
+        const hzLow = midiToHz(midi - 0.5)
+        const hzHigh = midiToHz(midi + 0.5)
+        const pyLow = this.freqToPy(hzLow, cssH)
+        const pyHigh = this.freqToPy(hzHigh, cssH)
+        const top = Math.min(pyLow, pyHigh)
+        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
+        if (hh < 0.1) continue
+        this.ctx.fillRect(pianoX, top, pianoW, hh)
       }
       // ========== 5. 钢琴黑键【修复半格偏移】 ==========
       this.ctx.fillStyle = '#1a1a1a'
-      for (const bInfo of pianoBlackKeyInfoList) {
-        this.ctx.fillRect(pianoX + pianoW * 0.3, bInfo.top, pianoW * 0.55, bInfo.height)
+      for (const midi of BLACK_KEYS) {
+        const hzLow = midiToHz(midi - 0.5)
+        const hzHigh = midiToHz(midi + 0.5)
+        const pyLow = this.freqToPy(hzLow, cssH)
+        const pyHigh = this.freqToPy(hzHigh, cssH)
+        const top = Math.min(pyLow, pyHigh)
+        const hh = Math.max(0, Math.abs(pyHigh - pyLow))
+        if (hh < 0.1) continue
+        this.ctx.fillRect(pianoX + pianoW * 0.3, top, pianoW * 0.55, hh)
       }
       // ========== 6. Cx八度标签 ==========
       this.ctx.fillStyle = '#ff00FF'
@@ -297,7 +258,7 @@ export class ScrollingSpectrum {
       const octaves = [24, 36, 48, 60, 72, 84, 96, 108]
       for (const midi of octaves) {
         const hzMid = midiToHz(midi)
-        const pyMid = this.freqToPy(hzMid, height)
+        const pyMid = this.freqToPy(hzMid, cssH)
         const oct = (midi - 24) / 12 + 1
         this.ctx.fillText(`C${oct}`, pianoX + pianoW * 0.72, pyMid)
       }
