@@ -138,7 +138,13 @@ export class ScrollingSpectrum {
       this.points.push({ py: 0, v: 0 })
     }
 
+
+    const pianoW = width * pianoWidthRatio
+    const pianoX = height - pianoW
+    const waterfallW = width - pianoW
     //白键信息缓存，避免每帧重复计算
+
+
     var pianoWhiteKeyInfoList :Array<{
       top: number;
       height: number;
@@ -190,9 +196,8 @@ export class ScrollingSpectrum {
     }
     const drawFrame = () => {
       if (!this.running || !this.canvas || !this.ctx || !this.offscreenCanvas || !this.offCtx) return
-      const pianoW = width * pianoWidthRatio
-      const pianoX = height - pianoW
-      const waterfallW = width - pianoW
+   
+      
       // ========== getByteFrequencyData 异常捕获 + 长度校验 ==========
       if (this.analyser) {
         if (this.data.length !== this.analyser.frequencyBinCount) {
