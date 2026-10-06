@@ -14,9 +14,7 @@ export interface VoiceSpectrumConfig {
   minDb: number
   maxDb: number
   multiplier : number,
-  /** Attack / Release，单位为秒 */
-  attack: number
-  release: number
+
   /** 频谱环外观 */
   innerOffset: number
   outerOffset: number
@@ -36,8 +34,7 @@ export class VoiceAvatarSpectrum {
       multiplier : 2.0,
       minDb: -80,
       maxDb: 0,
-      attack: 0,
-      release: 0,
+
       innerOffset: 5,
       outerOffset: 80,
       lineWidth: 8,
@@ -153,8 +150,7 @@ export class VoiceAvatarSpectrum {
 
     // attack/release 系数，预计算一次
     const dt = 1000 / this.config.fps / 1000
-    const attackCoef = dt / (this.config.attack + dt)
-    const releaseCoef = dt / (this.config.release + dt)
+
 
     // 半圆环频谱：复用变量，不循环内创建临时字符串
     const drawHalf = (
@@ -182,11 +178,7 @@ export class VoiceAvatarSpectrum {
       for (i = 0; i < n; i++) {
         vRaw = data[i] / 255
         // 攻击释放平滑
-        if (vRaw > smoothBuf[i]) {
-          smoothBuf[i] = smoothBuf[i] + (vRaw - smoothBuf[i]) * attackCoef
-        } else {
-          smoothBuf[i] = smoothBuf[i] + (vRaw - smoothBuf[i]) * releaseCoef
-        }
+   
         v = smoothBuf[i] * this.config.multiplier
         len = inner + v * (outer - inner)
         a = startA + (i / n) * (endA - startA)
