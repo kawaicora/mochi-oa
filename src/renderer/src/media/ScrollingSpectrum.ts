@@ -93,7 +93,7 @@ export class ScrollingSpectrum {
       scrollSpeed = 8,
       minDb = -80,
       maxDb = 0,
-      multiplier = 2.0,
+      multiplier = 3.0,
       background = '#0b0f1a',
       fps = 30,
       pianoWidthRatio = 0.08,
@@ -137,14 +137,14 @@ export class ScrollingSpectrum {
     for (let i = 0; i < binCount; i++) {
       this.points.push({ py: 0, v: 0 })
     }
-
+    const cssW = width
+    const cssH = height
+    const pianoW = cssW * pianoWidthRatio
+    const pianoX = cssW - pianoW
+    const waterfallW = cssW - pianoW
     const drawFrame = () => {
       if (!this.running || !this.canvas || !this.ctx || !this.offscreenCanvas || !this.offCtx) return
-      const cssW = width
-      const cssH = height
-      const pianoW = cssW * pianoWidthRatio
-      const pianoX = cssW - pianoW
-      const waterfallW = cssW - pianoW
+     
       // ========== getByteFrequencyData 异常捕获 + 长度校验 ==========
       if (this.analyser) {
         if (this.data.length !== this.analyser.frequencyBinCount) {
