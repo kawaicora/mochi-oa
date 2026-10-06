@@ -166,7 +166,6 @@ export class VoiceAvatarSpectrum {
       const rate = audioCtx?.sampleRate ?? 48000
       const n = Math.min(data.length, Math.max(1, Math.floor((limitTopHz / rate) * chunk)))
       let i: number
-      let vRaw: number
       let v: number
       let len: number
       let a: number
@@ -176,10 +175,7 @@ export class VoiceAvatarSpectrum {
       g.lineCap = 'round'
 
       for (i = 0; i < n; i++) {
-        vRaw = data[i] / 255
-        // 攻击释放平滑
-   
-        v = smoothBuf[i] * this.config.multiplier
+        v =  data[i] / 255 * this.config.multiplier
         len = inner + v * (outer - inner)
         a = startA + (i / n) * (endA - startA)
 
