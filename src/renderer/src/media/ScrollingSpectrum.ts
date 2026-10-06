@@ -16,9 +16,18 @@ export interface ScrollingSpectrumOptions {
   pianoWidthRatio?: number
   devicePixelRatio?: number
 }
-function midiToHz(midiNote: number): number {
-  return 440 * Math.pow(2, (midiNote - 69) / 12)
-}
+// 给 midiToHz 内部自带缓存，函数闭包存缓存Map
+const midiToHz = (() => {
+  const cache = new Map<number, number>();
+  return function (midiNote: number): number {
+    if (cache.has(midiNote)) {
+      return cache.get(midiNote)!;
+    }
+    const val = 440 * Math.pow(2, (midiNote - 69) / 12);
+    cache.set(midiNote, val);
+    return val;
+  }
+})();
 const MIDI_C1 = 24
 const MIDI_C10 = 108
 const FREQ_C1 = midiToHz(MIDI_C1)    // 32.7032 Hz
@@ -90,10 +99,10 @@ export class ScrollingSpectrum {
       width = 1280,
       height = 720,
       fftSize = 8192,
-      scrollSpeed = 8,
+      scrollSpeed = 6,
       minDb = -80,
       maxDb = 0,
-      multiplier = 3.0,
+      multiplier = 2,
       background = '#0b0f1a',
       fps = 30,
       pianoWidthRatio = 0.08,
@@ -137,11 +146,11 @@ export class ScrollingSpectrum {
     for (let i = 0; i < binCount; i++) {
       this.points.push({ py: 0, v: 0 })
     }
-    const cssW = width
-    const cssH = height
-    const pianoW = cssW * pianoWidthRatio
-    const pianoX = cssW - pianoW
-    const waterfallW = cssW - pianoW
+     const cssW = width
+      const cssH = height
+      const pianoW = cssW * pianoWidthRatio
+      const pianoX = cssW - pianoW
+      const waterfallW = cssW - pianoW
     const drawFrame = () => {
       if (!this.running || !this.canvas || !this.ctx || !this.offscreenCanvas || !this.offCtx) return
      
@@ -177,7 +186,6 @@ export class ScrollingSpectrum {
         p.py = py
         p.v = v
       }
-      this.points.sort((a,b) => a.py - b.py)
 
       // ========== GC核心优化：合并路径，同色连续梯形合并绘制 ==========
       let i: number
@@ -215,7 +223,6 @@ export class ScrollingSpectrum {
         this.offCtx.lineTo(newX + halfW, y0)
         this.offCtx.lineTo(newX + halfW, y1)
         this.offCtx.lineTo(newX - halfW, y1)
-        this.offCtx.closePath()
       }
       // 填充最后一组
       if (currentColor !== null) {
