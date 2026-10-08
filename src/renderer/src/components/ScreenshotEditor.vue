@@ -330,6 +330,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   cursor: crosshair;
+  /* 关键：主窗口顶部有隐形标题栏拖拽区(-webkit-app-region: drag)，
+     会拦截落在其上的点击/框选/绘制。截图遮罩必须声明 no-drag，
+     使整块区域(含顶部工具栏)都能正常交互，不再被当作窗口拖拽。 */
+  -webkit-app-region: no-drag;
+  user-select: none;
 }
 .shot-stage {
   position: relative;
