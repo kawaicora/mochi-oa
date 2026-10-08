@@ -5,6 +5,7 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { readBranding, brandingIconPath } from './branding'
 
 export interface TrayDeps {
   showWindow: () => void
@@ -21,6 +22,16 @@ let flashTimer: NodeJS.Timeout | null = null
  * 全部缺失则退化为纯色 16x16 占位。
  */
 function createTrayIcon(): ReturnType<typeof nativeImage.createFromPath> | ReturnType<typeof nativeImage.createFromBuffer> {
+  // 优先品牌自定义图标（userData/brand.json iconPath）
+  const brandIcon = brandingIconPath()
+  if (brandIcon) {
+    try {
+      const img = nativeImage.createFromPath(brandIcon)
+      if (!img.isEmpty()) return img
+    } catch {
+      /* 用内置 */
+    }
+  }
   const candidates = [
     join(process.resourcesPath, 'resources', 'icon_256.png'),
     join(process.resourcesPath, 'icon_256.png'),
@@ -52,11 +63,12 @@ function createTrayIcon(): ReturnType<typeof nativeImage.createFromPath> | Retur
 /** 初始化托盘；桌面环境不支持时返回 false，调用方据此降级关窗行为。 */
 export function setupTray(deps: TrayDeps): boolean {
   try {
+    const brandName = readBranding().name
     tray = new Tray(createTrayIcon())
-    tray.setToolTip('麻薯OA')
+    tray.setToolTip(brandName)
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: '打开 麻薯OA', click: deps.showWindow },
+        { label: `打开 ${brandName}`, click: deps.showWindow },
         { type: 'separator' },
         { label: '退出', click: deps.quit }
       ])

@@ -5,6 +5,11 @@ import './styles/base.css'
 import './styles/diyu.css'
 import '@fortawesome/fontawesome-free/css/all.min.css'
 
+// ---- 品牌标题：软件名一处配置，渲染窗口标题跟随 ----
+try {
+  window.pantry?.getBranding?.().then((b) => { document.title = b.name }).catch(() => {})
+} catch { /* 忽略 */ }
+
 // ---- 渲染进程全局错误日志：window.onerror / unhandledrejection → 主进程写 renderer-error.log（不再闪现丢失） ----
 function safeLog(msg: string): void {
   try {
