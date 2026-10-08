@@ -60,6 +60,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.screenshotGetPending),
   screenshotSave: (dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.screenshotSave, dataUrl),
+  screenshotResize: (sel: { x: number; y: number; w: number; h: number }, toolbarDIP?: number): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.screenshotResize, sel, toolbarDIP),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
   notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),

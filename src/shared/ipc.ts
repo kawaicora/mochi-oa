@@ -207,6 +207,8 @@ export const IpcChannels = {
   screenshotGetPending: 'shot:getPending',
   /** 截屏窗口保存：主进程写临时 PNG、关窗、并通知主窗口发送 */
   screenshotSave: 'shot:save',
+  /** 截屏窗口按框选区域缩放定位（冻结画面跟随选框）：{ sel:{x,y,w,h}(物理像素), toolbarDIP } */
+  screenshotResize: 'shot:resize',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
