@@ -78,6 +78,8 @@ function pickColor(c: string): void {
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .tbtn:hover {
   background: #33333a;
@@ -100,6 +102,7 @@ function pickColor(c: string): void {
   border: 2px solid rgba(255, 255, 255, 0.25);
   cursor: pointer;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 .tcolor.on {
   border-color: #fff;
