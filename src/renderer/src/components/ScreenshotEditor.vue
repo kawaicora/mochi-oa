@@ -3,8 +3,11 @@
  * 截屏编辑器（参考 QQ/微信截图）：
  * 阶段一 select：显示全屏截图，拖拽框选，或点“全屏”整屏；
  * 阶段二 edit：对选中区域做画笔/箭头/矩形/椭圆/文字 + 颜色选择 + 撤销/重做，保存导出 PNG。
+ *
+ * 交互用 pointer 事件 + setPointerCapture：按下即捕获指针，即使鼠标拖出窗口外，
+ * pointermove/pointerup 仍会派发，避免“窗口外释放鼠标”导致绘制/框选卡死。
  */
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps<{ src: string; srcWidth: number; srcHeight: number }>()
 const emit = defineEmits<{ (e: 'save', dataUrl: string): void; (e: 'cancel'): void }>()
@@ -25,12 +28,33 @@ let editing = false
 let anchor: { x: number; y: number } | null = null
 let undoStack: ImageData[] = []
 let redoStack: ImageData[] = []
+let lastPt: { x: number; y: number } | null = null
 
-function canvasPixel(c: HTMLCanvasElement, e: MouseEvent): { x: number; y: number } {
+function canvasPixel(c: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
   const r = c.getBoundingClientRect()
   return {
     x: Math.round((e.clientX - r.left) * (c.width / r.width)),
     y: Math.round((e.clientY - r.top) * (c.height / r.height))
+  }
+}
+function grabPointer(e: PointerEvent): void {
+  const el = e.currentTarget as HTMLElement | null
+  if (el && typeof el.setPointerCapture === 'function') {
+    try {
+      el.setPointerCapture(e.pointerId)
+    } catch {
+      /* 已释放等情况忽略 */
+    }
+  }
+}
+function releasePointer(e: PointerEvent): void {
+  const el = e.currentTarget as HTMLElement | null
+  if (el && typeof el.hasPointerCapture === 'function' && el.hasPointerCapture(e.pointerId)) {
+    try {
+      el.releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -44,12 +68,13 @@ function setupStage(): void {
   if (!g) return
   g.drawImage(img, 0, 0, props.srcWidth, props.srcHeight)
 }
-function onSelDown(e: MouseEvent): void {
+function onSelDown(e: PointerEvent): void {
   if (!stageCanvas.value) return
+  grabPointer(e)
   editing = true
   anchor = canvasPixel(stageCanvas.value, e)
 }
-function onSelMove(e: MouseEvent): void {
+function onSelMove(e: PointerEvent): void {
   if (!editing || !anchor || !stageCanvas.value || !img) return
   const p = canvasPixel(stageCanvas.value, e)
   const x = Math.min(anchor.x, p.x)
@@ -66,7 +91,8 @@ function onSelMove(e: MouseEvent): void {
     g.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w, sel.h)
   }
 }
-function onSelUp(): void {
+function onSelUp(e: PointerEvent): void {
+  releasePointer(e)
   if (!editing) return
   editing = false
   if (!sel || sel.w < 4 || sel.h < 4) {
@@ -120,9 +146,10 @@ function redo(): void {
   undoStack.push(g.getImageData(0, 0, c.width, c.height))
   g.putImageData(redoStack.pop()!, 0, 0)
 }
-function onEditDown(e: MouseEvent): void {
+function onEditDown(e: PointerEvent): void {
   const c = editCanvas.value
   if (!c) return
+  grabPointer(e)
   anchor = canvasPixel(c, e)
   editing = true
   if (tool.value === 'text') {
@@ -137,9 +164,10 @@ function onEditDown(e: MouseEvent): void {
       }
     }
     editing = false
+    lastPt = null
   }
 }
-function onEditMove(e: MouseEvent): void {
+function onEditMove(e: PointerEvent): void {
   if (!editing || !anchor || tool.value === 'text') return
   const c = editCanvas.value
   const g = c?.getContext('2d')
@@ -154,7 +182,6 @@ function onEditMove(e: MouseEvent): void {
   g.lineJoin = 'round'
   const a = anchor
   if (tool.value === 'pen') {
-    // 画笔：上一点到当前连线（连续轨迹用 last point）
     g.beginPath()
     g.moveTo(lastPt?.x ?? a.x, lastPt?.y ?? a.y)
     g.lineTo(p.x, p.y)
@@ -172,12 +199,29 @@ function onEditMove(e: MouseEvent): void {
     g.stroke()
   }
 }
-let lastPt: { x: number; y: number } | null = null
-function onEditUp(): void {
+function onEditUp(e: PointerEvent): void {
+  releasePointer(e)
   if (!editing) return
   editing = false
   lastPt = null
   snapshot()
+}
+/** 保底释放：指针离开画布（拖出窗口）立即结束本笔，防止卡死 */
+function onLeave(e: PointerEvent): void {
+  if (phase.value === 'select') {
+    editing = false
+    return
+  }
+  const c = editCanvas.value
+  if (!editing || !c) return
+  editing = false
+  lastPt = null
+  snapshot()
+}
+function onCancel(e: PointerEvent): void {
+  releasePointer(e)
+  editing = false
+  lastPt = null
 }
 function drawArrow(g: CanvasRenderingContext2D, a: { x: number; y: number }, p: { x: number; y: number }): void {
   g.beginPath()
@@ -216,28 +260,30 @@ onMounted(() => {
   img.src = props.src
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
-watch(() => props.src, () => { if (img) { img.onload = setupStage; img.src = props.src } })
 </script>
 
 <template>
-  <div class="shot-mask" @mousedown.self="phase === 'select' ? onSelDown($event) : undefined">
+  <div class="shot-mask">
     <div class="shot-stage">
       <canvas
         ref="stageCanvas"
         v-show="phase === 'select'"
         class="shot-canvas"
-        @mousedown="onSelDown"
-        @mousemove="onSelMove"
-        @mouseup="onSelUp"
+        @pointerdown="onSelDown"
+        @pointermove="onSelMove"
+        @pointerup="onSelUp"
+        @pointerleave="onLeave"
+        @pointercancel="onCancel"
       ></canvas>
       <canvas
         ref="editCanvas"
         v-show="phase === 'edit'"
         class="shot-canvas"
-        :class="{ 'crosshair': tool === 'rect' || tool === 'ellipse' }"
-        @mousedown="onEditDown"
-        @mousemove="onEditMove"
-        @mouseup="onEditUp"
+        @pointerdown="onEditDown"
+        @pointermove="onEditMove"
+        @pointerup="onEditUp"
+        @pointerleave="onLeave"
+        @pointercancel="onCancel"
       ></canvas>
     </div>
 
@@ -251,7 +297,7 @@ watch(() => props.src, () => { if (img) { img.onload = setupStage; img.src = pro
     <!-- 编辑工具栏 -->
     <div v-else class="shot-toolbar">
       <button
-        v-for="(t, i) in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
+        v-for="t in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
         :key="t"
         class="shot-btn"
         :class="{ active: tool === t }"
@@ -310,9 +356,7 @@ watch(() => props.src, () => { if (img) { img.onload = setupStage; img.src = pro
   box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
   background: #000;
   cursor: crosshair;
-}
-.shot-canvas.crosshair {
-  cursor: crosshair;
+  touch-action: none;
 }
 .shot-toolbar {
   position: fixed;
@@ -348,6 +392,7 @@ watch(() => props.src, () => { if (img) { img.onload = setupStage; img.src = pro
   align-items: center;
   justify-content: center;
   gap: 5px;
+  user-select: none;
 }
 .shot-btn:hover {
   background: rgba(255, 255, 255, 0.12);
@@ -376,6 +421,7 @@ watch(() => props.src, () => { if (img) { img.onload = setupStage; img.src = pro
   border: 2px solid transparent;
   cursor: pointer;
   box-sizing: border-box;
+  padding: 0;
 }
 .shot-color.active {
   border-color: #fff;
