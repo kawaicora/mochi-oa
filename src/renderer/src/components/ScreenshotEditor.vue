@@ -7,7 +7,7 @@
  * 交互用 pointer 事件 + pointerleave 结束 + window pointerup 兜底：不用 setPointerCapture，
  * 避免捕获未释放导致按钮点击被吞；拖出画布即结束本笔，窗口内任意位置释放也兜底结束。
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps<{ src: string; srcWidth: number; srcHeight: number }>()
 const emit = defineEmits<{ (e: 'save', dataUrl: string): void; (e: 'cancel'): void }>()
@@ -18,6 +18,17 @@ const editCanvas = ref<HTMLCanvasElement | null>(null)
 const phase = ref<'select' | 'edit'>('select')
 const tool = ref<'pen' | 'arrow' | 'rect' | 'ellipse' | 'text'>('pen')
 const color = ref('#ff4444')
+
+// 文字工具：点击画布放置内联输入框（Electron 下 window.prompt 不弹，改用 DOM 输入框）
+const textDraft = ref<{ active: boolean; text: string; px: number; py: number; left: number; top: number }>({
+  active: false,
+  text: '',
+  px: 0,
+  py: 0,
+  left: 0,
+  top: 0
+})
+const textInputRef = ref<HTMLTextAreaElement | null>(null)
 
 const COLORS = ['#ff4444', '#ff8a00', '#ffd400', '#2ee62e', '#00c8ff', '#3b6bff', '#a43bff', '#ff3bd6', '#ffffff', '#000000']
 const TOOL_NAMES: Record<string, string> = { pen: '画笔', arrow: '箭头', rect: '矩形', ellipse: '椭圆', text: '文字' }
@@ -132,18 +143,39 @@ function onEditDown(e: PointerEvent): void {
   editing = true
   if (tool.value === 'pen') pts = [{ ...anchor }]
   if (tool.value === 'text') {
-    const text = window.prompt('输入文字', '')
-    if (text) {
-      snapshot()
-      const g = c.getContext('2d')
-      if (g) {
-        g.fillStyle = color.value
-        g.font = `${lw() * 6}px sans-serif`
-        g.fillText(text, anchor.x, anchor.y)
-      }
+    // 在点击处放置内联输入框。输入框挂到 mask 下（position:absolute），
+    // mask 为 fixed inset:0 覆盖视口，故 left/top 直接取视口 client 坐标即可。
+    textDraft.value = {
+      active: true,
+      text: '',
+      px: anchor.x,
+      py: anchor.y,
+      left: e.clientX,
+      top: e.clientY
     }
+    void nextTick(() => textInputRef.value?.focus())
     editing = false
   }
+}
+function commitText(): void {
+  const d = textDraft.value
+  if (!d.active) return
+  const t = d.text.trim()
+  d.active = false
+  if (!t) return
+  const c = editCanvas.value
+  const g = c?.getContext('2d')
+  if (!c || !g) return
+  const r = c.getBoundingClientRect()
+  const scale = c.width / r.width
+  snapshot()
+  g.fillStyle = color.value
+  g.font = `600 ${Math.round(20 * scale)}px sans-serif`
+  g.textBaseline = 'top'
+  g.fillText(t, d.px, d.py)
+}
+function cancelText(): void {
+  textDraft.value = { ...textDraft.value, active: false }
 }
 function onEditMove(e: PointerEvent): void {
   if (!editing || !anchor || tool.value === 'text') return
@@ -231,6 +263,8 @@ function save(): void {
 
 /* 键盘：Esc 取消，Enter 保存，Ctrl+Z 撤销 */
 function onKey(e: KeyboardEvent): void {
+  // 文字输入框聚焦时，全局快捷键停用（Esc/Enter/Ctrl+Z 已由输入框自行处理）
+  if (textDraft.value.active) return
   if (e.key === 'Escape') emit('cancel')
   else if (e.key === 'Enter') save()
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -318,6 +352,20 @@ onBeforeUnmount(() => {
         @pointercancel="onCancel"
       ></canvas>
     </div>
+
+    <!-- 文字输入框：点击画布(文字工具)时出现，回车/失焦提交绘制，Esc 取消 -->
+    <textarea
+      v-if="textDraft.active"
+      ref="textInputRef"
+      class="shot-text-input"
+      :style="{ left: textDraft.left + 'px', top: textDraft.top + 'px', color }"
+      v-model="textDraft.text"
+      rows="1"
+      placeholder="输入文字…"
+      @keydown.enter.prevent="commitText"
+      @keydown.esc.stop.prevent="cancelText"
+      @blur="commitText"
+    ></textarea>
   </div>
 </template>
 
@@ -371,6 +419,27 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   pointer-events: auto;
   user-select: none;
+}
+.shot-text-input {
+  position: absolute;
+  z-index: 1000;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.85);
+  font: 600 20px sans-serif;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  min-width: 60px;
+  min-height: 26px;
+  padding: 2px 4px;
+  line-height: 1.2;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+  -webkit-app-region: no-drag;
+  user-select: text;
+}
+.shot-text-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+  text-shadow: none;
 }
 .shot-hint {
   color: #cfcfd4;
