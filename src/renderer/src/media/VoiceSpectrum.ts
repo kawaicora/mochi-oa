@@ -5,6 +5,10 @@ export interface VoiceAvatarOptions {
 export interface VoiceSpectrumConfig {
   /** FFT 大小，必须是 32~32768 之间的 2 的整数次幂 */
   fftSize: number
+  /** 自然加权：true 时弱化低频饱和，保留频率能量分布（false 时原始频谱幅度） */
+  naturalWeight?: boolean
+  /** 频谱增益（dB，正值放大、负值衰减） */
+  gainDb?: number
   /** 频谱显示范围 */
   minHz: number
   maxHz: number

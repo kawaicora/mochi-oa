@@ -41,6 +41,8 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api = {
   // 应用 / 窗口
   getAppInfo: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke(IpcChannels.appInfo),
+  // 渲染进程错误日志（写 userData/logs/renderer-error.log）
+  logError: (msg: string): void => { ipcRenderer.send(IpcChannels.logError, msg) },
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),
   toggleMaximize: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winToggleMaximize),
   closeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winClose),

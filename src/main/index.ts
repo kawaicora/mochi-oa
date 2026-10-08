@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
@@ -8,6 +8,24 @@ import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
+
+// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
+function logMainError(tag: string, err: unknown): void {
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}\n`
+    appendFileSync(join(dir, 'main-error.log'), line, 'utf8')
+  } catch {
+    /* 日志写入失败静默，避免二次抛错 */
+  }
+}
+process.on('uncaughtException', (e) => { logMainError('uncaughtException', e) })
+process.on('unhandledRejection', (r) => { logMainError('unhandledRejection', r) })
+// 渲染进程报错：经 IPC 转发写日志（renderer 侧 window.onerror / unhandledrejection 触发）
+ipcMain.on(IpcChannels.logError, (_e, msg: unknown) => {
+  logMainError('renderer', msg)
+})
 
 /** 应用图标：优先打包目录(resourcesPath)，其次开发目录(项目根 resources/)。任务栏/窗口用。 */
 function resolveAppIcon(): string | undefined {

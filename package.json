@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.9.7",
+  "version": "2.9.8",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
