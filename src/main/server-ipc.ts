@@ -634,9 +634,42 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   })
 
   // 打开独立全屏截屏窗口（固定、不可调整）——先把截图数据暂存，截图窗口 ready 后再取
-  // 工具栏内嵌在编辑窗口内部（无独立工具栏窗口）
+  // 同时打开独立工具栏窗口（框选时用）；全屏编辑时隐藏独立窗口、工具栏内嵌在编辑窗口内部
   let pendingScreenshot: { dataUrl: string; width: number; height: number } | null = null
   let screenshotWin: BrowserWindow | null = null
+  let screenshotToolbarWin: BrowserWindow | null = null
+  const openScreenshotToolbar = (): void => {
+    const tw = new BrowserWindow({
+      alwaysOnTop: true,
+      frame: false,
+      resizable: false,
+      movable: false,
+      skipTaskbar: true,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#1b1b1f',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    // 工具栏固定到主屏顶部中央，置顶在截图窗口之上、不可移动
+    const disp = screen.getPrimaryDisplay()
+    const TW = ScreenshotToolbar.WIDTH
+    const TH = ScreenshotToolbar.HEIGHT
+    tw.setAlwaysOnTop(true, 'screen-saver')
+    tw.setBounds({ x: Math.round((disp.workArea.width - TW) / 2), y: 0, width: TW, height: TH })
+    tw.once('ready-to-show', () => {
+      tw.show()
+      tw.moveTop()
+    })
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void tw.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/toolbar.html`)
+    } else {
+      void tw.loadFile(join(__dirname, '../renderer/toolbar.html'))
+    }
+    screenshotToolbarWin = tw
+    tw.on('closed', () => {
+      if (screenshotToolbarWin === tw) screenshotToolbarWin = null
+    })
+  }
   ipcMain.handle(IpcChannels.openScreenshotWindow, (_e, payload) => {
     const p = (payload ?? {}) as { dataUrl?: unknown; width?: unknown; height?: unknown }
     if (typeof p.dataUrl !== 'string') return { ok: false, error: 'no data' }
@@ -659,15 +692,38 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     win.once('ready-to-show', () => {
       win.setBounds(screen.getPrimaryDisplay().bounds)
       win.show()
+      const tw = screenshotToolbarWin
+      if (tw && !tw.isDestroyed()) tw.moveTop()
     })
     win.on('closed', () => {
       if (screenshotWin === win) screenshotWin = null
+      if (screenshotToolbarWin && !screenshotToolbarWin.isDestroyed()) screenshotToolbarWin.close()
+      screenshotToolbarWin = null
     })
     screenshotWin = win
+    openScreenshotToolbar()
     if (process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/screenshot.html`)
     } else {
       void win.loadFile(join(__dirname, '../renderer/screenshot.html'))
+    }
+    return { ok: true }
+  })
+  // 工具栏窗口命令 → 转发到当前截图窗口（驱动编辑器）
+  ipcMain.on(IpcChannels.screenshotToolbarCommand, (_e, cmd: unknown) => {
+    if (screenshotWin && !screenshotWin.isDestroyed()) {
+      screenshotWin.webContents.send(IpcEvents.screenshotToolbarCommand, cmd ?? {})
+    }
+  })
+  // 截图窗口 → 显示/隐藏独立工具栏窗口（全屏编辑隐藏→内嵌工具栏；框选显示）
+  ipcMain.handle(IpcChannels.screenshotToolbarVisible, (_e, visible: unknown) => {
+    const tw = screenshotToolbarWin
+    if (!tw || tw.isDestroyed()) return { ok: false }
+    if (visible) {
+      tw.show()
+      tw.moveTop()
+    } else {
+      tw.hide()
     }
     return { ok: true }
   })
@@ -691,8 +747,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
   })
 
-  // 截屏窗口按框选区域缩放定位：窗口 bounds=选框（工具栏内嵌窗口顶部，上方有空间则上移留工具栏），冻结画面跟随选框
-  ipcMain.handle(IpcChannels.screenshotResize, (_e, sel: unknown, toolbarDIP?: unknown) => {
+  // 截屏窗口按框选区域缩放定位：窗口 bounds=选框（框选时工具栏为独立窗口，无需留空间），冻结画面跟随选框
+  ipcMain.handle(IpcChannels.screenshotResize, (_e, sel: unknown) => {
     const win = BrowserWindow.fromWebContents(_e.sender)
     if (!win || win.isDestroyed()) return { ok: false }
     const s = (sel ?? {}) as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
@@ -703,17 +759,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) return { ok: false }
     const scale = screen.getPrimaryDisplay().scaleFactor || 1
     if (win.isFullScreen()) win.setFullScreen(false)
-    const tb = Math.max(0, Number(toolbarDIP) || 0)
-    const bx = Math.round(x / scale)
-    const by0 = Math.round(y / scale)
-    const bw = Math.round(w / scale)
-    const bh = Math.round(h / scale)
-    // 选框上方有屏幕空间 → 窗口上移留出内嵌工具栏区域；否则窗口顶到选框顶部
-    if (by0 >= tb) {
-      win.setBounds({ x: bx, y: by0 - tb, width: bw, height: bh + tb })
-    } else {
-      win.setBounds({ x: bx, y: by0, width: bw, height: bh })
-    }
+    win.setBounds({ x: Math.round(x / scale), y: Math.round(y / scale), width: Math.round(w / scale), height: Math.round(h / scale) })
     return { ok: true }
   })
 }

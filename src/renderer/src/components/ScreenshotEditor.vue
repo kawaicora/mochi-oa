@@ -9,7 +9,7 @@
  */
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
-const props = defineProps<{ src: string; srcWidth: number; srcHeight: number }>()
+const props = defineProps<{ src: string; srcWidth: number; srcHeight: number; inlineToolbar?: boolean }>()
 const emit = defineEmits<{
   (e: 'save', dataUrl: string): void
   (e: 'cancel'): void
@@ -323,8 +323,8 @@ defineExpose({
 
 <template>
   <div class="shot-mask">
-    <!-- 内嵌工具栏（编辑窗口内部顶部）：全屏编辑时工具栏绘制在编辑窗口内，天然在上层 -->
-    <div class="shot-toolbar-wrap">
+    <!-- 内嵌工具栏：仅全屏编辑时显示（框选时用独立工具栏窗口） -->
+    <div v-if="props.inlineToolbar" class="shot-toolbar-wrap">
       <!-- 框选工具栏 -->
       <div v-if="phase === 'select'" class="shot-toolbar">
         <button class="shot-btn" @click="selectAll"><i class="fas fa-expand"></i> 全屏</button>
