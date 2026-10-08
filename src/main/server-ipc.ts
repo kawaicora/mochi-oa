@@ -340,9 +340,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }, Number(companyId) || 0, String(relativePath ?? ''))
   })
   // 下载整个文件夹到配置目录（按原结构建目录）
-  ipcMain.handle(IpcChannels.serverDownloadFolder, (_e, relPath) =>
-    serverClient.downloadFolder(String(relPath), loadServerConfig().downloadDir)
-  )
+  ipcMain.handle(IpcChannels.serverDownloadFolder, async (_e, relPath) => {
+    const t0 = Date.now()
+    const r = await serverClient.downloadFolder(String(relPath), loadServerConfig().downloadDir)
+    console.log(`[fs:folder] 下载 ${relPath} -> ok=${r.ok} count=${r.count ?? 0} dest=${r.destDir ?? ''} err=${r.error ?? ''} ${Date.now() - t0}ms`)
+    return r
+  })
 
   // RTC 信令
   ipcMain.handle(IpcChannels.rtcCreateMeeting, (_e, opts) => serverClient.rtcCreateMeeting(opts as { title?: string; startAt?: string; password?: string; kind: 'video' | 'voice' }))
@@ -372,11 +375,15 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   )
   // 下载远程文件到本地存储路径（图片/视频/3D 预览用），返回 {ok,path,fileUrl,error}
   ipcMain.handle(IpcChannels.serverDownloadFile, async (_e, url) => {
+    const t0 = Date.now()
     try {
-      const name = basename(String(url).split('?')[0] ?? '').trim() || 'download.bin'
+      const rawUrl = String(url)
+      const safeUrl = (u: string): string => String(u).replace(/token=[^&]+/g, 'token=***')
+      const name = basename(rawUrl.split('?')[0] ?? '').trim() || 'download.bin'
       // 统一下载到设置里的存储路径（downloadDir），与手动下载一致
       const dir = loadServerConfig().downloadDir
       await mkdir(dir, { recursive: true })
+      console.log(`[fs:download] 开始 url=${safeUrl(rawUrl)} name=${name} dir=${dir}`)
       const safe = name.replace(/[\\/:*?"<>|]/g, '_')
       let dest = join(dir, safe)
       // 同名去重：已存在则追加 (n)，避免覆盖已有文件
@@ -393,17 +400,23 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           break
         }
       }
-      const dl = await serverClient.downloadFile(String(url))
-      if (!dl.ok || !dl.buf) return { ok: false, error: dl.error || '下载失败' }
+      const dl = await serverClient.downloadFile(rawUrl)
+      if (!dl.ok || !dl.buf) {
+        console.log(`[fs:download] 失败 url=${safeUrl(rawUrl)} err=${dl.error ?? ''} ${Date.now() - t0}ms`)
+        return { ok: false, error: dl.error || '下载失败' }
+      }
       await writeFile(dest, dl.buf)
+      console.log(`[fs:download] 完成 -> ${dest} ${dl.buf.length}B ${Date.now() - t0}ms`)
       // 整条 Windows 路径编码进 URL：避免 `C:` 盘符被 Chromium 解析成 host（app-file://c/...）导致路径丢失
       return { ok: true, path: dest, fileUrl: `app-file:///${encodeURIComponent(dest)}` }
     } catch (err) {
+      console.log(`[fs:download] 异常 ${err instanceof Error ? err.message : String(err)} ${Date.now() - t0}ms`)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
   // 保存通话/会议录制到 {downloadDir}/通话录制/{name}（Document=个人文档目录，默认 文档/麻薯）
   ipcMain.handle(IpcChannels.appSaveRecording, async (_e, payload) => {
+    const t0 = Date.now()
     try {
       const p = (payload ?? {}) as { name?: unknown; base64?: unknown }
       const name = String(p.name ?? `通话录制_${Date.now()}.webm`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 120)
@@ -412,9 +425,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const dir = join(loadServerConfig().downloadDir, '通话录制')
       await mkdir(dir, { recursive: true })
       const dest = join(dir, name.endsWith('.webm') ? name : `${name}.webm`)
-      await writeFile(dest, Buffer.from(base64, 'base64'))
+      const buf = Buffer.from(base64, 'base64')
+      await writeFile(dest, buf)
+      console.log(`[fs:save] 录制 ${name} -> ${dest} ${buf.length}B ${Date.now() - t0}ms`)
       return { ok: true, path: dest, error: '' }
     } catch (err) {
+      console.log(`[fs:save] 录制失败 ${err instanceof Error ? err.message : String(err)} ${Date.now() - t0}ms`)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
