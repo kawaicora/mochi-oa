@@ -213,7 +213,8 @@ async function onDownload(): Promise<void> {
     if (r.ok) flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
     else flashToast(`下载失败：${r.error || '未知错误'}`)
   } else {
-    const r = await window.pantry.serverDownloadFile(m.content)
+    // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
+    const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
     if (r.ok && r.path) flashToast(`已下载 → ${r.path}`)
     else flashToast(`下载失败：${r.error || '未知错误'}`)
   }
@@ -232,7 +233,7 @@ async function onOpenFileLocation(): Promise<void> {
       const r = await app.downloadFolder(m.content)
       if (r.ok && r.destDir) path = r.destDir
     } else {
-      const r = await window.pantry.serverDownloadFile(m.content)
+      const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
       if (r.ok && r.path) path = r.path
     }
   }
