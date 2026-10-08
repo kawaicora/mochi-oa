@@ -18,17 +18,19 @@ let name = ''
 let appId = ''
 let description = ''
 let iconPath = ''
+let executableName = ''
 try {
   const b = JSON.parse(readFileSync(join(root, 'resources', 'brand.json'), 'utf8'))
   if (b && typeof b.name === 'string' && b.name.trim()) name = b.name.trim()
   if (b && typeof b.appId === 'string' && b.appId.trim()) appId = b.appId.trim()
   if (b && typeof b.description === 'string' && b.description.trim()) description = b.description.trim()
   if (b && typeof b.iconPath === 'string' && b.iconPath.trim()) iconPath = b.iconPath.trim()
+  if (b && typeof b.executableName === 'string' && b.executableName.trim()) executableName = b.executableName.trim()
 } catch {
   /* brand.json 缺失/损坏用 package.json 默认 */
 }
 
-console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}, description = ${description || '(默认)'}, icon = ${iconPath || '(默认)'}`)
+console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}, description = ${description || '(默认)'}, icon = ${iconPath || '(默认)'}, executableName = ${executableName || '(默认)'}`)
 
 if (name) {
   pkg.build = pkg.build || {}
@@ -50,7 +52,12 @@ if (iconPath) {
   pkg.build.mac = { ...(pkg.build.mac || {}), icon }
   pkg.build.linux = { ...(pkg.build.linux || {}), icon }
 }
-if (name || appId || description || iconPath) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+if (executableName) {
+  // 可执行名/安装目录（ASCII；productName 是中文时 electron-builder 用它生成文件名/安装目录）
+  pkg.build = pkg.build || {}
+  pkg.build.executableName = executableName
+}
+if (name || appId || description || iconPath || executableName) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 
 try {
   // 用 node 直接跑 electron-builder 的 cli.js（跨平台；直接 spawn .cmd 在 Windows 上会 EINVAL）
