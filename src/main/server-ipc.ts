@@ -645,6 +645,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
     const win = new BrowserWindow({
       fullscreen: true,
+      alwaysOnTop: true,
       frame: false,
       resizable: false,
       maximizable: false,
@@ -681,5 +682,31 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     } catch (e) {
       return { ok: false, error: String(e) }
     }
+  })
+
+  // 截屏窗口按框选区域缩放定位：退出全屏 → 窗口 bounds=选框（上方有空间则上移留出工具栏），冻结画面跟随选框
+  ipcMain.handle(IpcChannels.screenshotResize, (_e, sel: unknown, toolbarDIP?: unknown) => {
+    const win = BrowserWindow.fromWebContents(_e.sender)
+    if (!win || win.isDestroyed()) return { ok: false }
+    const s = (sel ?? {}) as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+    const x = Number(s.x)
+    const y = Number(s.y)
+    const w = Number(s.w)
+    const h = Number(s.h)
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) return { ok: false }
+    const scale = screen.getPrimaryDisplay().scaleFactor || 1
+    if (win.isFullScreen()) win.setFullScreen(false)
+    const tb = Math.max(0, Number(toolbarDIP) || 0)
+    const bx = Math.round(x / scale)
+    const by0 = Math.round(y / scale)
+    const bw = Math.round(w / scale)
+    const bh = Math.round(h / scale)
+    // 选框上方有屏幕空间 → 窗口上移留出工具栏区域，工具栏浮在选框上方；否则窗口顶到选框顶部
+    if (by0 >= tb) {
+      win.setBounds({ x: bx, y: by0 - tb, width: bw, height: bh + tb })
+    } else {
+      win.setBounds({ x: bx, y: by0, width: bw, height: bh })
+    }
+    return { ok: true }
   })
 }
