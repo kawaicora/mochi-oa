@@ -323,6 +323,49 @@ defineExpose({
 
 <template>
   <div class="shot-mask">
+    <!-- 内嵌工具栏（编辑窗口内部顶部）：全屏编辑时工具栏绘制在编辑窗口内，天然在上层 -->
+    <div class="shot-toolbar-wrap">
+      <!-- 框选工具栏 -->
+      <div v-if="phase === 'select'" class="shot-toolbar">
+        <button class="shot-btn" @click="selectAll"><i class="fas fa-expand"></i> 全屏</button>
+        <span class="shot-hint">拖拽框选区域，或点“全屏”</span>
+        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
+      </div>
+
+      <!-- 编辑工具栏 -->
+      <div v-else class="shot-toolbar">
+        <button
+          v-for="t in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
+          :key="t"
+          class="shot-btn"
+          :class="{ active: tool === t }"
+          :title="TOOL_NAMES[t]"
+          @click="tool = t"
+        >
+          <i v-if="t === 'pen'" class="fas fa-pen-nib"></i>
+          <i v-else-if="t === 'arrow'" class="fas fa-arrow-right"></i>
+          <i v-else-if="t === 'rect'" class="fas fa-square"></i>
+          <i v-else-if="t === 'ellipse'" class="fas fa-circle"></i>
+          <i v-else class="fas fa-font"></i>
+        </button>
+        <span class="shot-sep"></span>
+        <button
+          v-for="c in COLORS"
+          :key="c"
+          class="shot-color"
+          :style="{ background: c }"
+          :class="{ active: color === c }"
+          @click="color = c"
+        ></button>
+        <span class="shot-sep"></span>
+        <button class="shot-btn" title="撤销 (Ctrl+Z)" @click="undo"><i class="fas fa-undo"></i></button>
+        <button class="shot-btn" title="重做 (Ctrl+Shift+Z)" @click="redo"><i class="fas fa-redo"></i></button>
+        <span class="shot-sep"></span>
+        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
+        <button class="shot-btn primary" @click="save"><i class="fas fa-check"></i> 保存发送</button>
+      </div>
+    </div>
+
     <div class="shot-stage">
       <!-- 冻结画面：直接用 img 显示底图（不依赖 canvas 绘制，加载更可靠），canvas 仅叠加框选遮罩 -->
       <img v-show="phase === 'select'" class="shot-bg" :src="src" draggable="false" alt="" />
