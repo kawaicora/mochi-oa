@@ -288,11 +288,10 @@ onMounted(() => {
   window.addEventListener('pointerup', onGlobalUp)
   img = new Image()
   img.onload = () => {
-    console.log(`[shot] editor img loaded ${img?.naturalWidth}x${img?.naturalHeight}`)
     setupStage()
   }
-  img.onerror = (e) => {
-    console.log('[shot] editor img load error', String(e))
+  img.onerror = () => {
+    /* 加载失败静默 */
   }
   img.src = props.src
 })

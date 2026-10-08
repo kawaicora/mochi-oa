@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell } from 'electron'
-import { existsSync, mkdirSync, appendFileSync, createWriteStream } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
@@ -21,73 +21,6 @@ function logMainError(tag: string, err: unknown): void {
     /* 日志写入失败静默，避免二次抛错 */
   }
 }
-
-// ---- 统一 console 日志落盘：只允许使用 console 输出日志，全部捕获到 userData/logs/mochi-oa.log ----
-function initConsoleLogging(): void {
-  try {
-    const dir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const stream = createWriteStream(join(dir, 'mochi-oa.log'), { flags: 'a' })
-    const stamp = (): string => new Date().toISOString()
-    const fmt = (args: unknown[]): string =>
-      args
-        .map((a) => {
-          if (typeof a === 'string') return a
-          if (a instanceof Error) return a.stack || a.message
-          try {
-            return JSON.stringify(a)
-          } catch {
-            return String(a)
-          }
-        })
-        .join(' ')
-    // 主进程 console 重定向到文件（保留原 stdout/stderr 输出，便于 dev 终端仍可见）
-    const hook = (key: 'log' | 'warn' | 'error' | 'info'): void => {
-      const orig = console[key].bind(console)
-      console[key] = (...a: unknown[]) => {
-        stream.write(`[${stamp()}] [main] [${key}] ${fmt(a)}\n`)
-        orig(...a)
-      }
-    }
-    hook('log')
-    hook('warn')
-    hook('error')
-    hook('info')
-    // 所有渲染窗口的 console → 文件（兼容新旧 console-message 签名）
-    app.on('web-contents-created', (_e, wc) => {
-      wc.on('console-message', (...a: unknown[]) => {
-        let level = 'log'
-        let message = ''
-        let line = 0
-        let source = ''
-        const first = a[1]
-        if (first && typeof first === 'object') {
-          const d = first as Record<string, unknown>
-          level = String(d.level ?? 'log')
-          message = String(d.message ?? '')
-          line = Number(d.lineNumber ?? 0)
-          source = String(d.sourceId ?? '')
-        } else {
-          level = String(first ?? 'log')
-          message = String(a[2] ?? '')
-          line = Number(a[3] ?? 0)
-          source = String(a[4] ?? '')
-        }
-        stream.write(`[${stamp()}] [renderer] [${level}] ${message} ${source}:${line}\n`)
-      })
-    })
-    process.on('exit', () => {
-      try {
-        stream.end()
-      } catch {
-        /* 忽略 */
-      }
-    })
-  } catch {
-    /* 日志初始化失败静默 */
-  }
-}
-initConsoleLogging()
 process.on('uncaughtException', (e) => { logMainError('uncaughtException', e) })
 process.on('unhandledRejection', (r) => { logMainError('unhandledRejection', r) })
 // 渲染进程报错：经 IPC 转发写日志（renderer 侧 window.onerror / unhandledrejection 触发）
