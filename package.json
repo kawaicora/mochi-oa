@@ -1,13 +1,13 @@
 {
   "name": "mochi-oa",
-  "version": "2.9.52",
+  "version": "2.9.54",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
   "private": true,
   "build": {
     "appId": "com.mochi.oa",
-    "productName": "小墨办公",
+    "productName": "麻薯",
     "directories": {
       "output": "release"
     },
