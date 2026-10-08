@@ -60,9 +60,7 @@ function setupStage(): void {
   if (!c || !img) return
   c.width = props.srcWidth
   c.height = props.srcHeight
-  const g = c.getContext('2d')
-  if (!g) return
-  g.drawImage(img, 0, 0, props.srcWidth, props.srcHeight)
+  // 冻结画面由 <img class="shot-bg"> 直接显示；stage canvas 保持透明，仅叠加框选遮罩
 }
 function onSelDown(e: PointerEvent): void {
   if (!stageCanvas.value) return
@@ -77,7 +75,8 @@ function onSelMove(e: PointerEvent): void {
   sel = { x, y, w: Math.abs(p.x - anchor.x), h: Math.abs(p.y - anchor.y) }
   const g = stageCanvas.value.getContext('2d')
   if (!g) return
-  g.drawImage(img, 0, 0, props.srcWidth, props.srcHeight)
+  // 冻结画面在 <img> 上，canvas 每帧清空后只画框选遮罩（透明底）
+  g.clearRect(0, 0, props.srcWidth, props.srcHeight)
   if (sel.w > 1 || sel.h > 1) {
     g.fillStyle = 'rgba(0,120,255,0.15)'
     g.fillRect(sel.x, sel.y, sel.w, sel.h)
@@ -325,6 +324,8 @@ defineExpose({
 <template>
   <div class="shot-mask">
     <div class="shot-stage">
+      <!-- 冻结画面：直接用 img 显示底图（不依赖 canvas 绘制，加载更可靠），canvas 仅叠加框选遮罩 -->
+      <img v-show="phase === 'select'" class="shot-bg" :src="src" draggable="false" alt="" />
       <canvas
         ref="stageCanvas"
         v-show="phase === 'select'"
@@ -390,13 +391,25 @@ defineExpose({
 }
 .shot-canvas {
   /* 最大化全屏：画布铺满整个编辑窗口（无留白黑边），框选与绘画窗口一致 */
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   display: block;
   box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
-  background: #000;
+  background: transparent;
   cursor: crosshair;
   touch-action: none;
+}
+.shot-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+  z-index: 0;
+  pointer-events: none;
 }
 .shot-toolbar-wrap {
   flex-shrink: 0;
