@@ -43,10 +43,9 @@ if (description) {
 if (name || appId || description) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 
 try {
-  const bin = process.platform === 'win32'
-    ? join(root, 'node_modules', '.bin', 'electron-builder.cmd')
-    : join(root, 'node_modules', '.bin', 'electron-builder')
-  execFileSync(bin, [target, '--publish', 'never'], { stdio: 'inherit', cwd: root })
+  // 用 node 直接跑 electron-builder 的 cli.js（跨平台；直接 spawn .cmd 在 Windows 上会 EINVAL）
+  const cli = join(root, 'node_modules', 'electron-builder', 'cli.js')
+  execFileSync(process.execPath, [cli, target, '--publish', 'never'], { stdio: 'inherit', cwd: root })
 } finally {
   writeFileSync(pkgPath, orig, 'utf8') // 打包结束还原 package.json
 }
