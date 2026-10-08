@@ -14,6 +14,7 @@ const emit = defineEmits<{
   (e: 'save', dataUrl: string): void
   (e: 'cancel'): void
   (e: 'resize-window', sel: { x: number; y: number; w: number; h: number }): void
+  (e: 'edit-started', info: { sel: { x: number; y: number; w: number; h: number }; full: boolean }): void
 }>()
 
 const stageCanvas = ref<HTMLCanvasElement | null>(null)
@@ -116,6 +117,8 @@ function enterEdit(): void {
   if (!isFullSel) {
     emit('resize-window', { x: sel.x, y: sel.y, w: sel.w, h: sel.h })
   }
+  // 告知宿主已进入编辑 + 是否全屏 + 选框，宿主据此定位独立工具栏窗口
+  emit('edit-started', { sel: { x: sel.x, y: sel.y, w: sel.w, h: sel.h }, full: isFullSel })
 }
 
 /* ---------- 阶段二：编辑 ---------- */

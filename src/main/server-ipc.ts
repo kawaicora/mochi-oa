@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
-import { IpcChannels, IpcEvents } from '../shared/ipc'
+import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
@@ -656,8 +656,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     })
     // 工具栏固定到主屏顶部中央，置顶在截图窗口之上、不可移动
     const disp = screen.getPrimaryDisplay()
-    const TW = 660
-    const TH = 100
+    const TW = ScreenshotToolbar.WIDTH
+    const TH = ScreenshotToolbar.HEIGHT
     tw.setAlwaysOnTop(true, 'screen-saver')
     tw.setBounds({ x: Math.round((disp.workArea.width - TW) / 2), y: 0, width: TW, height: TH })
     tw.once('ready-to-show', () => tw.show())
@@ -714,6 +714,19 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     if (screenshotWin && !screenshotWin.isDestroyed()) {
       screenshotWin.webContents.send(IpcEvents.screenshotToolbarCommand, cmd ?? {})
     }
+  })
+  // 截图窗口 → 移动独立工具栏窗口到目标位置（置顶不可移动，程序化 setBounds）
+  ipcMain.handle(IpcChannels.screenshotToolbarPos, (_e, pos: unknown) => {
+    const tw = screenshotToolbarWin
+    if (!tw || tw.isDestroyed()) return { ok: false }
+    const p = (pos ?? {}) as { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+    const x = Number(p.x)
+    const y = Number(p.y)
+    const width = Number(p.width)
+    const height = Number(p.height)
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return { ok: false }
+    tw.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+    return { ok: true }
   })
   ipcMain.handle(IpcChannels.screenshotGetPending, () => {
     const p = pendingScreenshot

@@ -211,6 +211,8 @@ export const IpcChannels = {
   screenshotResize: 'shot:resize',
   /** 独立工具栏窗口 → 主进程 → 截图窗口：驱动编辑命令 { action, value? } */
   screenshotToolbarCommand: 'shot:toolbarCommand',
+  /** 截图窗口 → 主进程：移动独立工具栏窗口到目标位置（DIP） */
+  screenshotToolbarPos: 'shot:toolbarPos',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
@@ -284,3 +286,6 @@ export const IpcEvents = {
   /** 独立工具栏窗口 → 截图窗口：编辑命令 { action, value? } */
   screenshotToolbarCommand: 'shot:event:toolbarCommand'
 } as const
+
+/** 独立截屏工具栏窗口固定尺寸（DIP） */
+export const ScreenshotToolbar = { WIDTH: 660, HEIGHT: 100 } as const

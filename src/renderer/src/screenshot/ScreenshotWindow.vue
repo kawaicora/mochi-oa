@@ -7,6 +7,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import ScreenshotEditor from '../components/ScreenshotEditor.vue'
 import type { ScreenshotEditorExpose } from '../components/ScreenshotEditor.vue'
+import { ScreenshotToolbar } from '@shared/ipc'
 
 const data = ref<{ src: string; srcWidth: number; srcHeight: number } | null>(null)
 const editorRef = ref<InstanceType<typeof ScreenshotEditor> | null>(null)
@@ -69,6 +70,34 @@ function onCancel(): void {
 function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): void {
   window.pantry.screenshotResize(sel)
 }
+// 进入编辑 → 定位独立工具栏窗口：全屏=编辑窗口内部顶部；框选=下方空间足够放底部，否则内部顶部
+function onEditStarted(info: { sel: { x: number; y: number; w: number; h: number }; full: boolean }): void {
+  const scale = window.devicePixelRatio || 1
+  const sw = window.screen.width
+  const sh = window.screen.height
+  const TW = ScreenshotToolbar.WIDTH
+  const TH = ScreenshotToolbar.HEIGHT
+  let tx: number
+  let ty: number
+  const selX = info.sel.x / scale
+  const selY = info.sel.y / scale
+  const selW = info.sel.w / scale
+  const selH = info.sel.h / scale
+  if (info.full) {
+    // 全屏：无外部空间，工具栏置于编辑窗口内部顶部（水平居中）
+    tx = Math.round((sw - TW) / 2)
+    ty = 0
+  } else if (sh - (selY + selH) >= TH) {
+    // 框选下方有足够空间 → 工具栏放选框底部（外部，不遮挡选框）
+    tx = Math.round(Math.min(Math.max(selX, 0), sw - TW))
+    ty = Math.round(selY + selH)
+  } else {
+    // 触底/下方无空间 → 工具栏放选框内部顶部（水平对齐选框）
+    tx = Math.round(Math.min(Math.max(selX, 0), sw - TW))
+    ty = Math.round(selY)
+  }
+  void window.pantry.screenshotToolbarPos({ x: tx, y: ty, width: TW, height: TH })
+}
 </script>
 
 <template>
@@ -82,6 +111,7 @@ function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): vo
       @save="onSave"
       @cancel="onCancel"
       @resize-window="onResizeWindow"
+      @edit-started="onEditStarted"
     />
   </div>
 </template>
