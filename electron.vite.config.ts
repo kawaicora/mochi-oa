@@ -53,7 +53,8 @@ export default defineConfig({
           index: resolve(__dirname, 'src/renderer/index.html'),
           meeting: resolve(__dirname, 'src/renderer/meeting.html'),
           task: resolve(__dirname, 'src/renderer/task.html'),
-          screenshot: resolve(__dirname, 'src/renderer/screenshot.html')
+          screenshot: resolve(__dirname, 'src/renderer/screenshot.html'),
+          toolbar: resolve(__dirname, 'src/renderer/toolbar.html')
         }
       }
     }

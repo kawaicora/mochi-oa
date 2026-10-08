@@ -292,53 +292,35 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('pointerup', onGlobalUp)
 })
+
+/* 外部（独立工具栏窗口）驱动：设置工具/颜色、撤销重做、全屏、保存、取消 */
+export interface ScreenshotEditorExpose {
+  setTool(t: 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text'): void
+  setColor(c: string): void
+  undo(): void
+  redo(): void
+  selectAll(): void
+  save(): void
+  cancel(): void
+}
+defineExpose({
+  setTool: (t: 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text') => {
+    tool.value = t
+    cancelText()
+  },
+  setColor: (c: string) => {
+    color.value = c
+  },
+  undo,
+  redo,
+  selectAll,
+  save,
+  cancel: () => emit('cancel')
+} satisfies ScreenshotEditorExpose)
 </script>
 
 <template>
   <div class="shot-mask">
-    <!-- 顶部工具栏行：作为 mask 的第一个文档流行（flex column 顶部），天然在预览区之上，整条可点 -->
-    <div class="shot-toolbar-wrap">
-      <!-- 框选工具栏 -->
-      <div v-if="phase === 'select'" class="shot-toolbar">
-        <button class="shot-btn" @click="selectAll"><i class="fas fa-expand"></i> 全屏</button>
-        <span class="shot-hint">拖拽框选区域，或点“全屏”</span>
-        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
-      </div>
-
-      <!-- 编辑工具栏 -->
-      <div v-else class="shot-toolbar">
-        <button
-          v-for="t in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
-          :key="t"
-          class="shot-btn"
-          :class="{ active: tool === t }"
-          :title="TOOL_NAMES[t]"
-          @click="tool = t"
-        >
-          <i v-if="t === 'pen'" class="fas fa-pen-nib"></i>
-          <i v-else-if="t === 'arrow'" class="fas fa-arrow-right"></i>
-          <i v-else-if="t === 'rect'" class="fas fa-square"></i>
-          <i v-else-if="t === 'ellipse'" class="fas fa-circle"></i>
-          <i v-else class="fas fa-font"></i>
-        </button>
-        <span class="shot-sep"></span>
-        <button
-          v-for="c in COLORS"
-          :key="c"
-          class="shot-color"
-          :style="{ background: c }"
-          :class="{ active: color === c }"
-          @click="color = c"
-        ></button>
-        <span class="shot-sep"></span>
-        <button class="shot-btn" title="撤销 (Ctrl+Z)" @click="undo"><i class="fas fa-undo"></i></button>
-        <button class="shot-btn" title="重做 (Ctrl+Shift+Z)" @click="redo"><i class="fas fa-redo"></i></button>
-        <span class="shot-sep"></span>
-        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
-        <button class="shot-btn primary" @click="save"><i class="fas fa-check"></i> 保存发送</button>
-      </div>
-    </div>
-
     <div class="shot-stage">
       <canvas
         ref="stageCanvas"
