@@ -41,6 +41,9 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api = {
   // 应用 / 窗口
   getAppInfo: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke(IpcChannels.appInfo),
+  // 品牌配置：软件名/图标（一处配置，全局生效）
+  getBranding: (): Promise<{ name: string; iconPath: string | null }> => ipcRenderer.invoke(IpcChannels.brandingGet),
+  setBranding: (p: { name?: string; iconPath?: string | null }): Promise<{ name: string; iconPath: string | null }> => ipcRenderer.invoke(IpcChannels.brandingSet, p),
   // 渲染进程错误日志（写 userData/logs/renderer-error.log）
   logError: (msg: string): void => { ipcRenderer.send(IpcChannels.logError, msg) },
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),

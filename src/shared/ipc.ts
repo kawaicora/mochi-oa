@@ -208,6 +208,10 @@ export const IpcChannels = {
   /** 保存通话/会议录制（base64）到 {downloadDir}/通话录制/，返回 {ok,path,error} */
   appSaveRecording: 'app:saveRecording',
   appInfo: 'app:info',
+  /** 读取品牌配置（软件名/图标） */
+  brandingGet: 'app:brandingGet',
+  /** 写入品牌配置（软件名/图标） */
+  brandingSet: 'app:brandingSet',
   /** 在系统文件管理器中打开本地文件所在路径 */
   appOpenFileLocation: 'app:openFileLocation'
 } as const

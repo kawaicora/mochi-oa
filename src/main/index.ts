@@ -8,6 +8,7 @@ import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
+import { readBranding, saveBranding, refreshBranding, brandingIconPath } from './branding'
 
 // ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {
@@ -86,7 +87,7 @@ function createWindow(): void {
     frame: false,
     roundedCorners: true,
     backgroundColor: '#ffffff',
-    icon: resolveAppIcon(),
+    icon: brandingIconPath() ?? resolveAppIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -96,6 +97,7 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.setTitle(readBranding().name)
   // 窗口聚焦 → 停止托盘闪动
   mainWindow.on('focus', () => stopFlashTray())
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -174,6 +176,21 @@ app.whenReady().then(() => {
     if (fromWin && !fromWin.isDestroyed() && fromWin.isFocused()) return
     notifyManager({ title: opts.title ?? '', body: opts.body ?? '', target: opts.target ?? { kind: 'main' }, tray: opts.tray ?? true })
     return { ok: true }
+  })
+  // 品牌配置：软件名/图标（一处配置，全局生效）
+  ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
+  ipcMain.handle(IpcChannels.brandingSet, (_e, p: { name?: string; iconPath?: string | null }) => {
+    const b = saveBranding(p ?? {})
+    const w = BrowserWindow.getAllWindows()
+    for (const win of w) {
+      if (!win.isDestroyed()) {
+        win.setTitle(b.name)
+        const ip = brandingIconPath()
+        if (ip) win.setIcon(require('electron').nativeImage.createFromPath(ip))
+      }
+    }
+    refreshBranding()
+    return b
   })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
