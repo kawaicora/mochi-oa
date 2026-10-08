@@ -209,6 +209,8 @@ export const IpcChannels = {
   screenshotSave: 'shot:save',
   /** 截屏窗口按框选区域缩放定位（冻结画面跟随选框）：{ sel:{x,y,w,h}(物理像素), toolbarDIP } */
   screenshotResize: 'shot:resize',
+  /** 独立工具栏窗口 → 主进程 → 截图窗口：驱动编辑命令 { action, value? } */
+  screenshotToolbarCommand: 'shot:toolbarCommand',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
@@ -278,5 +280,7 @@ export const IpcEvents = {
   /** 托盘"设置"入口，通知 renderer 打开设置面板 */
   uiOpenSettings: 'ui:event:openSettings',
   /** 截屏窗口保存成功 → 通知主窗口把临时 PNG 发送到当前会话 */
-  screenshotSaved: 'shot:event:saved'
+  screenshotSaved: 'shot:event:saved',
+  /** 独立工具栏窗口 → 截图窗口：编辑命令 { action, value? } */
+  screenshotToolbarCommand: 'shot:event:toolbarCommand'
 } as const
