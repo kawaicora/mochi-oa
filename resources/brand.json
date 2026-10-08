@@ -1,5 +1,5 @@
 {
-  "name": "麻薯OA",
-  "iconPath": "icon_256.png",
+  "name": "小墨办公",
+  "iconPath": "xiaomo_256.png",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
