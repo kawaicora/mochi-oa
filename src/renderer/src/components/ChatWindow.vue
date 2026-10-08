@@ -196,6 +196,24 @@ async function onDelete(messageId: string): Promise<void> {
 /** 当前右键菜单对应的消息 */
 const menuMsg = computed(() => (showMsgMenu.value ? app.messages.find((x) => x.id === showMsgMenu.value!.id) : undefined))
 
+/** 下载当前右键文件/文件夹到配置的下载目录 */
+async function onDownload(): Promise<void> {
+  const id = showMsgMenu.value?.id
+  closeMsgMenu()
+  if (!id) return
+  const m = app.messages.find((x) => x.id === id)
+  if (!m) return
+  if (m.kind === 'folder') {
+    const r = await app.downloadFolder(m.content)
+    if (r.ok) flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
+    else flashToast(`下载失败：${r.error || '未知错误'}`)
+  } else {
+    const r = await window.pantry.serverDownloadFile(m.content)
+    if (r.ok && r.path) flashToast(`已下载 → ${r.path}`)
+    else flashToast(`下载失败：${r.error || '未知错误'}`)
+  }
+}
+
 /** 打开本地文件所在路径（视频/图片/文件/3D/文件夹） */
 async function onOpenFileLocation(): Promise<void> {
   const id = showMsgMenu.value?.id
@@ -439,6 +457,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 
     <!-- 消息右键菜单 -->
     <div v-if="showMsgMenu" class="ctx-menu" :style="{ left: showMsgMenu.x + 'px', top: showMsgMenu.y + 'px' }">
+      <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
       <button class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
     </div>

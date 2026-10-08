@@ -1,5 +1,5 @@
 {
   "name": "麻薯OA",
-  "iconPath": "",
-  "defaultServerUrl": ""
+  "iconPath": "icon_256.png",
+  "defaultServerUrl": "http://192.168.2.57:3000"
 }
