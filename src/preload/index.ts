@@ -62,15 +62,6 @@ const api = {
     ipcRenderer.invoke(IpcChannels.screenshotSave, dataUrl),
   screenshotResize: (sel: { x: number; y: number; w: number; h: number }, toolbarDIP?: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.screenshotResize, sel, toolbarDIP),
-  /** 独立工具栏窗口 → 截图窗口：驱动编辑命令 */
-  screenshotToolbarCommand: (cmd: { action: string; value?: unknown }): void =>
-    ipcRenderer.send(IpcChannels.screenshotToolbarCommand, cmd),
-  /** 截图窗口订阅来自工具栏窗口的命令（返回退订函数） */
-  onScreenshotToolbarCommand: (l: (cmd: { action: string; value?: unknown }) => void): (() => void) =>
-    subscribe<{ action: string; value?: unknown }>(IpcEvents.screenshotToolbarCommand, l),
-  /** 截图窗口：把独立工具栏窗口移动到目标位置（DIP） */
-  screenshotToolbarPos: (pos: { x: number; y: number; width: number; height: number }): Promise<void> =>
-    ipcRenderer.invoke(IpcChannels.screenshotToolbarPos, pos),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
   notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
