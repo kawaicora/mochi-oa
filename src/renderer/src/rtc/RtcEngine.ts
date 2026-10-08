@@ -205,23 +205,39 @@ class RtcEngine {
     pc.ontrack = (event) => {
       // event.streams[0] 绑定远程流；无 streams 时忽略
       if (event.streams.length === 0) return
+      console.log(`[RtcEngine] [ontrack] user=${userId} kind=${event.track.kind} stream=${event.streams[0].id} ${event.track.readyState}`)
       this.onRemoteStream(userId, event.streams[0])
     }
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
+      const c = event.candidate
+      if (c) {
+        // 本端收集到候选：host/srflx/relay 类型、协议、传输地址（内网排查用）
+        console.log(`[RtcEngine] [ice:local] user=${userId} type=${c.type} proto=${c.protocol} ${c.candidate}`, 'gather=' + pc.iceGatheringState)
         this.onSignal({
           type: 'ice',
-          candidate: event.candidate.candidate,
-          sdpMid: event.candidate.sdpMid,
-          sdpMLineIndex: event.candidate.sdpMLineIndex
+          candidate: c.candidate,
+          sdpMid: c.sdpMid,
+          sdpMLineIndex: c.sdpMLineIndex
         })
+      } else {
+        console.log(`[RtcEngine] [ice:local] user=${userId} end-of-candidates`)
       }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[RtcEngine] [ice-state] user=${userId} ${pc.iceConnectionState}`)
+    }
+
+    pc.onicegatheringstatechange = () => {
+      console.log(`[RtcEngine] [ice-gather] user=${userId} ${pc.iceGatheringState}`)
     }
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
+      console.log(`[RtcEngine] [conn-state] user=${userId} ${state} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
       if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+        console.log(`[RtcEngine] [conn-state] user=${userId} ${state} → 关闭对端连接`)
         this.closePeer(userId)
         this.onPeerDisconnected(userId)
       }
