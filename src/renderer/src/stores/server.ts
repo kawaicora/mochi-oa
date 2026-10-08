@@ -71,6 +71,15 @@ export const useServerStore = defineStore('server', () => {
       .replace(/\/+$/, '')
   }
 
+  /** 服务端返回的相对文件路径（/files/...）→ 用当前 serverUrl 自动拼成绝对 URL（同源可达）。
+   *  已是 http(s) 绝对 URL 则原样返回。返回相对路径仅当 serverUrl 为空。 */
+  function absFileUrl(url: string): string {
+    if (!url || /^https?:\/\//i.test(url)) return url
+    const base = httpBase(settings.value.serverUrl)
+    if (!base) return url
+    return base + (url.startsWith('/') ? url : '/' + url)
+  }
+
   /** 忘记密码：发送重置验证码到绑定邮箱 */
   async function sendResetCode(email: string): Promise<{ ok: boolean; error?: string }> {
     return window.pantry.serverSendResetCode(email)
@@ -131,6 +140,7 @@ export const useServerStore = defineStore('server', () => {
     wire,
     setServerUrl,
     connect,
+    absFileUrl,
     login,
     register,
     sendResetCode,

@@ -7,5 +7,6 @@ release/
 .vite/
 tools/.shot/
 *.log
+*.tsbuildinfo
 功能反馈截图
 electron.vite.config.*.mjs

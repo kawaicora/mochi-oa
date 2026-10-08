@@ -26,25 +26,25 @@ export default defineConfig({
     },
     plugins: [
       vue(),
-      javascriptObfuscator({
-        // 指定需要混淆的文件，通常排除 node_modules
-        include: ['src/**/*.{js,ts,vue}'], 
-        exclude: ['node_modules/**'],
-        // 混淆选项，参考 javascript-obfuscator
-        options: {
-          compact: true, // 压缩代码
-          controlFlowFlattening: false, // 控制流扁平化（核心混淆手段）  不要开 会奔溃
-          controlFlowFlatteningThreshold: 0.75,
-          stringArray: true, // 字符串数组化
-          stringArrayEncoding: ['base64'], // 字符串 Base64 编码
-          stringArrayThreshold: 0.75,
-          identifierNamesGenerator: 'hexadecimal', // 变量名十六进制化
-          renameGlobals: false, // 不要重命名全局变量，防止破坏 Vue/Pinia
-          selfDefending: false, // 自我防御，防止格式化  不要开 会奔溃
-          debugProtection: true, // 防止调试
-          disableConsoleOutput: true, // 移除 console
-        }
-      })
+      // javascriptObfuscator({
+      //   // 指定需要混淆的文件，通常排除 node_modules
+      //   include: ['src/**/*.{js,ts,vue}'], 
+      //   exclude: ['node_modules/**'],
+      //   // 混淆选项，参考 javascript-obfuscator
+      //   options: {
+      //     compact: true, // 压缩代码
+      //     controlFlowFlattening: false, // 控制流扁平化（核心混淆手段）  不要开 会奔溃
+      //     controlFlowFlatteningThreshold: 0.75,
+      //     stringArray: true, // 字符串数组化
+      //     stringArrayEncoding: ['base64'], // 字符串 Base64 编码
+      //     stringArrayThreshold: 0.75,
+      //     identifierNamesGenerator: 'hexadecimal', // 变量名十六进制化
+      //     renameGlobals: false, // 不要重命名全局变量，防止破坏 Vue/Pinia
+      //     selfDefending: false, // 自我防御，防止格式化  不要开 会奔溃
+      //     debugProtection: true, // 防止调试
+      //     disableConsoleOutput: true, // 移除 console
+      //   }
+      // })
     ],
     build: {
       outDir: 'out/renderer',

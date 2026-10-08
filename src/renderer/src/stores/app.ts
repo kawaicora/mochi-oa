@@ -71,9 +71,9 @@ export const useAppStore = defineStore('app', () => {
     if (!isAutoPreviewKind(msg.kind)) return
     if (localCache.value[msg.id]) return
     if (failedLocalCache.value.has(msg.id)) return
-    if (!/^https?:\/\//i.test(msg.content || '')) return
     try {
-      const r = await window.pantry.serverDownloadFile(msg.content)
+      console.log('正在下载消息预览文件:', msg.content)
+      const r = await window.pantry.serverDownloadFile(server.absFileUrl(msg.content))
       if (r.ok && r.path && r.fileUrl && !failedLocalCache.value.has(msg.id)) {
         localCache.value[msg.id] = { fileUrl: r.fileUrl, path: r.path }
       }
@@ -83,10 +83,13 @@ export const useAppStore = defineStore('app', () => {
   }
   function localPreviewUrl(msg: ServerChatMessage): string {
     const c = localCache.value[msg.id]
-    return c ? c.fileUrl : msg.content
+    const u = c ? c.fileUrl : server.absFileUrl(msg.content)
+    console.log('正在获取本地预览路径:', u)
+    return u
   }
   function fallbackPreview(msg: ServerChatMessage): void {
     if (localCache.value[msg.id]) delete localCache.value[msg.id]
+    console.log('清除本地预览缓存:', msg.id)
     failedLocalCache.value.add(msg.id)
   }
   function ensureLocalForAll(list: ServerChatMessage[]): void {

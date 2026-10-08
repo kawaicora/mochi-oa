@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useServerStore } from '../stores/server'
 
 const props = withDefaults(
   defineProps<{ nick?: string; avatar?: string; size?: number }>(),
   { size: 36 }
 )
 
+const server = useServerStore()
+// 头像可能是服务端返回的相对路径（/files/...）→ 自动用当前 serverUrl 拼成绝对地址（同源可达）
 const hasAvatar = computed(() => typeof props.avatar === 'string' && props.avatar.length > 0)
+const src = computed(() => server.absFileUrl(props.avatar ?? ''))
 const initial = computed(() => (props.nick ? props.nick.slice(0, 1) : '?'))
 </script>
 
@@ -17,7 +21,7 @@ const initial = computed(() => (props.nick ? props.nick.slice(0, 1) : '?'))
   >
     <img
       v-if="hasAvatar"
-      :src="avatar"
+      :src="src"
       :style="{ width: size + 'px', height: size + 'px', borderRadius: '50%', objectFit: 'cover' }"
       alt=""
     />
