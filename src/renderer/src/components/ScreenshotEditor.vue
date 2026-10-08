@@ -276,44 +276,47 @@ onBeforeUnmount(() => {
       ></canvas>
     </div>
 
-    <!-- 框选工具栏 -->
-    <div v-if="phase === 'select'" class="shot-toolbar">
-      <button class="shot-btn" @click="selectAll"><i class="fas fa-expand"></i> 全屏</button>
-      <span class="shot-hint">拖拽框选区域，或点“全屏”</span>
-      <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
-    </div>
+    <!-- 顶部工具栏行：flex 居中，外层不拦截事件，保证整条可点且不被 canvas 覆盖 -->
+    <div class="shot-toolbar-wrap">
+      <!-- 框选工具栏 -->
+      <div v-if="phase === 'select'" class="shot-toolbar">
+        <button class="shot-btn" @click="selectAll"><i class="fas fa-expand"></i> 全屏</button>
+        <span class="shot-hint">拖拽框选区域，或点“全屏”</span>
+        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
+      </div>
 
-    <!-- 编辑工具栏 -->
-    <div v-else class="shot-toolbar">
-      <button
-        v-for="t in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
-        :key="t"
-        class="shot-btn"
-        :class="{ active: tool === t }"
-        :title="TOOL_NAMES[t]"
-        @click="tool = t"
-      >
-        <i v-if="t === 'pen'" class="fas fa-pen-nib"></i>
-        <i v-else-if="t === 'arrow'" class="fas fa-arrow-right"></i>
-        <i v-else-if="t === 'rect'" class="fas fa-square"></i>
-        <i v-else-if="t === 'ellipse'" class="fas fa-circle"></i>
-        <i v-else class="fas fa-font"></i>
-      </button>
-      <span class="shot-sep"></span>
-      <button
-        v-for="c in COLORS"
-        :key="c"
-        class="shot-color"
-        :style="{ background: c }"
-        :class="{ active: color === c }"
-        @click="color = c"
-      ></button>
-      <span class="shot-sep"></span>
-      <button class="shot-btn" title="撤销 (Ctrl+Z)" @click="undo"><i class="fas fa-undo"></i></button>
-      <button class="shot-btn" title="重做 (Ctrl+Shift+Z)" @click="redo"><i class="fas fa-redo"></i></button>
-      <span class="shot-sep"></span>
-      <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
-      <button class="shot-btn primary" @click="save"><i class="fas fa-check"></i> 保存发送</button>
+      <!-- 编辑工具栏 -->
+      <div v-else class="shot-toolbar">
+        <button
+          v-for="t in (['pen', 'arrow', 'rect', 'ellipse', 'text'] as const)"
+          :key="t"
+          class="shot-btn"
+          :class="{ active: tool === t }"
+          :title="TOOL_NAMES[t]"
+          @click="tool = t"
+        >
+          <i v-if="t === 'pen'" class="fas fa-pen-nib"></i>
+          <i v-else-if="t === 'arrow'" class="fas fa-arrow-right"></i>
+          <i v-else-if="t === 'rect'" class="fas fa-square"></i>
+          <i v-else-if="t === 'ellipse'" class="fas fa-circle"></i>
+          <i v-else class="fas fa-font"></i>
+        </button>
+        <span class="shot-sep"></span>
+        <button
+          v-for="c in COLORS"
+          :key="c"
+          class="shot-color"
+          :style="{ background: c }"
+          :class="{ active: color === c }"
+          @click="color = c"
+        ></button>
+        <span class="shot-sep"></span>
+        <button class="shot-btn" title="撤销 (Ctrl+Z)" @click="undo"><i class="fas fa-undo"></i></button>
+        <button class="shot-btn" title="重做 (Ctrl+Shift+Z)" @click="redo"><i class="fas fa-redo"></i></button>
+        <span class="shot-sep"></span>
+        <button class="shot-btn" @click="emit('cancel')"><i class="fas fa-times"></i> 取消</button>
+        <button class="shot-btn primary" @click="save"><i class="fas fa-check"></i> 保存发送</button>
+      </div>
     </div>
   </div>
 </template>
@@ -347,13 +350,17 @@ onBeforeUnmount(() => {
   cursor: crosshair;
   touch-action: none;
 }
-.shot-toolbar {
+.shot-toolbar-wrap {
   position: absolute;
   top: 12px;
   left: 0;
   right: 0;
-  margin: 0 auto;
-  width: fit-content;
+  display: flex;
+  justify-content: center;
+  z-index: 999;
+  pointer-events: none;
+}
+.shot-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -361,8 +368,8 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   padding: 6px 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  z-index: 999;
   pointer-events: auto;
+  user-select: none;
 }
 .shot-hint {
   color: #cfcfd4;
