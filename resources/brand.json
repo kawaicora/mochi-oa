@@ -3,6 +3,5 @@
   "iconPath": "xiaomo_256.png",
   "appId": "com.jinmo.oa",
   "description": "小墨办公-锦墨专属定制办公软件",
-  "executableName": "mochi-oa",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
