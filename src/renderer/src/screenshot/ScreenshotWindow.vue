@@ -73,6 +73,8 @@ function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): vo
 // 进入编辑：全屏(沾满) → 隐藏独立窗口、内嵌工具栏显示；框选 → 显示独立窗口并定位到区域外侧(上下就近)
 function onEditStarted(info: { sel: { x: number; y: number; w: number; h: number }; full: boolean }): void {
   inlineToolbar.value = info.full
+  // 无论框选/全屏都通知工具栏进入编辑（选择阶段只显示 全屏/取消）
+  void window.pantry.screenshotToolbarEdit()
   if (info.full) {
     void window.pantry.screenshotToolbarVisible(false)
     return

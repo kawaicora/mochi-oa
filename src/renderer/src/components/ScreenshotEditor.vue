@@ -418,8 +418,7 @@ defineExpose({
   inset: 0;
   z-index: 99999;
   background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
   cursor: crosshair;
   /* 关键：主窗口顶部有隐形标题栏拖拽区(-webkit-app-region: drag)，
      会拦截落在其上的点击/框选/绘制。截图遮罩必须声明 no-drag，
@@ -429,12 +428,11 @@ defineExpose({
 }
 .shot-stage {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
   box-sizing: border-box;
 }
 .shot-canvas {
@@ -460,11 +458,15 @@ defineExpose({
   pointer-events: none;
 }
 .shot-toolbar-wrap {
-  flex-shrink: 0;
+  /* 悬浮覆盖在画面上方（不占流、不挤压画面）：全屏编辑时看起来像还在屏幕上编辑，画面被冻住 */
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
   justify-content: center;
-  padding: 12px 0 4px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .shot-toolbar {
   display: flex;

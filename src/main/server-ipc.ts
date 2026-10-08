@@ -769,6 +769,11 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     tw.moveTop()
     return { ok: true }
   })
+  // 截图窗口 → 已进入编辑：通知工具栏窗口切换为完整工具/颜色/保存（选择阶段只显示全屏/取消）
+  ipcMain.on(IpcChannels.screenshotToolbarEdit, (_e) => {
+    const tw = screenshotToolbarWin
+    if (tw && !tw.isDestroyed()) tw.webContents.send(IpcEvents.screenshotToolbarEdit)
+  })
   ipcMain.handle(IpcChannels.screenshotGetPending, () => {
     const p = pendingScreenshot
     pendingScreenshot = null

@@ -215,6 +215,8 @@ export const IpcChannels = {
   screenshotToolbarVisible: 'shot:toolbarVisible',
   /** 截图窗口 → 主进程：移动独立工具栏窗口到目标位置（DIP） */
   screenshotToolbarPos: 'shot:toolbarPos',
+  /** 截图窗口 → 主进程 → 工具栏窗口：已进入编辑（框选完成），工具栏切换到完整工具/颜色/保存 */
+  screenshotToolbarEdit: 'shot:toolbarEdit',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
@@ -286,8 +288,10 @@ export const IpcEvents = {
   /** 截屏窗口保存成功 → 通知主窗口把临时 PNG 发送到当前会话 */
   screenshotSaved: 'shot:event:saved',
   /** 独立工具栏窗口 → 截图窗口：编辑命令 { action, value? } */
-  screenshotToolbarCommand: 'shot:event:toolbarCommand'
+  screenshotToolbarCommand: 'shot:event:toolbarCommand',
+  /** 截图窗口 → 工具栏窗口：已进入编辑，切换完整工具栏 */
+  screenshotToolbarEdit: 'shot:event:toolbarEdit'
 } as const
 
-/** 独立截屏工具栏窗口固定尺寸（DIP）——加宽以容纳 全屏/取消/5工具/10色/撤销重做/保存发送，避免按钮被压扁 */
-export const ScreenshotToolbar = { WIDTH: 980, HEIGHT: 100 } as const
+/** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */
+export const ScreenshotToolbar = { WIDTH: 980, HEIGHT: 40 } as const
