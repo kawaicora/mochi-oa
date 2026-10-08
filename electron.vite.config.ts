@@ -41,8 +41,8 @@ export default defineConfig({
           identifierNamesGenerator: 'hexadecimal', // 变量名十六进制化
           renameGlobals: false, // 不要重命名全局变量，防止破坏 Vue/Pinia
           selfDefending: false, // 自我防御，防止格式化  不要开 会奔溃
-          debugProtection: true, // 防止调试
-          disableConsoleOutput: false, // 保留 console：日志经 console 输出并落盘（需为 false）
+          debugProtection: false, // 防调试代码会干扰渲染/导致乱码，关闭
+          disableConsoleOutput: false, // 保留 console：DevTools(Shift+Ctrl+I) 里能看到日志；编辑器窗口不打印日志（已在组件内移除）
         }
       })
     ],
