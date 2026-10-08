@@ -17,16 +17,18 @@ const pkg = JSON.parse(orig)
 let name = ''
 let appId = ''
 let description = ''
+let iconPath = ''
 try {
   const b = JSON.parse(readFileSync(join(root, 'resources', 'brand.json'), 'utf8'))
   if (b && typeof b.name === 'string' && b.name.trim()) name = b.name.trim()
   if (b && typeof b.appId === 'string' && b.appId.trim()) appId = b.appId.trim()
   if (b && typeof b.description === 'string' && b.description.trim()) description = b.description.trim()
+  if (b && typeof b.iconPath === 'string' && b.iconPath.trim()) iconPath = b.iconPath.trim()
 } catch {
   /* brand.json 缺失/损坏用 package.json 默认 */
 }
 
-console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}, description = ${description || '(默认)'}`)
+console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}, description = ${description || '(默认)'}, icon = ${iconPath || '(默认)'}`)
 
 if (name) {
   pkg.build = pkg.build || {}
@@ -40,7 +42,15 @@ if (description) {
   // 应用描述写 package.json 顶层 description（electron-builder 从顶层读，build.description 不合法）
   pkg.description = description
 }
-if (name || appId || description) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+if (iconPath) {
+  // 三端安装包/任务栏图标：指向 resources/ 下的品牌图标（electron-builder 相对项目根，png 可自动转 ico）
+  const icon = join('resources', iconPath)
+  pkg.build = pkg.build || {}
+  pkg.build.win = { ...(pkg.build.win || {}), icon }
+  pkg.build.mac = { ...(pkg.build.mac || {}), icon }
+  pkg.build.linux = { ...(pkg.build.linux || {}), icon }
+}
+if (name || appId || description || iconPath) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 
 try {
   // 用 node 直接跑 electron-builder 的 cli.js（跨平台；直接 spawn .cmd 在 Windows 上会 EINVAL）
