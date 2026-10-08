@@ -1,7 +1,7 @@
 {
   "name": "mochi-oa",
   "productName": "麻薯",
-  "appId": "com.jinmo.oa",
+  "appId": "com.mochi.oa",
   "description": "麻薯-好用简洁的办公软件",
   "iconPath": "mochi_256.png",
   "defaultServerUrl": "http://192.168.2.57:3000"
