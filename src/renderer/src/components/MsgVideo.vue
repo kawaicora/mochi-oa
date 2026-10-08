@@ -9,6 +9,7 @@
  */
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import flvjs from 'flv.js'
+import { useServerStore } from '../stores/server'
 
 type FlvPlayer = ReturnType<typeof flvjs.createPlayer>
 
@@ -39,6 +40,10 @@ const showCtrl = ref(false)
 const ctrlTimer = ref<ReturnType<typeof setTimeout> | undefined>(undefined)
 const isFull = ref(false)
 
+const server = useServerStore()
+/** 统一绝对地址：服务端返回的相对 /files/... 用当前 serverUrl 拼成同源可达 */
+const absContent = computed(() => server.absFileUrl(props.content))
+
 let player: FlvPlayer | null = null
 let objectUrl = ''
 
@@ -54,11 +59,11 @@ function needsTranscode(name: string): boolean {
   return TRANSCODE_EXTS.has(extOf(name))
 }
 
-/** 从消息 content 推导服务端 origin */
+/** 从消息 content（已统一绝对）推导服务端 origin */
 function serverOrigin(): string {
-  if (/^https?:\/\//i.test(props.content)) {
+  if (/^https?:\/\//i.test(absContent.value)) {
     try {
-      return new URL(props.content).origin
+      return new URL(absContent.value).origin
     } catch {
       /* ignore */
     }
@@ -69,7 +74,7 @@ function serverOrigin(): string {
 /** 构造转码 URL：/files/{rel} → /api/transcode?src={rel} */
 function transcodeUrl(): string {
   const origin = serverOrigin()
-  const rel = props.content.replace(/^https?:\/\/[^/]+/, '').replace(/^\/files\//, '')
+  const rel = absContent.value.replace(/^https?:\/\/[^/]+/, '').replace(/^\/files\//, '')
   return `${origin}/api/transcode?src=${encodeURIComponent(rel)}`
 }
 
@@ -77,7 +82,7 @@ function transcodeUrl(): string {
 async function readLocalBytes(): Promise<ArrayBuffer | null> {
   let p = props.path
   if (!p) {
-    const dl = await window.pantry.serverDownloadFile(props.content)
+    const dl = await window.pantry.serverDownloadFile(absContent.value)
     if (dl.ok && dl.path) p = dl.path
   }
   if (!p) return null
@@ -90,7 +95,7 @@ async function readLocalBytes(): Promise<ArrayBuffer | null> {
 function nativeSetup(): void {
   const el = videoEl.value
   if (!el || errMsg.value) return
-  el.src = props.content || props.src
+  el.src = absContent.value || props.src
   el.load()
 }
 

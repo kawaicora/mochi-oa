@@ -657,7 +657,7 @@ watch(view, (v) => {
             <button class="dt-btn" @click="askRemind(detail.task)">提醒设置</button>
           </div>
           <div v-if="detail.task.images.length" class="tv-images">
-            <a v-for="(im, i) in detail.task.images" :key="i" :href="im" target="_blank"><img :src="im" alt="任务图片" /></a>
+            <a v-for="(im, i) in detail.task.images" :key="i" :href="server.absFileUrl(im)" target="_blank"><img :src="server.absFileUrl(im)" alt="任务图片" /></a>
           </div>
         </div>
 
@@ -694,8 +694,8 @@ watch(view, (v) => {
             <textarea v-model="commentText" class="srv-input" rows="2" placeholder="输入留言…（可附图）" @keydown.ctrl.enter="addComment"></textarea>
             <div v-if="commentAtts.length" class="tv-comment-pre">
               <div v-for="(at, i) in commentAtts" :key="i" class="tv-pre-item" @click="commentAtts.splice(i, 1)">
-                <img v-if="at.kind === 'image'" :src="at.url" />
-                <video v-else-if="at.kind === 'video'" :src="at.url"></video>
+                <img v-if="at.kind === 'image'" :src="server.absFileUrl(at.url)" />
+                <video v-else-if="at.kind === 'video'" :src="server.absFileUrl(at.url)"></video>
                 <i v-else :class="at.kind === 'folder' ? 'fas fa-folder' : 'far fa-file-alt'"></i>
               </div>
             </div>
@@ -713,9 +713,9 @@ watch(view, (v) => {
             <div v-if="c.content" class="tv-comment-text">{{ c.content }}</div>
             <div v-if="c.attachments && c.attachments.length" class="tv-comment-imgs">
               <template v-for="(at, i) in c.attachments" :key="i">
-                <a v-if="at.kind === 'image'" :href="at.url" target="_blank"><img :src="at.url" /></a>
-                <video v-else-if="at.kind === 'video'" :src="at.url" controls></video>
-                <a v-else class="tv-att" :href="at.url" target="_blank"><i :class="at.kind === 'folder' ? 'fas fa-folder' : 'far fa-file-alt'"></i>{{ at.name || at.url }}</a>
+                <a v-if="at.kind === 'image'" :href="server.absFileUrl(at.url)" target="_blank"><img :src="server.absFileUrl(at.url)" /></a>
+                <video v-else-if="at.kind === 'video'" :src="server.absFileUrl(at.url)" controls></video>
+                <a v-else class="tv-att" :href="server.absFileUrl(at.url)" target="_blank"><i :class="at.kind === 'folder' ? 'fas fa-folder' : 'far fa-file-alt'"></i>{{ at.name || at.url }}</a>
               </template>
             </div>
           </div>

@@ -368,17 +368,32 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       (cfg ?? {}) as Parameters<typeof serverClient.setMainMailConfig>[0]
     )
   )
-  // 下载远程文件到本地缓存目录（图片/视频/3D 预览用），返回 {ok,path,fileUrl,error}
+  // 下载远程文件到本地存储路径（图片/视频/3D 预览用），返回 {ok,path,fileUrl,error}
   ipcMain.handle(IpcChannels.serverDownloadFile, async (_e, url) => {
     try {
-      const { mkdir, writeFile } = await import('node:fs/promises')
+      const { mkdir, writeFile, stat } = await import('node:fs/promises')
       const { join, basename } = await import('node:path')
       const { pathToFileURL } = await import('node:url')
       const name = basename(String(url).split('?')[0] ?? '').trim() || 'download.bin'
-      const dir = join(app.getPath('userData'), 'file-cache')
+      // 统一下载到设置里的存储路径（downloadDir），与手动下载一致
+      const dir = loadServerConfig().downloadDir
       await mkdir(dir, { recursive: true })
       const safe = name.replace(/[\\/:*?"<>|]/g, '_')
-      const dest = join(dir, safe)
+      let dest = join(dir, safe)
+      // 同名去重：已存在则追加 (n)，避免覆盖已有文件
+      let n = 1
+      for (;;) {
+        try {
+          await stat(dest)
+          const m = safe.match(/^(.+?)(\.[a-z0-9]+)?$/i)
+          const stem = m?.[1] ?? safe
+          const ext = m?.[2] ?? ''
+          dest = join(dir, `${stem} (${n})${ext}`)
+          n += 1
+        } catch {
+          break
+        }
+      }
       const dl = await serverClient.downloadFile(String(url))
       if (!dl.ok || !dl.buf) return { ok: false, error: dl.error || '下载失败' }
       await writeFile(dest, dl.buf)

@@ -358,7 +358,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
                     <i class="fas fa-cube"></i>&nbsp;3D 预览
                   </button>
                 </div>
-                <a v-else :href="m.content" target="_blank" class="msg-file">
+                <a v-else :href="app.localPreviewUrl(m)" target="_blank" class="msg-file">
                   <i :class="fileIcon(m.content)"></i>&nbsp;{{ fileNameOf(m.content) }}
                 </a>
               </template>
