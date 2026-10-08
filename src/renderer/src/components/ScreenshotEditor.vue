@@ -26,9 +26,9 @@ let img: HTMLImageElement | null = null
 let sel: { x: number; y: number; w: number; h: number } | null = null // select 阶段选框（源像素）
 let editing = false
 let anchor: { x: number; y: number } | null = null
+let pts: { x: number; y: number }[] = [] // 画笔：本笔路径点集
 let undoStack: ImageData[] = []
 let redoStack: ImageData[] = []
-let lastPt: { x: number; y: number } | null = null
 
 function canvasPixel(c: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
   const r = c.getBoundingClientRect()
@@ -152,6 +152,7 @@ function onEditDown(e: PointerEvent): void {
   grabPointer(e)
   anchor = canvasPixel(c, e)
   editing = true
+  if (tool.value === 'pen') pts = [{ ...anchor }]
   if (tool.value === 'text') {
     const text = window.prompt('输入文字', '')
     if (text) {
@@ -164,7 +165,6 @@ function onEditDown(e: PointerEvent): void {
       }
     }
     editing = false
-    lastPt = null
   }
 }
 function onEditMove(e: PointerEvent): void {
@@ -173,7 +173,7 @@ function onEditMove(e: PointerEvent): void {
   const g = c?.getContext('2d')
   if (!c || !g) return
   const p = canvasPixel(c, e)
-  // 恢复快照前的画面：撤销本笔
+  // 恢复进入本笔前的画面（撤销本笔已画的临时内容）
   if (undoStack.length) g.putImageData(undoStack[undoStack.length - 1], 0, 0)
   g.strokeStyle = color.value
   g.fillStyle = color.value
@@ -182,11 +182,12 @@ function onEditMove(e: PointerEvent): void {
   g.lineJoin = 'round'
   const a = anchor
   if (tool.value === 'pen') {
+    // 画笔：累积路径点集，恢复快照后重画整条折线（不能只画最后一段，否则只剩点/短线）
+    pts.push(p)
     g.beginPath()
-    g.moveTo(lastPt?.x ?? a.x, lastPt?.y ?? a.y)
-    g.lineTo(p.x, p.y)
+    g.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y)
     g.stroke()
-    lastPt = p
     return
   }
   if (tool.value === 'arrow') {
@@ -203,7 +204,7 @@ function onEditUp(e: PointerEvent): void {
   releasePointer(e)
   if (!editing) return
   editing = false
-  lastPt = null
+  pts = []
   snapshot()
 }
 /** 保底释放：指针离开画布（拖出窗口）立即结束本笔，防止卡死 */
@@ -215,13 +216,13 @@ function onLeave(e: PointerEvent): void {
   const c = editCanvas.value
   if (!editing || !c) return
   editing = false
-  lastPt = null
+  pts = []
   snapshot()
 }
 function onCancel(e: PointerEvent): void {
   releasePointer(e)
   editing = false
-  lastPt = null
+  pts = []
 }
 function drawArrow(g: CanvasRenderingContext2D, a: { x: number; y: number }, p: { x: number; y: number }): void {
   g.beginPath()
