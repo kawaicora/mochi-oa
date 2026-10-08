@@ -3,5 +3,6 @@
   "iconPath": "icon_256.png",
   "appId": "",
   "description": "",
+  "executableName": "mochi-oa",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
