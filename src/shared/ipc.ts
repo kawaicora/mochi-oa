@@ -158,8 +158,10 @@ export const IpcChannels = {
   serverListFolderFiles: 'server:listFolderFiles',
   /** 下载整个文件夹到配置路径（按原结构建目录）：{relPath} */
   serverDownloadFolder: 'server:downloadFolder',
-  /** 捕获主屏幕存为临时 PNG，返回临时文件路径（用于发送截屏） */
+  /** 捕获主屏幕（返回 { dataUrl, width, height }，全分辨率 PNG）用于截屏编辑 */
   fileCaptureScreen: 'file:captureScreen',
+  /** 把 dataUrl 写为临时 PNG，返回临时文件路径（截屏编辑后发送用） */
+  fileWriteTempImage: 'file:writeTempImage',
 
   // RTC 信令
   rtcCreateMeeting: 'server:rtc:createMeeting',
