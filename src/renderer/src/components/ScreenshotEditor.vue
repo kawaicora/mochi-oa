@@ -253,30 +253,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="shot-mask">
-    <div class="shot-stage">
-      <canvas
-        ref="stageCanvas"
-        v-show="phase === 'select'"
-        class="shot-canvas"
-        @pointerdown="onSelDown"
-        @pointermove="onSelMove"
-        @pointerup="onSelUp"
-        @pointerleave="onLeave"
-        @pointercancel="onCancel"
-      ></canvas>
-      <canvas
-        ref="editCanvas"
-        v-show="phase === 'edit'"
-        class="shot-canvas"
-        @pointerdown="onEditDown"
-        @pointermove="onEditMove"
-        @pointerup="onEditUp"
-        @pointerleave="onLeave"
-        @pointercancel="onCancel"
-      ></canvas>
-    </div>
-
-    <!-- 顶部工具栏行：flex 居中，外层不拦截事件，保证整条可点且不被 canvas 覆盖 -->
+    <!-- 顶部工具栏行：作为 mask 的第一个文档流行（flex column 顶部），天然在预览区之上，整条可点 -->
     <div class="shot-toolbar-wrap">
       <!-- 框选工具栏 -->
       <div v-if="phase === 'select'" class="shot-toolbar">
@@ -318,6 +295,29 @@ onBeforeUnmount(() => {
         <button class="shot-btn primary" @click="save"><i class="fas fa-check"></i> 保存发送</button>
       </div>
     </div>
+
+    <div class="shot-stage">
+      <canvas
+        ref="stageCanvas"
+        v-show="phase === 'select'"
+        class="shot-canvas"
+        @pointerdown="onSelDown"
+        @pointermove="onSelMove"
+        @pointerup="onSelUp"
+        @pointerleave="onLeave"
+        @pointercancel="onCancel"
+      ></canvas>
+      <canvas
+        ref="editCanvas"
+        v-show="phase === 'edit'"
+        class="shot-canvas"
+        @pointerdown="onEditDown"
+        @pointermove="onEditMove"
+        @pointerup="onEditUp"
+        @pointerleave="onLeave"
+        @pointercancel="onCancel"
+      ></canvas>
+    </div>
   </div>
 </template>
 
@@ -328,18 +328,17 @@ onBeforeUnmount(() => {
   z-index: 99999;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   cursor: crosshair;
 }
 .shot-stage {
   position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
-  padding: 48px 0;
   box-sizing: border-box;
 }
 .shot-canvas {
@@ -351,14 +350,11 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 .shot-toolbar-wrap {
-  position: absolute;
-  top: 12px;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   display: flex;
   justify-content: center;
-  z-index: 999;
-  pointer-events: none;
+  padding: 12px 0 4px;
+  pointer-events: auto;
 }
 .shot-toolbar {
   display: flex;
