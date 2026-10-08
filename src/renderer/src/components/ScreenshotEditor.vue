@@ -348,18 +348,21 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 .shot-toolbar {
-  position: fixed;
+  position: absolute;
   top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(30, 30, 34, 0.92);
+  background: rgba(30, 30, 34, 0.95);
   border-radius: 10px;
   padding: 6px 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 2;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  pointer-events: auto;
 }
 .shot-hint {
   color: #cfcfd4;
