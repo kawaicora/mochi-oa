@@ -660,7 +660,11 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     const TH = ScreenshotToolbar.HEIGHT
     tw.setAlwaysOnTop(true, 'screen-saver')
     tw.setBounds({ x: Math.round((disp.workArea.width - TW) / 2), y: 0, width: TW, height: TH })
-    tw.once('ready-to-show', () => tw.show())
+    // 工具栏必须盖在编辑窗口之上：显示后强制置顶到 z 序最前
+    tw.once('ready-to-show', () => {
+      tw.show()
+      tw.moveTop()
+    })
     if (process.env['ELECTRON_RENDERER_URL']) {
       void tw.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/toolbar.html`)
     } else {
@@ -693,6 +697,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     win.once('ready-to-show', () => {
       win.setBounds(screen.getPrimaryDisplay().bounds)
       win.show()
+      // 编辑窗口显示后可能盖住工具栏，把工具栏重新置顶到最前
+      const tw = screenshotToolbarWin
+      if (tw && !tw.isDestroyed()) tw.moveTop()
     })
     // 截图窗口关闭 → 连带关闭工具栏窗口
     win.on('closed', () => {
@@ -726,6 +733,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     const height = Number(p.height)
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return { ok: false }
     tw.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+    tw.moveTop()
     return { ok: true }
   })
   ipcMain.handle(IpcChannels.screenshotGetPending, () => {
