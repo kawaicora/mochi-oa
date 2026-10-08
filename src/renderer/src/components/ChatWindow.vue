@@ -203,6 +203,11 @@ async function onDownload(): Promise<void> {
   if (!id) return
   const m = app.messages.find((x) => x.id === id)
   if (!m) return
+  // 自动下载开关开着时收到即已下载到本地；避免右键重复下载（不生成 xxx (1) 副本）
+  if (m.kind !== 'folder' && app.localCache[id]?.path) {
+    flashToast(`已下载 → ${app.localCache[id]!.path}`)
+    return
+  }
   if (m.kind === 'folder') {
     const r = await app.downloadFolder(m.content)
     if (r.ok) flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
