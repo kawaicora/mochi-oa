@@ -62,6 +62,29 @@ export interface ServerClientOptions {
   token?: string
 }
 
+/** 日志：payload 脱敏（截断超长、掩盖 enc/token/password），避免打印敏感长串 */
+function safeLog(payload: unknown): string {
+  try {
+    let s = JSON.stringify(payload ?? {})
+    s = s.replace(/"enc":"[^"]{8,}"/g, '"enc":"***"').replace(/token[=:][^"&,}]{6,}/gi, 'token=***')
+    if (s.length > 300) return s.slice(0, 300) + `…(len=${s.length})`
+    return s
+  } catch {
+    return String(payload)
+  }
+}
+
+/** 日志：URL 脱敏（掩盖 query 里的 token） */
+function safeUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.searchParams.has('token')) u.searchParams.set('token', '***')
+    return u.toString()
+  } catch {
+    return String(url).replace(/token=[^&]+/g, 'token=***')
+  }
+}
+
 /** 带超时的 emit + ack 包装。
  *  服务端 ack 结构为 `{ ok:true, fieldA, fieldB }`（字段在顶层），
  *  客户端统一规整为 `{ ok, error, data:{ fieldA, fieldB } }`，供 applyAuthAck / 各 store 用 ack.data 读取。 */
@@ -72,17 +95,22 @@ function emitWithAck<T = unknown>(
   timeoutMs = 10000
 ): Promise<Ack & { data?: T }> {
   return new Promise((resolve) => {
+    const t0 = Date.now()
+    console.log(`[io:send] ${event} ${safeLog(payload)}`)
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
+      console.log(`[io:ack] ${event} TIMEOUT after ${timeoutMs}ms`)
       resolve({ ok: false, error: '请求超时' })
     }, timeoutMs)
     socket.emit(event, payload, (raw: unknown) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      resolve(normalizeAck<T>(raw))
+      const ack = normalizeAck<T>(raw)
+      console.log(`[io:ack] ${event} ok=${ack.ok} err=${ack.error ?? ''} ${Date.now() - t0}ms`)
+      resolve(ack)
     })
   })
 }
@@ -109,6 +137,7 @@ function normalizeAck<T>(raw: unknown): Ack & { data?: T } {
  */
 function httpPost(url: string, headers: Record<string, string>, body: Buffer | string): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
+    const t0 = Date.now()
     let u: URL
     try {
       u = new URL(url)
@@ -124,10 +153,17 @@ function httpPost(url: string, headers: Record<string, string>, body: Buffer | s
       (res) => {
         const chunks: Buffer[] = []
         res.on('data', (c) => chunks.push(Buffer.from(c)))
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          console.log(`[http] POST ${safeUrl(url)} -> ${res.statusCode ?? 0} ${text.length}B ${Date.now() - t0}ms`)
+          resolve({ status: res.statusCode ?? 0, text })
+        })
       }
     )
-    req.on('error', reject)
+    req.on('error', (e) => {
+      console.log(`[http] POST ${safeUrl(url)} ERROR ${e.message} ${Date.now() - t0}ms`)
+      reject(e)
+    })
     req.write(payload)
     req.end()
   })
@@ -147,6 +183,7 @@ function parseJson(text: string): Record<string, unknown> | null {
 /** 用 node:http/https 发 GET，返回状态码 + 原始 Buffer（文件内容为二进制）。 */
 function httpGet(url: string): Promise<{ status: number; buf: Buffer }> {
   return new Promise((resolve, reject) => {
+    const t0 = Date.now()
     let u: URL
     try {
       u = new URL(url)
@@ -158,9 +195,16 @@ function httpGet(url: string): Promise<{ status: number; buf: Buffer }> {
     const req = mod(u, { method: 'GET' }, (res) => {
       const chunks: Buffer[] = []
       res.on('data', (c) => chunks.push(Buffer.from(c)))
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, buf: Buffer.concat(chunks) }))
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks)
+        console.log(`[http] GET ${safeUrl(url)} -> ${res.statusCode ?? 0} ${buf.length}B ${Date.now() - t0}ms`)
+        resolve({ status: res.statusCode ?? 0, buf })
+      })
     })
-    req.on('error', reject)
+    req.on('error', (e) => {
+      console.log(`[http] GET ${safeUrl(url)} ERROR ${e.message} ${Date.now() - t0}ms`)
+      reject(e)
+    })
     req.end()
   })
 }
@@ -227,7 +271,13 @@ export class ServerClient extends EventEmitter {
     this.socket = socket
     this.pubKey = null // 新连接对应服务端新的 RSA 密钥对，需重新获取公钥
 
+    // 统一接收日志：捕获所有服务端下推事件（含业务推送，不含 ack 回调）
+    socket.onAny((event, ...args) => {
+      console.log(`[io:rx] ${event} ${safeLog(args[0])}`)
+    })
+
     socket.on('connect', () => {
+      console.log('[io:lifecycle] connect established (transport=' + (socket.io?.engine?.transport?.name ?? '?') + ')')
       this.setState({ state: 'connected', connected: true, error: undefined })
       if (this.token) {
         void this.authMe().then((ack) => {
@@ -238,6 +288,7 @@ export class ServerClient extends EventEmitter {
       }
     })
     socket.on('disconnect', (reason) => {
+      console.log(`[io:lifecycle] disconnect reason=${reason}`)
       this.setState({
         state: 'disconnected',
         connected: false,
@@ -245,6 +296,7 @@ export class ServerClient extends EventEmitter {
       })
     })
     socket.on('connect_error', (err) => {
+      console.log(`[io:lifecycle] connect_error ${err.message} transport=${socket.io?.engine?.transport?.name ?? '?'}`)
       this.setState({ state: 'error', connected: false, error: err.message })
     })
 
