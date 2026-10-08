@@ -530,9 +530,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
         types: ['screen'],
         thumbnailSize: { width: w, height: h }
       })
-      if (!source || source.length === 0) return null
+      if (!source || source.length === 0) {
+        console.log('[shot] capture: no sources')
+        return null
+      }
       const thumb = source.find((s) => s.name.toLowerCase().includes('screen')) ?? source[0]
-      return { dataUrl: thumb.thumbnail.toDataURL(), width: w, height: h }
+      const dataUrl = thumb.thumbnail.toDataURL()
+      console.log(`[shot] capture selected="${thumb.name}" sources=${source.length} thumbSize=${JSON.stringify(thumb.thumbnail.getSize())} dataUrlLen=${dataUrl.length} prefix=${dataUrl.slice(0, 30)}`)
+      return { dataUrl, width: w, height: h }
     } catch {
       return null
     }
@@ -701,7 +706,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       screenshotToolbarWin = null
     })
     screenshotWin = win
-    openScreenshotToolbar()
+    // 工具栏窗口创建失败不得阻断截图窗口（否则截图窗口不会 loadURL/show → 黑屏）
+    try {
+      openScreenshotToolbar()
+    } catch (e) {
+      console.log('[shot] toolbar open failed:', String(e))
+    }
     if (process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/screenshot.html`)
     } else {

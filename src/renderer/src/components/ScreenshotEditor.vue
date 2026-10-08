@@ -287,7 +287,13 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('pointerup', onGlobalUp)
   img = new Image()
-  img.onload = setupStage
+  img.onload = () => {
+    console.log(`[shot] editor img loaded ${img?.naturalWidth}x${img?.naturalHeight}`)
+    setupStage()
+  }
+  img.onerror = (e) => {
+    console.log('[shot] editor img load error', String(e))
+  }
   img.src = props.src
 })
 onBeforeUnmount(() => {
