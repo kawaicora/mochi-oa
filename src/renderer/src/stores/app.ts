@@ -71,25 +71,33 @@ export const useAppStore = defineStore('app', () => {
     if (!isAutoPreviewKind(msg.kind)) return
     if (localCache.value[msg.id]) return
     if (failedLocalCache.value.has(msg.id)) return
+    const abs = server.absFileUrl(msg.content)
+    console.log(`[cache] 下载预览 msg=${msg.id} kind=${msg.kind} url=${abs}`)
+    const t0 = Date.now()
     try {
-      console.log('正在下载消息预览文件:', msg.content)
-      const r = await window.pantry.serverDownloadFile(server.absFileUrl(msg.content))
+      const r = await window.pantry.serverDownloadFile(abs)
       if (r.ok && r.path && r.fileUrl && !failedLocalCache.value.has(msg.id)) {
         localCache.value[msg.id] = { fileUrl: r.fileUrl, path: r.path }
+        console.log(`[cache] 缓存完成 msg=${msg.id} -> ${r.path} ${Date.now() - t0}ms`)
+      } else {
+        console.log(`[cache] 下载失败 msg=${msg.id} err=${r.error ?? ''} ${Date.now() - t0}ms`)
+        failedLocalCache.value.add(msg.id)
       }
-    } catch {
-      // 忽略下载失败，下次重试
+    } catch (err) {
+      console.log(`[cache] 下载异常 msg=${msg.id} ${err instanceof Error ? err.message : String(err)} ${Date.now() - t0}ms`)
+      failedLocalCache.value.add(msg.id)
     }
   }
   function localPreviewUrl(msg: ServerChatMessage): string {
     const c = localCache.value[msg.id]
     const u = c ? c.fileUrl : server.absFileUrl(msg.content)
-    console.log('正在获取本地预览路径:', u)
+    console.log(`[cache] 取预览 msg=${msg.id} ${c ? '本地缓存' : '服务端URL'} -> ${u}`)
     return u
   }
   function fallbackPreview(msg: ServerChatMessage): void {
-    if (localCache.value[msg.id]) delete localCache.value[msg.id]
-    console.log('清除本地预览缓存:', msg.id)
+    const had = !!localCache.value[msg.id]
+    if (had) delete localCache.value[msg.id]
+    console.log(`[cache] 回退清除 msg=${msg.id} hadCache=${had} -> 标记失败`)
     failedLocalCache.value.add(msg.id)
   }
   function ensureLocalForAll(list: ServerChatMessage[]): void {

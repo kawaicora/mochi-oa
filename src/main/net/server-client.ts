@@ -837,6 +837,7 @@ export class ServerClient extends EventEmitter {
 
   async uploadFile(filePath: string, companyId = 0): Promise<Ack & { data?: { url?: string; uuid?: string; fileName?: string; size?: number } }> {
     if (!this.token) return { ok: false, error: '未登录' }
+    const t0 = Date.now()
     try {
       const buf = await readFile(filePath)
       const name = basename(filePath)
@@ -850,12 +851,15 @@ export class ServerClient extends EventEmitter {
       const tail = Buffer.from(`${CRLF}--${boundary}--${CRLF}`)
       const body = Buffer.concat([head, buf, tail])
       const url = `${this._state.serverUrl.replace(/\/$/, '')}/api/upload?token=${encodeURIComponent(this.token)}&company=${companyId}`
+      console.log(`[upload] 上传 ${filePath} (${buf.length}B, company=${companyId})`)
       // 主进程用 node:http/https 手写 POST（net.fetch 在部分 Electron 版本为 null，不依赖它）
       const res = await httpPost(url, { 'Content-Type': `multipart/form-data; boundary=${boundary}` }, body)
       const data = parseJson(res.text) as { ok?: boolean; error?: string; fileName?: string; url?: string; uuid?: string; size?: number } | null
+      console.log(`[upload] 完成 ${name} -> http=${res.status} ok=${data?.ok} url=${data?.url ?? ''} ${Date.now() - t0}ms ${data?.error ?? ''}`)
       if (!data || typeof data !== 'object' || !data.ok) return { ok: false, error: data?.error || `上传失败（http ${res.status}）` }
       return { ok: true, data: { url: data.url, uuid: data.uuid, fileName: data.fileName, size: data.size } }
     } catch (err) {
+      console.log(`[upload] 异常 ${filePath} ${err instanceof Error ? err.message : String(err)} ${Date.now() - t0}ms`)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
@@ -872,7 +876,7 @@ export class ServerClient extends EventEmitter {
     if (!base) return { ok: false, error: '未配置服务器地址' }
     const authQ = `token=${encodeURIComponent(this.token)}&company=${companyId}`
     const CHUNK = 1024 * 1024 // 1MB/块
-    // console.log(`[upload] 开始分块上传 ${filePath} -> ${base}/api/upload/chunk (company=${companyId})`)
+    console.log(`[upload] 开始分块上传 ${filePath} -> ${base}/api/upload/chunk (company=${companyId})`)
     try {
       const uploadId = randomUUID()
       const { size } = await stat(filePath)
@@ -883,6 +887,7 @@ export class ServerClient extends EventEmitter {
         : /^(mp4|webm|mov|mkv|avi|m4v|flv)$/.test(ext) ? `video/${ext}`
         : 'application/octet-stream'
       const total = Math.max(1, Math.ceil(size / CHUNK))
+      console.log(`[upload] 分块参数 ${name} size=${size} chunks=${total} mime=${mime}`)
       const CRLF = '\r\n'
       const buf = await readFile(filePath)
       const field = (b: string, k: string, v: string): string =>
@@ -903,17 +908,18 @@ export class ServerClient extends EventEmitter {
         const body = Buffer.concat([head, buf.subarray(start, end), tail])
         const res = await httpPost(`${base}/api/upload/chunk?${authQ}`, { 'Content-Type': `multipart/form-data; boundary=${b}` }, body)
         const data = parseJson(res.text) as { ok?: boolean } | null
-        // console.log(`[upload] 分块 ${i + 1}/${total}: http=${res.status} ok=${data?.ok}`)
+        console.log(`[upload] 分块 ${i + 1}/${total}: http=${res.status} ok=${data?.ok}`)
         if (!data?.ok) throw new Error(`分块 ${i + 1}/${total} 上传失败（http ${res.status}）`)
         onProgress?.(Math.round(((i + 1) / total) * 100))
       }
 
       const compRes = await httpPost(`${base}/api/upload/chunk/complete?${authQ}`, { 'Content-Type': 'application/json' }, JSON.stringify({ uploadId, filename: name, totalChunks: total, mime, relativePath }))
       const comp = parseJson(compRes.text) as { ok?: boolean; error?: string; url?: string; uuid?: string; filename?: string; size?: number } | null
-      // console.log(`[upload] complete: http=${compRes.status} ok=${comp?.ok} url=${comp?.url} ${comp?.error || ''}`)
+      console.log(`[upload] complete: http=${compRes.status} ok=${comp?.ok} url=${comp?.url} ${comp?.error || ''}`)
       if (!comp?.ok) throw new Error(comp?.error || `合并文件失败（http ${compRes.status}）`)
       return { ok: true, url: comp.url, uuid: comp.uuid, fileName: comp.filename, size: comp.size }
     } catch (err) {
+      console.log(`[upload] 分块异常 ${filePath} ${err instanceof Error ? err.message : String(err)}`)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
@@ -940,6 +946,7 @@ export class ServerClient extends EventEmitter {
       const list = parseJson(lr.buf.toString('utf8')) as { ok?: boolean; error?: string; files?: { relPath?: string; url?: string }[] } | null
       if (!list?.ok) return { ok: false, error: list?.error || `获取文件夹清单失败（http ${lr.status}）` }
       const files = list.files ?? []
+      console.log(`[fs:folder] 清单 ${relPath} -> ${files.length} 个文件 (http=${lr.status})`)
       // 落盘结构：去掉首段(companyKey) 后为 {文件夹名}/{子目录...}/{文件}，保持与发送一致
       const stripCompany = (p: string): string => p.split('/').slice(1).join('/')
       let count = 0
@@ -955,10 +962,14 @@ export class ServerClient extends EventEmitter {
         if (fr.status >= 200 && fr.status < 300) {
           await writeFile(target, fr.buf)
           count += 1
+        } else {
+          console.log(`[fs:folder] 单文件失败 ${f.relPath} http=${fr.status}`)
         }
       }
+      console.log(`[fs:folder] 落盘完成 ${relPath} -> ${count}/${files.length} 个文件 -> ${destDir}`)
       return { ok: true, destDir, count }
     } catch (err) {
+      console.log(`[fs:folder] 异常 ${relPath} ${err instanceof Error ? err.message : String(err)}`)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
