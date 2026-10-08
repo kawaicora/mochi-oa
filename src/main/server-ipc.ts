@@ -693,10 +693,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       backgroundColor: '#000000',
       webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
     })
-    // 框选之前：窗口铺满整个显示器（覆盖任务栏）、置顶、无边框
+    // 捕获窗口全程置顶（screen-saver 最高级别）：覆盖任务栏、不被任何窗口（含工具栏）覆盖
+    win.setAlwaysOnTop(true, 'screen-saver')
+    // 框选之前：窗口铺满整个显示器（含任务栏区域）、置顶、无边框
     win.once('ready-to-show', () => {
       win.setBounds(screen.getPrimaryDisplay().bounds)
       win.show()
+      win.moveTop()
       const tw = screenshotToolbarWin
       if (tw && !tw.isDestroyed()) tw.moveTop()
     })

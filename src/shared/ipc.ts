@@ -289,5 +289,5 @@ export const IpcEvents = {
   screenshotToolbarCommand: 'shot:event:toolbarCommand'
 } as const
 
-/** 独立截屏工具栏窗口固定尺寸（DIP） */
-export const ScreenshotToolbar = { WIDTH: 660, HEIGHT: 100 } as const
+/** 独立截屏工具栏窗口固定尺寸（DIP）——加宽以容纳 全屏/取消/5工具/10色/撤销重做/保存发送，避免按钮被压扁 */
+export const ScreenshotToolbar = { WIDTH: 980, HEIGHT: 100 } as const
