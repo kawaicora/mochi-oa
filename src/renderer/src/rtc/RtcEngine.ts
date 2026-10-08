@@ -33,6 +33,19 @@ function EnforceStereo(sdp: string): string {
   })
 }
 
+/** 解析 ICE candidate 字符串，抽取出类型 + 地址 + 转发服务器地址，用于日志可读 */
+function describeCandidate(candidate: string): string {
+  const typ = candidate.match(/typ\s+(\w+)/)?.[1] ?? '?'
+  const parts = candidate.split(' ')
+  // 标准格式：candidate:foundation component transport priority address port typ type ...
+  const address = parts[5] ?? ''
+  const port = parts[6] ?? ''
+  const raddr = candidate.match(/raddr\s+([\w.:-]+)/)?.[1] ?? ''
+  const rport = candidate.match(/rport\s+(\d+)/)?.[1] ?? ''
+  if (typ === 'relay' && raddr) return `relay ${address}:${port} (中转服务器 ${raddr}:${rport})`
+  return `${typ} ${address}:${port}`
+}
+
 class RtcEngine {
   private roomId: string
   private iceServers: RTCIceServer[]
@@ -213,7 +226,7 @@ class RtcEngine {
       const c = event.candidate
       if (c) {
         // 本端收集到候选：host/srflx/relay 类型、协议、传输地址（内网排查用）
-        console.log(`[RtcEngine] [ice:local] user=${userId} type=${c.type} proto=${c.protocol} ${c.candidate}`, 'gather=' + pc.iceGatheringState)
+        console.log(`[RtcEngine] [ice:local] user=${userId} ${describeCandidate(c.candidate)} (gather=${pc.iceGatheringState})`)
         this.onSignal({
           type: 'ice',
           candidate: c.candidate,
@@ -236,11 +249,55 @@ class RtcEngine {
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
       console.log(`[RtcEngine] [conn-state] user=${userId} ${state} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
+      if (state === 'connected') {
+        // 连接建立 → 读取选中的候选对，报告直连 or 中转及各端地址
+        void this._logPeerInfo(userId, pc)
+      }
       if (state === 'disconnected' || state === 'failed' || state === 'closed') {
         console.log(`[RtcEngine] [conn-state] user=${userId} ${state} → 关闭对端连接`)
         this.closePeer(userId)
         this.onPeerDisconnected(userId)
       }
+    }
+  }
+
+  /** 连接建立后：用 getStats 找出成功候选对，判定直连/中转，并输出本地/远端候选与中心服务器(TURN)地址 */
+  private async _logPeerInfo(userId: number, pc: RTCPeerConnection): Promise<void> {
+    try {
+      const stats = await pc.getStats()
+      const cands = new Map<string, { candidateType?: string; address?: string; port?: number; relayProtocol?: string }>()
+      let succeeded: { localCandidateId?: string; remoteCandidateId?: string } | null = null
+      stats.forEach((s) => {
+        const r = s as unknown as Record<string, unknown>
+        if (r.type === 'candidate') {
+          cands.set(s.id, {
+            candidateType: String(r.candidateType ?? ''),
+            address: String(r.address ?? ''),
+            port: Number(r.port ?? 0),
+            relayProtocol: r.relayProtocol ? String(r.relayProtocol) : undefined
+          })
+        } else if (r.type === 'candidate-pair' && r.state === 'succeeded' && !succeeded) {
+          succeeded = { localCandidateId: String(r.localCandidateId ?? ''), remoteCandidateId: String(r.remoteCandidateId ?? '') }
+        }
+      })
+      if (!succeeded) {
+        console.log(`[RtcEngine] [peer-info] user=${userId} 尚未选出可用候选对（可能仍在中转协商中）`)
+        return
+      }
+      const sp = succeeded as { localCandidateId?: string; remoteCandidateId?: string }
+      const lc = cands.get(sp.localCandidateId ?? '')
+      const rc = cands.get(sp.remoteCandidateId ?? '')
+      const fmt = (c?: { candidateType?: string; address?: string; port?: number }): string =>
+        c && c.address ? `${c.candidateType} ${c.address}:${c.port}` : '?'
+      const viaRelay = (lc?.candidateType === 'relay' || rc?.candidateType === 'relay')
+      console.log(`[RtcEngine] [peer-info] user=${userId} 连接方式=${viaRelay ? '中转(relay)' : '直连(P2P)'}`)
+      console.log(`[RtcEngine] [peer-info] user=${userId} 本地候选=${fmt(lc)}`)
+      console.log(`[RtcEngine] [peer-info] user=${userId} 远端成员候选=${fmt(rc)}`)
+      if (lc?.candidateType === 'relay') {
+        console.log(`[RtcEngine] [peer-info] user=${userId} 中心服务器(TURN)中转地址=${lc.address}:${lc.port}${lc.relayProtocol ? ` (${lc.relayProtocol})` : ''}`)
+      }
+    } catch (err) {
+      console.log(`[RtcEngine] [peer-info] user=${userId} getStats失败 ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -322,7 +379,7 @@ class RtcEngine {
 
   private async _handleIce(pc: RTCPeerConnection, userId: number, signal: Extract<RtcSignalPayload, { type: 'ice' }>): Promise<void> {
     // 远端描述尚未 set：先缓存，待 offer/answer 处理完成后统一补加，避免 addIceCandidate 报 remote description was null
-    console.log('[RtcEngine] [收到ICE] user=' + userId, signal.candidate, 'cached=' + (pc.remoteDescription === null), 'sig=' + pc.signalingState)
+    console.log(`[RtcEngine] [收到ICE] user=${userId} ${describeCandidate(signal.candidate)} cached=${pc.remoteDescription === null} sig=${pc.signalingState}`)
     if (!pc.remoteDescription) {
       this._pendingIceArr(userId).push({
         candidate: signal.candidate,
