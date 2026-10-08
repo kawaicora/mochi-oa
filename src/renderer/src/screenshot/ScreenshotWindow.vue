@@ -28,11 +28,6 @@ async function onSave(dataUrl: string): Promise<void> {
 function onCancel(): void {
   window.pantry.closeWindow()
 }
-// 框选进入编辑 → 窗口缩放/定位到选框（冻结画面跟随，工具栏自适应）
-const TOOLBAR_DIP = 46
-function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): void {
-  window.pantry.screenshotResize(sel, TOOLBAR_DIP)
-}
 </script>
 
 <template>
@@ -44,7 +39,6 @@ function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): vo
       :src-height="data.srcHeight"
       @save="onSave"
       @cancel="onCancel"
-      @resize-window="onResizeWindow"
     />
   </div>
 </template>
