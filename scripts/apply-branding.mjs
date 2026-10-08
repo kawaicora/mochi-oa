@@ -20,7 +20,8 @@ let description = ''
 let iconPath = ''
 try {
   const b = JSON.parse(readFileSync(join(root, 'resources', 'brand.json'), 'utf8'))
-  if (b && typeof b.name === 'string' && b.name.trim()) name = b.name.trim()
+  // 字段名严格对应 package.json：显示名用 productName
+  if (b && typeof b.productName === 'string' && b.productName.trim()) name = b.productName.trim()
   if (b && typeof b.appId === 'string' && b.appId.trim()) appId = b.appId.trim()
   if (b && typeof b.description === 'string' && b.description.trim()) description = b.description.trim()
   if (b && typeof b.iconPath === 'string' && b.iconPath.trim()) iconPath = b.iconPath.trim()

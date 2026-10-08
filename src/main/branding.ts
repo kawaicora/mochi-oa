@@ -2,10 +2,14 @@
  * Mochi OA - 品牌配置中心（随安装包打包，运行时只读）。
  * 配置文件固定在 resources/brand.json，electron-builder 的 extraResources 会把整个
  * resources 目录打进安装包（落位 process.resourcesPath/resources/），因此品牌配置随包分发：
+ *   字段名严格对应 package.json：
  *   {
- *     "name": "麻薯OA",                  // 软件显示名（窗口标题/托盘/渲染标题）
- *     "iconPath": "brand.png",           // 自定义图标：resources 目录下的文件名；留空用内置图标
- *     "defaultServerUrl": ""             // 默认服务器地址；UI 可改，未改时默认用它
+ *     "name": "mochi-oa",                 // 对应 package.json.name（安装名/可执行名，ASCII）
+ *     "productName": "麻薯OA",            // 对应 package.json.build.productName（显示名）
+ *     "appId": "",                        // 对应 package.json.build.appId
+ *     "description": "",                  // 对应 package.json.description
+ *     "iconPath": "icon_256.png",         // 自定义图标：resources 目录下文件名；留空用内置
+ *     "defaultServerUrl": ""              // 默认服务器地址；UI 可改，未改时默认用它
  *   }
  * 要换品牌：改 resources/brand.json（及放入图标）→ 重新打包 → 安装包内的名称/图标/默认地址随之变化。
  */
@@ -55,8 +59,9 @@ export function readBranding(): Branding {
     if (!existsSync(p)) return cached
     const raw = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
     if (raw && typeof raw === 'object') {
-      if (typeof raw['name'] === 'string' && String(raw['name']).trim()) {
-        cached.name = String(raw['name']).trim().slice(0, 64)
+      // 显示名读 productName（字段名严格对应 package.json）
+      if (typeof raw['productName'] === 'string' && String(raw['productName']).trim()) {
+        cached.name = String(raw['productName']).trim().slice(0, 64)
       }
       if (typeof raw['iconPath'] === 'string' && String(raw['iconPath']).trim()) {
         cached.iconPath = String(raw['iconPath']).trim().slice(0, 1024)
@@ -70,3 +75,4 @@ export function readBranding(): Branding {
   }
   return cached
 }
+
