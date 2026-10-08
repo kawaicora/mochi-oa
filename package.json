@@ -7,7 +7,7 @@
   "private": true,
   "build": {
     "appId": "com.mochi.oa",
-    "productName": "小墨办公",
+    "productName": "麻薯",
     "directories": {
       "output": "release"
     },
