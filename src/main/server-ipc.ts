@@ -737,6 +737,21 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
     return { ok: true }
   })
+  // 截图窗口 → 移动独立工具栏窗口到目标位置（框选：区域外侧，上下空间就近；置顶不可移动，程序化 setBounds）
+  ipcMain.handle(IpcChannels.screenshotToolbarPos, (_e, pos: unknown) => {
+    const tw = screenshotToolbarWin
+    if (!tw || tw.isDestroyed()) return { ok: false }
+    const p = (pos ?? {}) as { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+    const x = Number(p.x)
+    const y = Number(p.y)
+    const width = Number(p.width)
+    const height = Number(p.height)
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return { ok: false }
+    tw.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+    tw.show()
+    tw.moveTop()
+    return { ok: true }
+  })
   ipcMain.handle(IpcChannels.screenshotGetPending, () => {
     const p = pendingScreenshot
     pendingScreenshot = null

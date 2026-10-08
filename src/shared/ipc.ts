@@ -213,6 +213,8 @@ export const IpcChannels = {
   screenshotToolbarCommand: 'shot:toolbarCommand',
   /** 截图窗口 → 主进程：显示/隐藏独立工具栏窗口（全屏编辑时隐藏，框选时显示） */
   screenshotToolbarVisible: 'shot:toolbarVisible',
+  /** 截图窗口 → 主进程：移动独立工具栏窗口到目标位置（DIP） */
+  screenshotToolbarPos: 'shot:toolbarPos',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */

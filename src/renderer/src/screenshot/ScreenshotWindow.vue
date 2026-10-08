@@ -6,6 +6,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import ScreenshotEditor from '../components/ScreenshotEditor.vue'
 import type { ScreenshotEditorExpose } from '../components/ScreenshotEditor.vue'
+import { ScreenshotToolbar } from '@shared/ipc'
 
 const data = ref<{ src: string; srcWidth: number; srcHeight: number } | null>(null)
 const editorRef = ref<InstanceType<typeof ScreenshotEditor> | null>(null)
@@ -69,10 +70,40 @@ function onCancel(): void {
 function onResizeWindow(sel: { x: number; y: number; w: number; h: number }): void {
   window.pantry.screenshotResize(sel)
 }
-// 进入编辑：全屏 → 隐藏独立窗口、内嵌工具栏显示；框选 → 显示独立窗口、内嵌工具栏隐藏
+// 进入编辑：全屏(沾满) → 隐藏独立窗口、内嵌工具栏显示；框选 → 显示独立窗口并定位到区域外侧(上下就近)
 function onEditStarted(info: { sel: { x: number; y: number; w: number; h: number }; full: boolean }): void {
   inlineToolbar.value = info.full
-  void window.pantry.screenshotToolbarVisible(!info.full)
+  if (info.full) {
+    void window.pantry.screenshotToolbarVisible(false)
+    return
+  }
+  // 框选：显示独立工具栏窗口并定位到选框外侧
+  void window.pantry.screenshotToolbarVisible(true)
+  const scale = window.devicePixelRatio || 1
+  const sw = window.screen.width
+  const sh = window.screen.height
+  const TW = ScreenshotToolbar.WIDTH
+  const TH = ScreenshotToolbar.HEIGHT
+  const selX = info.sel.x / scale
+  const selY = info.sel.y / scale
+  const selW = info.sel.w / scale
+  const selH = info.sel.h / scale
+  let tx: number
+  let ty: number
+  // 区域下方有足够空间 → 工具栏放区域下方外部
+  if (sh - (selY + selH) >= TH) {
+    tx = Math.round(Math.min(Math.max(selX, 0), sw - TW))
+    ty = Math.round(selY + selH)
+  } else if (selY >= TH) {
+    // 下方不够、上方有空间 → 工具栏放区域上方外部（截取底部时显示在上面）
+    tx = Math.round(Math.min(Math.max(selX, 0), sw - TW))
+    ty = Math.round(selY - TH)
+  } else {
+    // 上下都没空间（区域几乎沾满）→ 工具栏放选框内部顶部
+    tx = Math.round(Math.min(Math.max(selX, 0), sw - TW))
+    ty = Math.round(selY)
+  }
+  void window.pantry.screenshotToolbarPos({ x: tx, y: ty, width: TW, height: TH })
 }
 </script>
 
