@@ -10,7 +10,9 @@ import os from 'node:os'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { getClientLocation } from './location'
-import { constants, publicEncrypt } from 'node:crypto'
+import { constants, publicEncrypt, randomUUID } from 'node:crypto'
+import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { join, basename, normalize, sep } from 'node:path'
 import type {
   Ack,
   AuthAck,
@@ -784,8 +786,6 @@ export class ServerClient extends EventEmitter {
   async uploadFile(filePath: string, companyId = 0): Promise<Ack & { data?: { url?: string; uuid?: string; fileName?: string; size?: number } }> {
     if (!this.token) return { ok: false, error: '未登录' }
     try {
-      const { readFile } = await import('node:fs/promises')
-      const { basename } = await import('node:path')
       const buf = await readFile(filePath)
       const name = basename(filePath)
       const boundary = '----moshi-' + Math.random().toString(16).slice(2)
@@ -822,9 +822,6 @@ export class ServerClient extends EventEmitter {
     const CHUNK = 1024 * 1024 // 1MB/块
     // console.log(`[upload] 开始分块上传 ${filePath} -> ${base}/api/upload/chunk (company=${companyId})`)
     try {
-      const { randomUUID } = await import('node:crypto')
-      const { readFile, stat } = await import('node:fs/promises')
-      const { basename } = await import('node:path')
       const uploadId = randomUUID()
       const { size } = await stat(filePath)
       const name = basename(filePath)
@@ -886,8 +883,6 @@ export class ServerClient extends EventEmitter {
     const base = this._state.serverUrl.replace(/\/$/, '')
     if (!base) return { ok: false, error: '未配置服务器地址' }
     try {
-      const { mkdir, writeFile } = await import('node:fs/promises')
-      const { join, normalize, sep } = await import('node:path')
       const listUrl = `${base}/api/folder/files?path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(this.token)}`
       const lr = await httpGet(listUrl)
       const list = parseJson(lr.buf.toString('utf8')) as { ok?: boolean; error?: string; files?: { relPath?: string; url?: string }[] } | null

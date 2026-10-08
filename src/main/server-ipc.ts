@@ -4,9 +4,11 @@
  * 并把 serverClient 的推送事件桥接到 renderer。
  */
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell } from 'electron'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
+import { spawn } from 'node:child_process'
 import { IpcChannels, IpcEvents } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
@@ -371,9 +373,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 下载远程文件到本地存储路径（图片/视频/3D 预览用），返回 {ok,path,fileUrl,error}
   ipcMain.handle(IpcChannels.serverDownloadFile, async (_e, url) => {
     try {
-      const { mkdir, writeFile, stat } = await import('node:fs/promises')
-      const { join, basename } = await import('node:path')
-      const { pathToFileURL } = await import('node:url')
       const name = basename(String(url).split('?')[0] ?? '').trim() || 'download.bin'
       // 统一下载到设置里的存储路径（downloadDir），与手动下载一致
       const dir = loadServerConfig().downloadDir
@@ -410,8 +409,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const name = String(p.name ?? `通话录制_${Date.now()}.webm`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 120)
       const base64 = String(p.base64 ?? '')
       if (!base64) return { ok: false, error: '没有可保存的录制数据' }
-      const { mkdir, writeFile } = await import('node:fs/promises')
-      const { join } = await import('node:path')
       const dir = join(loadServerConfig().downloadDir, '通话录制')
       await mkdir(dir, { recursive: true })
       const dest = join(dir, name.endsWith('.webm') ? name : `${name}.webm`)
@@ -424,7 +421,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 读取本地文件为 ArrayBuffer（3D 模型解析用）
   ipcMain.handle(IpcChannels.serverReadFileBytes, async (_e, filePath) => {
     try {
-      const { readFile } = await import('node:fs/promises')
       const buf = await readFile(String(filePath))
       return { ok: true, data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer }
     } catch (err) {
@@ -453,7 +449,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     const cmd = typeof command === 'string' ? command.trim() : ''
     if (!cmd) return { ok: false, error: '空命令' }
     try {
-      const { spawn } = await import('node:child_process')
       const child = spawn(cmd, { shell: true, detached: true, stdio: 'ignore' })
       child.on('error', () => {})
       child.unref()
@@ -501,8 +496,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
 
   // 递归枚举文件夹内所有文件（用于发送文件夹）
   ipcMain.handle(IpcChannels.serverListFolderFiles, async (_e, folderPath) => {
-    const { readdir, stat } = await import('node:fs/promises')
-    const { join } = await import('node:path')
     const out: string[] = []
     const walk = async (dir: string): Promise<void> => {
       let entries: string[] = []
