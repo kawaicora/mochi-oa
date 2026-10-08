@@ -1005,13 +1005,6 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverDownloadFolder(content)
     return { ok: ack.ok, error: ack.error, destDir: ack.data?.destDir, count: ack.data?.count }
   }
-  async function sendScreenshot(): Promise<boolean> {
-    const s = selected.value
-    if (!s) return false
-    const shot = await window.pantry.captureScreen()
-    if (!shot) return false
-    return sendFile(shot)
-  }
   async function togglePin(conversationId: number, pinned: boolean): Promise<void> {
     const ack = await window.pantry.serverConversationPin(conversationId, pinned)
     if (ack.ok) await refreshConversations()
@@ -1206,7 +1199,6 @@ export const useAppStore = defineStore('app', () => {
     sendFile,
     sendFolder,
     downloadFolder,
-    sendScreenshot,
     togglePin,
     markRead,
     deleteMessage,

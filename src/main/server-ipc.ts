@@ -3,7 +3,7 @@
  * renderer 经 preload 发起的 server* 请求全部在此落到 serverClient 单例，
  * 并把 serverClient 的推送事件桥接到 renderer。
  */
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron'
 import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
@@ -519,18 +519,33 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     return out
   })
 
-  // 截屏：捕获主显示器全屏，存为临时 PNG 返回路径（用于聊天发送截屏）
+  // 截屏：捕获主显示器全屏（物理分辨率），返回 dataURL + 尺寸（渲染层做框选/编辑）
   ipcMain.handle(IpcChannels.fileCaptureScreen, async () => {
     try {
+      const disp = screen.getPrimaryDisplay()
+      const dpr = disp.scaleFactor || 1
+      const w = Math.round(disp.size.width * dpr)
+      const h = Math.round(disp.size.height * dpr)
       const source = await desktopCapturer.getSources({
         types: ['screen'],
-        thumbnailSize: { width: 1920, height: 1080 }
+        thumbnailSize: { width: w, height: h }
       })
       if (!source || source.length === 0) return null
       const thumb = source.find((s) => s.name.toLowerCase().includes('screen')) ?? source[0]
-      const png = thumb.thumbnail.toPNG()
+      return { dataUrl: thumb.thumbnail.toDataURL(), width: w, height: h }
+    } catch {
+      return null
+    }
+  })
+
+  // 把编辑后的 dataUrl 写为临时 PNG，返回文件路径（供 sendFile 上传发送）
+  ipcMain.handle(IpcChannels.fileWriteTempImage, async (_e, dataUrl: unknown) => {
+    try {
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return null
+      const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      const buf = Buffer.from(b64, 'base64')
       const out = join(tmpdir(), `shot-${Date.now()}.png`)
-      await writeFile(out, png)
+      await writeFile(out, buf)
       return out
     } catch {
       return null

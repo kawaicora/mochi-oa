@@ -251,7 +251,9 @@ const api = {
     ipcRenderer.invoke(IpcChannels.serverListFolderFiles, folderPath),
   serverDownloadFolder: (relPath: string): Promise<Ack & { data?: { destDir?: string; count?: number } }> =>
     ipcRenderer.invoke(IpcChannels.serverDownloadFolder, relPath),
-  captureScreen: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.fileCaptureScreen),
+  captureScreen: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
+    ipcRenderer.invoke(IpcChannels.fileCaptureScreen),
+  writeTempImage: (dataUrl: string): Promise<string | null> => ipcRenderer.invoke(IpcChannels.fileWriteTempImage, dataUrl),
 
   // RTC 信令
   rtcCreateMeeting: (opts: { title?: string; startAt?: string; password?: string; kind: RtcKind }): Promise<Ack & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }> =>

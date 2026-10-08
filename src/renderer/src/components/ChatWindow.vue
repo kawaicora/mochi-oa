@@ -9,6 +9,7 @@ import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
+import ScreenshotEditor from './ScreenshotEditor.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 
 const app = useAppStore()
@@ -17,6 +18,7 @@ const rtc = useRtcStore()
 
 const draft = ref('')
 const sending = ref(false)
+const shotEditor = ref<{ src: string; srcWidth: number; srcHeight: number } | null>(null)
 const showMembers = ref(false)
 const showMsgMenu = ref<{ id: string; x: number; y: number } | null>(null)
 const showEmoji = ref(false)
@@ -136,9 +138,24 @@ async function onPickAudio(): Promise<void> {
 
 async function onScreenshot(): Promise<void> {
   if (sending.value) return
+  const shot = await window.pantry.captureScreen()
+  if (!shot) {
+    flashToast('截屏失败')
+    return
+  }
+  shotEditor.value = { src: shot.dataUrl, srcWidth: shot.width, srcHeight: shot.height }
+}
+async function onShotSave(dataUrl: string): Promise<void> {
+  shotEditor.value = null
+  if (sending.value) return
+  const path = await window.pantry.writeTempImage(dataUrl)
+  if (!path) {
+    flashToast('保存截屏失败')
+    return
+  }
   sending.value = true
   try {
-    await app.sendScreenshot()
+    await app.sendFile(path)
   } finally {
     sending.value = false
   }
@@ -476,6 +493,16 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 
     <!-- 图片/视频单独预览 -->
     <MediaPreview v-if="previewMedia" :kind="previewMedia.kind" :m="previewMedia.m" @close="previewMedia = null" />
+
+    <!-- 截屏编辑器 -->
+    <ScreenshotEditor
+      v-if="shotEditor"
+      :src="shotEditor.src"
+      :src-width="shotEditor.srcWidth"
+      :src-height="shotEditor.srcHeight"
+      @save="onShotSave"
+      @cancel="shotEditor = null"
+    />
 
     <!-- 群设置 -->
     <GroupSettings v-if="app.groupSettingsOpen" />
