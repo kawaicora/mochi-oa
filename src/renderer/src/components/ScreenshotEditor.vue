@@ -111,8 +111,11 @@ function enterEdit(): void {
   g.drawImage(img, sel.x, sel.y, sel.w, sel.h, 0, 0, sel.w, sel.h)
   undoStack = []
   redoStack = []
-  // 通知宿主：把截屏窗口缩放/定位到框选区域（冻结画面跟随选框，工具栏自适应）
-  emit('resize-window', { x: sel.x, y: sel.y, w: sel.w, h: sel.h })
+  // 全屏编辑（点“全屏”）保持窗口全屏置顶，不缩放；仅框选时把窗口缩放/定位到框选区域（冻结画面跟随选框）
+  const isFullSel = sel.x === 0 && sel.y === 0 && sel.w === props.srcWidth && sel.h === props.srcHeight
+  if (!isFullSel) {
+    emit('resize-window', { x: sel.x, y: sel.y, w: sel.w, h: sel.h })
+  }
 }
 
 /* ---------- 阶段二：编辑 ---------- */
