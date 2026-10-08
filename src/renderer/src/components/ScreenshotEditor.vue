@@ -10,7 +10,11 @@
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps<{ src: string; srcWidth: number; srcHeight: number }>()
-const emit = defineEmits<{ (e: 'save', dataUrl: string): void; (e: 'cancel'): void }>()
+const emit = defineEmits<{
+  (e: 'save', dataUrl: string): void
+  (e: 'cancel'): void
+  (e: 'resize-window', sel: { x: number; y: number; w: number; h: number }): void
+}>()
 
 const stageCanvas = ref<HTMLCanvasElement | null>(null)
 const editCanvas = ref<HTMLCanvasElement | null>(null)
@@ -107,7 +111,11 @@ function enterEdit(): void {
   g.drawImage(img, sel.x, sel.y, sel.w, sel.h, 0, 0, sel.w, sel.h)
   undoStack = []
   redoStack = []
-  // 窗口始终全屏置顶（框选/全屏都不缩放窗口），冻结画面盖住原画面
+  // 点“全屏”保持窗口全屏置顶不缩放；仅框选时把窗口缩放/定位到框选区域（冻结画面跟随选框）
+  const isFullSel = sel.x === 0 && sel.y === 0 && sel.w === props.srcWidth && sel.h === props.srcHeight
+  if (!isFullSel) {
+    emit('resize-window', { x: sel.x, y: sel.y, w: sel.w, h: sel.h })
+  }
 }
 
 /* ---------- 阶段二：编辑 ---------- */

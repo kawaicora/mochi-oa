@@ -649,13 +649,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       frame: false,
       resizable: false,
       maximizable: false,
-      fullscreenable: false,
       show: false,
       autoHideMenuBar: true,
       backgroundColor: '#000000',
       webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
     })
-    win.once('ready-to-show', () => win.show())
+    // 确保显示即全屏（框选之前窗口铺满屏幕、忽略任务栏、置顶）
+    win.once('ready-to-show', () => {
+      win.setFullScreen(true)
+      win.show()
+    })
     if (process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/screenshot.html`)
     } else {
