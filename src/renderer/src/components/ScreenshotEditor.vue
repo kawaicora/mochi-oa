@@ -4,8 +4,8 @@
  * 阶段一 select：显示全屏截图，拖拽框选，或点“全屏”整屏；
  * 阶段二 edit：对选中区域做画笔/箭头/矩形/椭圆/文字 + 颜色选择 + 撤销/重做，保存导出 PNG。
  *
- * 交互用 pointer 事件 + setPointerCapture：按下即捕获指针，即使鼠标拖出窗口外，
- * pointermove/pointerup 仍会派发，避免“窗口外释放鼠标”导致绘制/框选卡死。
+ * 交互用 pointer 事件 + pointerleave 结束 + window pointerup 兜底：不用 setPointerCapture，
+ * 避免捕获未释放导致按钮点击被吞；拖出画布即结束本笔，窗口内任意位置释放也兜底结束。
  */
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 
@@ -37,26 +37,6 @@ function canvasPixel(c: HTMLCanvasElement, e: PointerEvent): { x: number; y: num
     y: Math.round((e.clientY - r.top) * (c.height / r.height))
   }
 }
-function grabPointer(e: PointerEvent): void {
-  const el = e.currentTarget as HTMLElement | null
-  if (el && typeof el.setPointerCapture === 'function') {
-    try {
-      el.setPointerCapture(e.pointerId)
-    } catch {
-      /* 已释放等情况忽略 */
-    }
-  }
-}
-function releasePointer(e: PointerEvent): void {
-  const el = e.currentTarget as HTMLElement | null
-  if (el && typeof el.hasPointerCapture === 'function' && el.hasPointerCapture(e.pointerId)) {
-    try {
-      el.releasePointerCapture(e.pointerId)
-    } catch {
-      /* ignore */
-    }
-  }
-}
 
 /* ---------- 阶段一：框选 ---------- */
 function setupStage(): void {
@@ -70,7 +50,6 @@ function setupStage(): void {
 }
 function onSelDown(e: PointerEvent): void {
   if (!stageCanvas.value) return
-  grabPointer(e)
   editing = true
   anchor = canvasPixel(stageCanvas.value, e)
 }
@@ -92,7 +71,7 @@ function onSelMove(e: PointerEvent): void {
   }
 }
 function onSelUp(e: PointerEvent): void {
-  releasePointer(e)
+  void e
   if (!editing) return
   editing = false
   if (!sel || sel.w < 4 || sel.h < 4) {
@@ -149,7 +128,6 @@ function redo(): void {
 function onEditDown(e: PointerEvent): void {
   const c = editCanvas.value
   if (!c) return
-  grabPointer(e)
   anchor = canvasPixel(c, e)
   editing = true
   if (tool.value === 'pen') pts = [{ ...anchor }]
@@ -201,14 +179,15 @@ function onEditMove(e: PointerEvent): void {
   }
 }
 function onEditUp(e: PointerEvent): void {
-  releasePointer(e)
+  void e
   if (!editing) return
   editing = false
   pts = []
   snapshot()
 }
-/** 保底释放：指针离开画布（拖出窗口）立即结束本笔，防止卡死 */
+/** 指针离开画布（拖出窗口/拖到工具栏）立即结束本笔，防止卡死，同时不吞按钮事件 */
 function onLeave(e: PointerEvent): void {
+  void e
   if (phase.value === 'select') {
     editing = false
     return
@@ -220,9 +199,14 @@ function onLeave(e: PointerEvent): void {
   snapshot()
 }
 function onCancel(e: PointerEvent): void {
-  releasePointer(e)
+  void e
   editing = false
   pts = []
+}
+/** 全局兜底：任何位置释放指针都结束当前绘制（避免窗口内拖到别处释放卡住） */
+function onGlobalUp(e: PointerEvent): void {
+  if (phase.value === 'select') onSelUp(e)
+  else onEditUp(e)
 }
 function drawArrow(g: CanvasRenderingContext2D, a: { x: number; y: number }, p: { x: number; y: number }): void {
   g.beginPath()
@@ -256,11 +240,15 @@ function onKey(e: KeyboardEvent): void {
 }
 onMounted(() => {
   window.addEventListener('keydown', onKey)
+  window.addEventListener('pointerup', onGlobalUp)
   img = new Image()
   img.onload = setupStage
   img.src = props.src
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('pointerup', onGlobalUp)
+})
 </script>
 
 <template>
