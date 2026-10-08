@@ -74,6 +74,10 @@ const api = {
   /** 截图窗口：移动独立工具栏窗口到目标位置（DIP） */
   screenshotToolbarPos: (pos: { x: number; y: number; width: number; height: number }): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.screenshotToolbarPos, pos),
+  /** 截图窗口 → 工具栏窗口：已进入编辑，工具栏切换为完整工具/颜色/保存 */
+  screenshotToolbarEdit: (): void => ipcRenderer.send(IpcChannels.screenshotToolbarEdit),
+  /** 工具栏窗口订阅“进入编辑”通知（返回退订函数） */
+  onScreenshotToolbarEdit: (l: () => void): (() => void) => subscribe(IpcEvents.screenshotToolbarEdit, l),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
   notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
