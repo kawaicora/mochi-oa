@@ -37,8 +37,8 @@ if (appId) {
   pkg.build.appId = appId
 }
 if (description) {
-  pkg.build = pkg.build || {}
-  pkg.build.description = description
+  // 应用描述写 package.json 顶层 description（electron-builder 从顶层读，build.description 不合法）
+  pkg.description = description
 }
 if (name || appId || description) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 
