@@ -1,7 +1,8 @@
 {
-  "name": "麻薯OA",
-  "iconPath": "icon_256.png",
+  "name": "mochi-oa",
+  "productName": "麻薯OA",
   "appId": "",
   "description": "",
+  "iconPath": "icon_256.png",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
