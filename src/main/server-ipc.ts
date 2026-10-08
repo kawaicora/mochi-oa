@@ -644,7 +644,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       height: Number(p.height) || 0
     }
     const win = new BrowserWindow({
-      fullscreen: true,
       alwaysOnTop: true,
       frame: false,
       resizable: false,
@@ -654,9 +653,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       backgroundColor: '#000000',
       webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
     })
-    // 确保显示即全屏（框选之前窗口铺满屏幕、忽略任务栏、置顶）
+    // 框选之前：窗口铺满整个显示器（覆盖任务栏）、置顶、无边框
     win.once('ready-to-show', () => {
-      win.setFullScreen(true)
+      win.setBounds(screen.getPrimaryDisplay().bounds)
       win.show()
     })
     if (process.env['ELECTRON_RENDERER_URL']) {
@@ -687,7 +686,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
   })
 
-  // 截屏窗口按框选区域缩放定位：退出全屏 → 窗口 bounds=选框（上方有空间则上移留出工具栏），冻结画面跟随选框
+  // 截屏窗口按框选区域缩放定位：窗口 bounds=选框（上方有空间则上移留出工具栏），冻结画面跟随选框
   ipcMain.handle(IpcChannels.screenshotResize, (_e, sel: unknown, toolbarDIP?: unknown) => {
     const win = BrowserWindow.fromWebContents(_e.sender)
     if (!win || win.isDestroyed()) return { ok: false }
