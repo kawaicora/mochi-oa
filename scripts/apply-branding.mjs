@@ -16,15 +16,17 @@ const pkg = JSON.parse(orig)
 
 let name = ''
 let appId = ''
+let description = ''
 try {
   const b = JSON.parse(readFileSync(join(root, 'resources', 'brand.json'), 'utf8'))
   if (b && typeof b.name === 'string' && b.name.trim()) name = b.name.trim()
   if (b && typeof b.appId === 'string' && b.appId.trim()) appId = b.appId.trim()
+  if (b && typeof b.description === 'string' && b.description.trim()) description = b.description.trim()
 } catch {
   /* brand.json 缺失/损坏用 package.json 默认 */
 }
 
-console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}`)
+console.log(`[branding] productName = ${name || '(默认)'}, appId = ${appId || '(默认)'}, description = ${description || '(默认)'}`)
 
 if (name) {
   pkg.build = pkg.build || {}
@@ -34,7 +36,11 @@ if (appId) {
   pkg.build = pkg.build || {}
   pkg.build.appId = appId
 }
-if (name || appId) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+if (description) {
+  pkg.build = pkg.build || {}
+  pkg.build.description = description
+}
+if (name || appId || description) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 
 try {
   const bin = process.platform === 'win32'

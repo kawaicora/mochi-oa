@@ -2,5 +2,6 @@
   "name": "麻薯OA",
   "iconPath": "icon_256.png",
   "appId": "",
+  "description": "",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
