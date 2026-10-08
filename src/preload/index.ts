@@ -54,6 +54,12 @@ const api = {
     ipcRenderer.invoke(IpcChannels.openMeetingWindow, params),
   openTaskWindow: (taskId: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
+  openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.openScreenshotWindow, payload),
+  screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
+    ipcRenderer.invoke(IpcChannels.screenshotGetPending),
+  screenshotSave: (dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.screenshotSave, dataUrl),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
   notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
@@ -322,7 +328,8 @@ const api = {
   onWikiUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.wikiUpdated, l),
   runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
   readAudioFile: (path: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> => ipcRenderer.invoke(IpcChannels.audioReadFile, path),
-  onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l)
+  onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l),
+  onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l)
 }
 
 export type PantryApi = typeof api
