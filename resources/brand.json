@@ -1,5 +1,6 @@
 {
   "name": "小墨办公",
   "iconPath": "xiaomo_256.png",
+  "appId": "",
   "defaultServerUrl": "http://192.168.2.57:3000"
 }
