@@ -6,8 +6,15 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { FileTransferMode, ServerSettings } from '../shared/server-types'
+import { readBranding } from './branding'
 
-export const DEFAULT_SERVER_URL = 'http://127.0.0.1:3000'
+const FALLBACK_SERVER_URL = 'http://127.0.0.1:3000'
+
+/** 默认服务器地址：优先 brand.json 的 defaultServerUrl，否则内置兜底 */
+function defaultServerUrl(): string {
+  const fromBrand = readBranding().defaultServerUrl
+  return fromBrand || FALLBACK_SERVER_URL
+}
 
 function configPath(): string {
   return join(app.getPath('userData'), 'server-config.json')
@@ -24,7 +31,7 @@ function defaultDownloadDir(): string {
 
 function defaultConfig(): ServerSettings {
   return {
-    serverUrl: DEFAULT_SERVER_URL,
+    serverUrl: defaultServerUrl(),
     token: '',
     fileTransferMode: 'local',
     downloadDir: defaultDownloadDir(),
@@ -50,7 +57,7 @@ export function loadServerConfig(): ServerSettings {
       serverUrl:
         typeof parsed.serverUrl === 'string' && parsed.serverUrl.trim()
           ? parsed.serverUrl.trim()
-          : DEFAULT_SERVER_URL,
+          : defaultServerUrl(),
       token: typeof parsed.token === 'string' ? parsed.token : '',
       fileTransferMode: normalizeMode(parsed.fileTransferMode),
       downloadDir: typeof parsed.downloadDir === 'string' && parsed.downloadDir.trim() ? parsed.downloadDir.trim() : fallback.downloadDir,

@@ -8,7 +8,7 @@ import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
-import { readBranding, saveBranding, refreshBranding, brandingIconPath } from './branding'
+import { readBranding, brandingIconPath } from './branding'
 
 // ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {
@@ -177,21 +177,8 @@ app.whenReady().then(() => {
     notifyManager({ title: opts.title ?? '', body: opts.body ?? '', target: opts.target ?? { kind: 'main' }, tray: opts.tray ?? true })
     return { ok: true }
   })
-  // 品牌配置：软件名/图标（一处配置，全局生效）
+  // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
-  ipcMain.handle(IpcChannels.brandingSet, (_e, p: { name?: string; iconPath?: string | null }) => {
-    const b = saveBranding(p ?? {})
-    const w = BrowserWindow.getAllWindows()
-    for (const win of w) {
-      if (!win.isDestroyed()) {
-        win.setTitle(b.name)
-        const ip = brandingIconPath()
-        if (ip) win.setIcon(require('electron').nativeImage.createFromPath(ip))
-      }
-    }
-    refreshBranding()
-    return b
-  })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
     return {

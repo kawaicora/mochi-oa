@@ -1,40 +1,47 @@
 /**
- * Mochi OA - 品牌配置中心（main 进程集中管理）。
- * 配置项集中在 userData/brand.json，改一处全局生效（主窗口标题/图标、托盘、渲染标题）。
- * {
- *   "name": "麻薯OA",          // 软件显示名
- *   "iconPath": "brand.png"    // 自定义图标：绝对路径，或相对 userData 目录的文件名；留空用内置图标
- * }
- * 安装包结构不变：不改打包配置，仅运行时读取该配置文件。
+ * Mochi OA - 品牌配置中心（随安装包打包，运行时只读）。
+ * 配置文件固定在 resources/brand.json，electron-builder 的 extraResources 会把整个
+ * resources 目录打进安装包（落位 process.resourcesPath/resources/），因此品牌配置随包分发：
+ *   {
+ *     "name": "麻薯OA",                  // 软件显示名（窗口标题/托盘/渲染标题）
+ *     "iconPath": "brand.png",           // 自定义图标：resources 目录下的文件名；留空用内置图标
+ *     "defaultServerUrl": ""             // 默认服务器地址；UI 可改，未改时默认用它
+ *   }
+ * 要换品牌：改 resources/brand.json（及放入图标）→ 重新打包 → 安装包内的名称/图标/默认地址随之变化。
  */
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, isAbsolute } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export interface Branding {
   name: string
   iconPath: string | null
+  defaultServerUrl: string | null
 }
 
-const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null }
+const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null, defaultServerUrl: null }
 
 let cached: Branding | null = null
 
-function configPath(): string {
-  return join(app.getPath('userData'), 'brand.json')
+/** 品牌资源目录：打包后 = process.resourcesPath/resources；开发 = 项目根 resources/ */
+function resourcesDir(): string {
+  if (app.isPackaged) return join(process.resourcesPath, 'resources')
+  return join(app.getAppPath(), 'resources')
 }
 
-/** 图标候选：iconPath 为绝对路径直接用；相对路径按相对 userData 解析；找不到返回 null */
+function configPath(): string {
+  return join(resourcesDir(), 'brand.json')
+}
+
+/** 自定义图标：brand.json 中 iconPath 为 resources 目录下文件名；找不到返回 null */
 export function brandingIconPath(): string | null {
   const b = readBranding()
   if (!b.iconPath) return null
-  const candidates = isAbsolute(b.iconPath) ? [b.iconPath] : [join(app.getPath('userData'), b.iconPath), b.iconPath]
-  for (const c of candidates) {
-    try {
-      if (existsSync(c)) return c
-    } catch {
-      /* ignore */
-    }
+  const p = join(resourcesDir(), b.iconPath)
+  try {
+    if (existsSync(p)) return p
+  } catch {
+    /* ignore */
   }
   return null
 }
@@ -54,30 +61,12 @@ export function readBranding(): Branding {
       if (typeof raw['iconPath'] === 'string' && String(raw['iconPath']).trim()) {
         cached.iconPath = String(raw['iconPath']).trim().slice(0, 1024)
       }
+      if (typeof raw['defaultServerUrl'] === 'string' && String(raw['defaultServerUrl']).trim()) {
+        cached.defaultServerUrl = String(raw['defaultServerUrl']).trim().slice(0, 512)
+      }
     }
   } catch {
     cached = { ...DEFAULTS }
   }
   return cached
-}
-
-/** 写入品牌配置（保存后立即生效；后续启动/重开窗口应用） */
-export function saveBranding(partial: Partial<Branding>): Branding {
-  const next: Branding = {
-    name: (partial.name && partial.name.trim()) ? partial.name.trim().slice(0, 64) : readBranding().name,
-    iconPath: partial.iconPath !== undefined ? (partial.iconPath && partial.iconPath.trim() ? partial.iconPath.trim().slice(0, 1024) : null) : readBranding().iconPath
-  }
-  try {
-    writeFileSync(configPath(), JSON.stringify(next, null, 2), 'utf8')
-  } catch {
-    /* 写入失败静默 */
-  }
-  cached = next
-  return next
-}
-
-/** 强制重读（清缓存） */
-export function refreshBranding(): Branding {
-  cached = null
-  return readBranding()
 }
