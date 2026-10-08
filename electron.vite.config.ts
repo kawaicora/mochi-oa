@@ -52,7 +52,8 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
           meeting: resolve(__dirname, 'src/renderer/meeting.html'),
-          task: resolve(__dirname, 'src/renderer/task.html')
+          task: resolve(__dirname, 'src/renderer/task.html'),
+          screenshot: resolve(__dirname, 'src/renderer/screenshot.html')
         }
       }
     }

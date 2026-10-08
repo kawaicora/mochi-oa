@@ -632,4 +632,54 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       void win.loadFile(join(__dirname, '../renderer/task.html'), { query })
     }
   })
+
+  // 打开独立全屏截屏窗口（固定、不可调整）——先把截图数据暂存，截图窗口 ready 后再取
+  let pendingScreenshot: { dataUrl: string; width: number; height: number } | null = null
+  ipcMain.handle(IpcChannels.openScreenshotWindow, (_e, payload) => {
+    const p = (payload ?? {}) as { dataUrl?: unknown; width?: unknown; height?: unknown }
+    if (typeof p.dataUrl !== 'string') return { ok: false, error: 'no data' }
+    pendingScreenshot = {
+      dataUrl: p.dataUrl,
+      width: Number(p.width) || 0,
+      height: Number(p.height) || 0
+    }
+    const win = new BrowserWindow({
+      fullscreen: true,
+      frame: false,
+      resizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#000000',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    win.once('ready-to-show', () => win.show())
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/screenshot.html`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/screenshot.html'))
+    }
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.screenshotGetPending, () => {
+    const p = pendingScreenshot
+    pendingScreenshot = null
+    return p
+  })
+  ipcMain.handle(IpcChannels.screenshotSave, async (_e, dataUrl: unknown) => {
+    try {
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return { ok: false, error: 'invalid dataUrl' }
+      const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      const buf = Buffer.from(b64, 'base64')
+      const out = join(tmpdir(), `shot-${Date.now()}.png`)
+      await writeFile(out, buf)
+      const sw = BrowserWindow.fromWebContents(_e.sender)
+      if (sw && !sw.isDestroyed()) sw.close()
+      sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, out)
+      return { ok: true, path: out }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  })
 }

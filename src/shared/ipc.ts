@@ -201,6 +201,12 @@ export const IpcChannels = {
   openMeetingWindow: 'win:openMeeting',
   /** 打开独立任务详情窗口 */
   openTaskWindow: 'win:openTask',
+  /** 打开独立全屏截屏窗口（固定不可调整），入参 { dataUrl, width, height } */
+  openScreenshotWindow: 'win:openScreenshot',
+  /** 截屏窗口 ready 后取待处理截图数据 */
+  screenshotGetPending: 'shot:getPending',
+  /** 截屏窗口保存：主进程写临时 PNG、关窗、并通知主窗口发送 */
+  screenshotSave: 'shot:save',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
@@ -268,5 +274,7 @@ export const IpcEvents = {
   /** 分块上传进度：{ uploadId, fileName, percent, done? } */
   uploadProgress: 'server:event:uploadProgress',
   /** 托盘"设置"入口，通知 renderer 打开设置面板 */
-  uiOpenSettings: 'ui:event:openSettings'
+  uiOpenSettings: 'ui:event:openSettings',
+  /** 截屏窗口保存成功 → 通知主窗口把临时 PNG 发送到当前会话 */
+  screenshotSaved: 'shot:event:saved'
 } as const

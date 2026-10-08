@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed } from 'vue'
+import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
@@ -9,7 +9,6 @@ import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
-import ScreenshotEditor from './ScreenshotEditor.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 
 const app = useAppStore()
@@ -18,7 +17,6 @@ const rtc = useRtcStore()
 
 const draft = ref('')
 const sending = ref(false)
-const shotEditor = ref<{ src: string; srcWidth: number; srcHeight: number } | null>(null)
 const showMembers = ref(false)
 const showMsgMenu = ref<{ id: string; x: number; y: number } | null>(null)
 const showEmoji = ref(false)
@@ -143,23 +141,21 @@ async function onScreenshot(): Promise<void> {
     flashToast('截屏失败')
     return
   }
-  shotEditor.value = { src: shot.dataUrl, srcWidth: shot.width, srcHeight: shot.height }
+  // 打开独立全屏截屏窗口；保存后主进程会回传临时 PNG 路径，由下方监听发送
+  await window.pantry.openScreenshotWindow({ dataUrl: shot.dataUrl, width: shot.width, height: shot.height })
 }
-async function onShotSave(dataUrl: string): Promise<void> {
-  shotEditor.value = null
-  if (sending.value) return
-  const path = await window.pantry.writeTempImage(dataUrl)
-  if (!path) {
-    flashToast('保存截屏失败')
-    return
-  }
-  sending.value = true
-  try {
-    await app.sendFile(path)
-  } finally {
-    sending.value = false
-  }
-}
+// 独立截屏窗口保存完成 → 把临时 PNG 发送到当前会话
+onMounted(() => {
+  window.pantry.onScreenshotSaved(async (path) => {
+    if (!path || sending.value) return
+    sending.value = true
+    try {
+      await app.sendFile(path)
+    } finally {
+      sending.value = false
+    }
+  })
+})
 
 const emojiList = [
   '😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😜', '🤔', '😭', '😅', '😇', '🙃', '😎', '🤩', '🥳', '😴', '🤯', '🥺', '😤',
@@ -493,16 +489,6 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 
     <!-- 图片/视频单独预览 -->
     <MediaPreview v-if="previewMedia" :kind="previewMedia.kind" :m="previewMedia.m" @close="previewMedia = null" />
-
-    <!-- 截屏编辑器 -->
-    <ScreenshotEditor
-      v-if="shotEditor"
-      :src="shotEditor.src"
-      :src-width="shotEditor.srcWidth"
-      :src-height="shotEditor.srcHeight"
-      @save="onShotSave"
-      @cancel="shotEditor = null"
-    />
 
     <!-- 群设置 -->
     <GroupSettings v-if="app.groupSettingsOpen" />
