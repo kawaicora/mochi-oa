@@ -202,7 +202,7 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
         memTotal: totalMem,
         gpus: staticInfo.gpus
       }
-      try { emit({ deviceId: did, info, perf }, onAck) } catch (e) { console.error(`[sys-report] emit 失败: ${e instanceof Error ? e.message : String(e)}`) }
+      try { emit({ deviceId: did, info, perf }) } catch (e) { console.error(`[sys-report] emit 失败: ${e instanceof Error ? e.message : String(e)}`) }
     } catch (e) {
       console.error(`[sys-report] tick 异常: ${e instanceof Error ? e.message + '\n' + (e.stack ?? '') : String(e)}`)
     }
