@@ -228,6 +228,51 @@ export class ServerClient extends EventEmitter {
   private token = ''
   /** 当前连接的 RSA 登录加密公钥（每次连接从服务端获取，连接销毁即失效） */
   private pubKey: string | null = null
+  /** token 过期巡检定时器（1 分钟一次；过期自动退出到登录页） */
+  private tokenWatcher: ReturnType<typeof setInterval> | null = null
+
+  /** 解析 JWT 的 exp（毫秒）。token 非 JWT 或解析失败返回 null（不触发过期巡检） */
+  private parseJwtExp(token: string): number | null {
+    try {
+      const part = token.split('.')[1]
+      if (!part) return null
+      const b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+      const json = decodeURIComponent(Array.prototype.map.call(atob(b64), (c: string) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join(''))
+      const payload = JSON.parse(json) as { exp?: unknown }
+      return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+    } catch { return null }
+  }
+
+  /** token 过期/丢失：清会话 → 渲染层回登录页（复用 sessionRevoked 事件链路） */
+  private onAuthExpired(reason: string): void {
+    if (!this.token && this._state.userId == null) return // 已登出
+    console.error(`[auth] 会话失效，自动退出到登录页：${reason}`)
+    this.token = ''
+    this.stopTokenWatcher()
+    this.setState({ token: undefined, userId: undefined, username: undefined, nick: undefined, error: reason })
+    this.emit('sessionRevoked', { sessionId: 0, reason: 'expired', at: new Date().toISOString() })
+  }
+
+  /** 1 分钟巡检：登录 token 过期 → 自动退出 */
+  private startTokenWatcher(): void {
+    if (this.tokenWatcher) return
+    this.tokenWatcher = setInterval(() => {
+      const t = this.token
+      if (!t) return
+      const exp = this.parseJwtExp(t)
+      if (exp != null && Date.now() > exp) this.onAuthExpired('登录 token 已过期')
+    }, 60_000)
+  }
+
+  private stopTokenWatcher(): void {
+    if (this.tokenWatcher) { clearInterval(this.tokenWatcher); this.tokenWatcher = null }
+  }
+
+  /** 无 token（上传/下载等受保护操作）→ 记录日志并触发自动退出 */
+  private logNoToken(what: string): void {
+    console.error(`[auth] ${what} 失败：无会话 token（会话已失效），触发自动退出`)
+    this.onAuthExpired(`${what} 无 token，会话已失效`)
+  }
 
   get state(): ServerClientState {
     return { ...this._state }
@@ -282,13 +327,17 @@ export class ServerClient extends EventEmitter {
       if (this.token) {
         void this.authMe().then((ack) => {
           if (!ack.ok) {
-            this.setState({ state: 'connected', connected: true, userId: undefined, error: ack.error || '会话已失效' })
+            console.error(`[auth] 重连后 auth:me 校验失败：${ack.error || '会话已失效'}，自动退出`)
+            this.onAuthExpired(ack.error || '会话已失效')
+          } else {
+            this.startTokenWatcher()
           }
         })
       }
     })
     socket.on('disconnect', (reason) => {
       console.log(`[io:lifecycle] disconnect reason=${reason}`)
+      this.stopTokenWatcher()
       this.setState({
         state: 'disconnected',
         connected: false,
@@ -474,6 +523,7 @@ export class ServerClient extends EventEmitter {
 
   async logout(): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
+    this.stopTokenWatcher()
     const ack = await emitWithAck(this.socket, 'auth:logout', {})
     this.token = ''
     this.setState({ token: undefined, userId: undefined, username: undefined, nick: undefined, avatar: undefined, connected: false, state: 'connected' })
@@ -842,7 +892,7 @@ export class ServerClient extends EventEmitter {
   // ─── 文件上传（HTTP 中继） ──────────────────────────────
 
   async uploadFile(filePath: string, companyId = 0): Promise<Ack & { data?: { url?: string; uuid?: string; fileName?: string; size?: number } }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('uploadFile'); return { ok: false, error: '未登录（无会话 token）' } }
     const t0 = Date.now()
     try {
       const buf = await readFile(filePath)
@@ -877,7 +927,7 @@ export class ServerClient extends EventEmitter {
     companyId = 0,
     relativePath = ''
   ): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> {
-    if (!this.token) return { ok: false, error: '未登录（无会话 token，请重新登录）' }
+    if (!this.token) { this.logNoToken('uploadFileChunked'); return { ok: false, error: '未登录（无会话 token，请重新登录）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
     if (!base) return { ok: false, error: '未配置服务器地址' }
     const authQ = `token=${encodeURIComponent(this.token)}&company=${companyId}`
@@ -932,7 +982,7 @@ export class ServerClient extends EventEmitter {
 
   // ─── 文件夹下载（HTTP：清单 → 逐文件落盘到配置目录） ──────
   async downloadFile(url: string): Promise<{ ok: boolean; error?: string; buf?: Buffer }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('downloadFile'); return { ok: false, error: '未登录（无会话 token）' } }
     try {
       const fr = await httpGet(String(url))
       if (fr.status >= 200 && fr.status < 300) return { ok: true, buf: fr.buf }
@@ -943,7 +993,7 @@ export class ServerClient extends EventEmitter {
   }
 
   async downloadFolder(relPath: string, destDir: string): Promise<{ ok: boolean; error?: string; destDir?: string; count?: number }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('downloadFolder'); return { ok: false, error: '未登录（无会话 token）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
     if (!base) return { ok: false, error: '未配置服务器地址' }
     try {

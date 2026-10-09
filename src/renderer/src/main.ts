@@ -30,10 +30,13 @@ const app = createApp(App)
 app.use(createPinia())
 app.mount('#app')
 
-// ---- 远程设备控制（被控端）：登录后向服务端注册本机，供 web 管理远程查看 ---- 
+// ---- 远程设备控制（被控端）：登录后向服务端注册本机，供 web 管理远程查看 ----
+// 注意：必须静态 import —— Electron 打包后动态 import('./...') 会报 'a dynamic import undefined'，
+// 导致被控端不加载（web 列表看不到本机）。静态加载后仅 init() 订阅登录态，不影响主界面启动。
+import RemoteControl from './remote/RemoteControl'
 try {
-  import('./remote/RemoteControl').then(({ default: remote }) => remote.init()).catch((e) => {
-    console.error('[remote] RemoteControl 动态加载失败（被控端将不会注册，web 列表看不到本机）', e)
-    safeLog('[remote] RemoteControl 加载失败 ' + (e instanceof Error ? (e.stack || e.message) : String(e)))
-  })
-} catch (e) { console.error('[remote] RemoteControl 挂载异常', e) }
+  RemoteControl.init()
+} catch (e) {
+  console.error('[remote] RemoteControl 初始化失败（被控端将不会注册）', e)
+  safeLog('[remote] RemoteControl 初始化失败 ' + (e instanceof Error ? (e.stack || e.message) : String(e)))
+}
