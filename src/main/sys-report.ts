@@ -28,7 +28,8 @@ import * as path from 'node:path'
 // 都可能取不到方法（此前 import * as 与 import default 均导致 si.motherboard is not a function）。
 // 主进程是 Node 环境，直接用 require 拿 module.exports 最稳。d.ts 仅声明命名空间接口，此处显式声明形状。
 type SiApi = {
-  motherboard(): Promise<{ manufacturer: string; model: string }>
+  // 注意：systeminformation 的主板方法名是 baseboard()（无 motherboard 方法）
+  baseboard(): Promise<{ manufacturer: string; model: string }>
   memLayout(): Promise<Array<{ size?: number; clockSpeed?: number; type?: string; manufacturer?: string }>>
   graphics(): Promise<{ controllers: Array<{ vendor?: string; model?: string; vram?: number; driverVersion?: string; utilizationGpu?: number }> }>
   diskLayout(): Promise<Array<{ device?: string; name?: string; size?: number }>>
@@ -92,7 +93,7 @@ async function refreshStatic(): Promise<void> {
     const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | undefined> =>
       Promise.race([p, new Promise<undefined>((res) => setTimeout(() => res(undefined), ms))])
     const [mb, memLayout, graphics, disks, nets, fsSizes, procs] = await Promise.all([
-      withTimeout(si.motherboard(), 4000),
+      withTimeout(si.baseboard(), 4000),
       withTimeout(si.memLayout(), 4000),
       withTimeout(si.graphics(), 4000),
       withTimeout(si.diskLayout(), 4000),
