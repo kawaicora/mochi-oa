@@ -6,7 +6,8 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron'
 import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
+import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
@@ -14,6 +15,15 @@ import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
+
+/** 主进程落盘日志（userData/logs/main.log）：定位连接/被控上报链路 */
+async function logMain(msg: string): Promise<void> {
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    await appendFile(join(dir, 'main.log'), `[${new Date().toISOString()}] [main] ${msg}\n`, 'utf8')
+  } catch { /* 忽略 */ }
+}
 
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
@@ -30,34 +40,38 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 推送 → renderer
   serverClient.on('state', (s) => {
     sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
+    void logMain(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
     // 登录连接后启动本机系统信息上报（被控端）；断开即停
     // 协议：动态包(dev:sys) → 服务端返回 updated（设备完整）/ lost（缺失或基础信息不全）；
     //       lost → 立即重发全量 dev:register → 服务端返回 added → 之后只发动态。
     if (s.connected) {
+      void logMain('startSysReport 启动（被控端系统上报）')
       startSysReport(async (p, onAck) => {
         try {
           const ack = await serverClient.devSys(p)
           const status = ack?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
+          void logMain(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
             const info = (p.info ?? {}) as Record<string, unknown>
             const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
             const pub = ips.find((x) => !x.internal)?.address ?? ips[0]?.address ?? ''
             const st = serverClient.state
-            await serverClient.devRegister({
+            const regAck = await serverClient.devRegister({
               deviceId: p.deviceId,
               name: String(info.hostname ?? '电脑').slice(0, 64),
               os: `${info.type ?? ''} ${info.release ?? ''}`.trim().slice(0, 128),
               ip: pub,
               username: st.nick || st.username || ''
             })
-            console.log(`[remote] 服务端返回 ${status}，已重发全量注册`)
+            void logMain(`服务端返回 ${status}，已重发全量注册 regAck=${regAck?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
           }
         } catch (e) {
-          console.warn('[remote] dev:sys 上报失败', e)
+          void logMain(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
         }
       })
     } else {
+      void logMain('stopSysReport（未连接）')
       stopSysReport()
     }
   })

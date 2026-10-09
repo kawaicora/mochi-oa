@@ -252,6 +252,11 @@ app.whenReady().then(() => {
   // 启动即连接已保存的服务器地址（带 token 则自动恢复会话）
   const cfg = loadServerConfig()
   if (cfg.serverUrl) {
+    try {
+      const logDir = join(app.getPath('userData'), 'logs')
+      if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
+      appendFileSync(join(logDir, 'main.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
+    } catch { /* 忽略 */ }
     serverClient.connect({ serverUrl: cfg.serverUrl, token: cfg.token })
   }
 
