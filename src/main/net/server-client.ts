@@ -347,6 +347,12 @@ export class ServerClient extends EventEmitter {
     socket.on('plan:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('plansUpdated', d))
     socket.on('doc:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('docsUpdated', d))
     socket.on('wiki:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('wikiUpdated', d))
+    // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl 消费）
+    socket.on('dev:view', (d: { deviceId?: string }) => this.emit('devView', d))
+    socket.on('dev:enumerate', (d: { deviceId?: string }) => this.emit('devEnumerate', d))
+    socket.on('dev:start', (d: { deviceId?: string; kind?: string; device?: unknown }) => this.emit('devStart', d))
+    socket.on('dev:stop', (d: { deviceId?: string }) => this.emit('devStop', d))
+    socket.on('dev:signal', (d: { deviceId?: string; signal?: unknown }) => this.emit('devSignal', d))
   }
 
   disconnect(): void {
@@ -1027,6 +1033,24 @@ export class ServerClient extends EventEmitter {
   async rtcChatMessage(roomId: string, content: string): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'rtc:chatMessage', { roomId, content })
+  }
+
+  // ─── 远程设备控制（被控端上报/信令） ───────────────────────
+  async devRegister(payload: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:register', payload)
+  }
+  async devHeartbeat(deviceId: string): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:heartbeat', { deviceId })
+  }
+  async devDevices(deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:devices', { deviceId, cams, mics })
+  }
+  async devSignal(deviceId: string, signal: unknown): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:signal', { deviceId, signal })
   }
 
   // ─── 个人信息 ───────────────────────────────────────────

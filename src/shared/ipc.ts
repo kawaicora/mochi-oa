@@ -17,6 +17,12 @@ export const IpcChannels = {
   // 开机自启
   setAutoLaunch: 'app:setAutoLaunch',
   getAutoLaunch: 'app:getAutoLaunch',
+  // 远程设备控制（被控端 → 服务端）
+  devRegister: 'dev:register',
+  devHeartbeat: 'dev:heartbeat',
+  devDevices: 'dev:devices',
+  devSignal: 'dev:signal',
+  devGetInfo: 'dev:info',
 
   // 账号
   serverRegister: 'server:register',
@@ -293,7 +299,13 @@ export const IpcEvents = {
   /** 独立工具栏窗口 → 截图窗口：编辑命令 { action, value? } */
   screenshotToolbarCommand: 'shot:event:toolbarCommand',
   /** 截图窗口 → 工具栏窗口：已进入编辑，切换完整工具栏 */
-  screenshotToolbarEdit: 'shot:event:toolbarEdit'
+  screenshotToolbarEdit: 'shot:event:toolbarEdit',
+  /** 远程设备控制：服务端 → 被控端（客户端 app）事件 */
+  devView: 'dev:event:view',
+  devEnumerate: 'dev:event:enumerate',
+  devStart: 'dev:event:start',
+  devStop: 'dev:event:stop',
+  devSignal: 'dev:event:signal'
 } as const
 
 /** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */

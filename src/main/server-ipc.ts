@@ -82,6 +82,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('plansUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.plansUpdated, d ?? {}))
   serverClient.on('docsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.docsUpdated, d ?? {}))
   serverClient.on('wikiUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.wikiUpdated, d ?? {}))
+  // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl）
+  serverClient.on('devView', (d) => broadcastToAllWindows(IpcEvents.devView, d ?? {}))
+  serverClient.on('devEnumerate', (d) => broadcastToAllWindows(IpcEvents.devEnumerate, d ?? {}))
+  serverClient.on('devStart', (d) => broadcastToAllWindows(IpcEvents.devStart, d ?? {}))
+  serverClient.on('devStop', (d) => broadcastToAllWindows(IpcEvents.devStop, d ?? {}))
+  serverClient.on('devSignal', (d) => broadcastToAllWindows(IpcEvents.devSignal, d ?? {}))
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {
@@ -358,6 +364,41 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.rtcDmAnswer, (_e, roomId, accept) => serverClient.rtcDmAnswer(String(roomId), accept === true))
   ipcMain.handle(IpcChannels.rtcGroupCall, (_e, groupId, kind) => serverClient.rtcGroupCall(Number(groupId) || 0, kind === 'voice' ? 'voice' : 'video'))
   ipcMain.handle(IpcChannels.rtcChatSend, (_e, roomId, content) => serverClient.rtcChatMessage(String(roomId), String(content ?? '')))
+
+  // 远程设备控制（被控端）：渲染 → main → serverClient socket
+  ipcMain.handle(IpcChannels.devRegister, (_e, payload) => serverClient.devRegister(payload as { deviceId: string; name: string; os: string; ip: string; username: string }))
+  ipcMain.handle(IpcChannels.devHeartbeat, (_e, deviceId) => { serverClient.devHeartbeat(String(deviceId ?? '')); return Promise.resolve() })
+  ipcMain.handle(IpcChannels.devDevices, (_e, deviceId, cams, mics) => serverClient.devDevices(String(deviceId ?? ''), cams as Array<{ id: string; label: string }>, mics as Array<{ id: string; label: string }>))
+  ipcMain.handle(IpcChannels.devSignal, (_e, deviceId, signal) => serverClient.devSignal(String(deviceId ?? ''), signal))
+  // 本机信息（deviceId/hostname/os/ip），供被控端注册用
+  ipcMain.handle(IpcChannels.devGetInfo, () => {
+    const os = require('node:os') as typeof import('node:os')
+    const fs = require('node:fs') as typeof import('node:fs')
+    const path = require('node:path') as typeof import('node:path')
+    const idFile = path.join(app.getPath('userData'), 'device-id.json')
+    let deviceId = ''
+    try {
+      if (fs.existsSync(idFile)) deviceId = (JSON.parse(fs.readFileSync(idFile, 'utf8')) as { id?: string }).id ?? ''
+      if (!deviceId) {
+        deviceId = 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+        fs.writeFileSync(idFile, JSON.stringify({ id: deviceId }), 'utf8')
+      }
+    } catch { deviceId = deviceId || 'dev-' + Math.random().toString(36).slice(2, 10) }
+    const nets = os.networkInterfaces()
+    let ip = ''
+    for (const name of Object.keys(nets)) {
+      for (const n of nets[name] || []) {
+        if (n && n.family === 'IPv4' && !n.internal) { ip = n.address; break }
+      }
+      if (ip) break
+    }
+    return {
+      deviceId,
+      hostname: os.hostname(),
+      os: os.type() + ' ' + os.release(),
+      ip: ip || '127.0.0.1'
+    }
+  })
 
   // 个人信息
   ipcMain.handle(IpcChannels.userUpdateProfile, (_e, patch) =>

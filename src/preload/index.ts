@@ -303,6 +303,16 @@ const api = {
     ipcRenderer.invoke(IpcChannels.rtcGroupCall, groupId, kind),
   rtcChatMessage: (roomId: string, content: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcChatSend, roomId, content),
+  // 远程设备控制（被控端）
+  devGetInfo: (): Promise<{ deviceId: string; hostname: string; os: string; ip: string }> =>
+    ipcRenderer.invoke(IpcChannels.devGetInfo),
+  devRegister: (p: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devRegister, p),
+  devHeartbeat: (deviceId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.devHeartbeat, deviceId),
+  devDevices: (deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devDevices, deviceId, cams, mics),
+  devSignal: (deviceId: string, signal: unknown): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devSignal, deviceId, signal),
 
   // 推送订阅
   onServerState: (l: (s: ServerClientState) => void) => subscribe<ServerClientState>(IpcEvents.serverState, l),
@@ -329,6 +339,12 @@ const api = {
   onRtcEnded: (l: (d: RtcEndedEvent) => void) => subscribe<RtcEndedEvent>(IpcEvents.rtcEnded, l),
   onRtcGroupCall: (l: (d: RtcGroupCallEvent) => void) => subscribe<RtcGroupCallEvent>(IpcEvents.rtcGroupCall, l),
   onRtcChatMessage: (l: (d: RtcChatMessageEvent) => void) => subscribe<RtcChatMessageEvent>(IpcEvents.rtcChatMessage, l),
+  // 远程设备控制（被控端）事件订阅
+  onDevView: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devView, l),
+  onDevEnumerate: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devEnumerate, l),
+  onDevStart: (l: (d: { deviceId?: string; kind?: string; device?: unknown }) => void) => subscribe<{ deviceId?: string; kind?: string; device?: unknown }>(IpcEvents.devStart, l),
+  onDevStop: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devStop, l),
+  onDevSignal: (l: (d: { deviceId?: string; signal?: unknown }) => void) => subscribe<{ deviceId?: string; signal?: unknown }>(IpcEvents.devSignal, l),
   onGroupMembersUpdated: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupMembersUpdated, l),
   onGroupInvite: (l: (d: GroupInviteEvent) => void) => subscribe<GroupInviteEvent>(IpcEvents.groupInvite, l),
   onGroupDissolved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupDissolved, l),

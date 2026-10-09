@@ -27,3 +27,8 @@ window.addEventListener('unhandledrejection', (e) => {
 const app = createApp(App)
 app.use(createPinia())
 app.mount('#app')
+
+// ---- 远程设备控制（被控端）：登录后向服务端注册本机，供 web 管理远程查看 ---- 
+try {
+  import('./remote/RemoteControl').then(({ default: remote }) => remote.init()).catch(() => {})
+} catch { /* 忽略 */ }
