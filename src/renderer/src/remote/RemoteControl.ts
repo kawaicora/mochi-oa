@@ -48,7 +48,7 @@ class RemoteControl {
       this.info = info
       this.deviceId = info.deviceId
       console.log(`[remote] 本机信息 deviceId=${info.deviceId} hostname=${info.hostname} ip=${info.ip} os=${info.os}`)
-    }).catch(() => console.warn('[remote] devGetInfo 失败'))
+    }).catch((e) => console.warn('[remote] devGetInfo 失败（被控端将无法注册）', e))
 
     this.unsubs.push(
       window.pantry.onServerState((s: DevState) => {
@@ -74,19 +74,30 @@ class RemoteControl {
   // ── 注册 / 心跳 ────────────────────────────────────────
   private async tryRegister(username: string, nick: string): Promise<void> {
     if (this.registered) return
-    if (!this.info) { this.info = await window.pantry.devGetInfo().catch(() => null); if (this.info) this.deviceId = this.info.deviceId }
-    if (!this.deviceId) return
+    if (!this.info) {
+      try { this.info = await window.pantry.devGetInfo() } catch (e) { console.warn('[remote] tryRegister 获取本机信息失败', e) }
+      if (this.info) this.deviceId = this.info.deviceId
+    }
+    if (!this.deviceId) { console.warn('[remote] tryRegister 无 deviceId，跳过注册'); return }
     this.registered = true
     this.nickname = nick || username || this.info?.hostname || '电脑'
     const name = this.info?.hostname || '电脑'
-    const ack = await window.pantry.devRegister({
-      deviceId: this.deviceId,
-      name,
-      os: this.info?.os ?? '',
-      ip: this.info?.ip ?? '',
-      username: this.nickname
-    })
+    let ack: { ok: boolean; error?: string }
+    try {
+      ack = await window.pantry.devRegister({
+        deviceId: this.deviceId,
+        name,
+        os: this.info?.os ?? '',
+        ip: this.info?.ip ?? '',
+        username: this.nickname
+      })
+    } catch (e) {
+      console.error('[remote] dev:register 调用失败（IPC 异常）', e)
+      this.registered = false
+      return
+    }
     console.log(`[remote] dev:register ${this.deviceId} name=${name} =>`, ack.ok ? 'ok' : (ack as { error?: string }).error)
+    if (!ack.ok) { this.registered = false; return }
     if (!this.hbTimer) {
       this.hbTimer = setInterval(() => { window.pantry.devHeartbeat(this.deviceId) }, 25_000)
     }
