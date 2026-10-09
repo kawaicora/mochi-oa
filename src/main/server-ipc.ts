@@ -17,12 +17,9 @@ import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
-async function logMain(msg: string): Promise<void> {
-  try {
-    const dir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    await appendFile(join(dir, 'renderer-console.log'), `[${new Date().toISOString()}] [main] ${msg}\n`, 'utf8')
-  } catch { /* 忽略 */ }
+// 走主进程 console：被 patchMainConsoleToFile 包装后会自动 ①终端输出 ②落盘 renderer-console.log([main] 格式) ③广播到渲染层控制台
+function logMain(msg: string): void {
+  console.log(msg)
 }
 
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
