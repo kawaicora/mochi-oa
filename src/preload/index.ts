@@ -43,8 +43,6 @@ const api = {
   getAppInfo: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke(IpcChannels.appInfo),
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   getBranding: (): Promise<{ name: string; iconPath: string | null }> => ipcRenderer.invoke(IpcChannels.brandingGet),
-  // 渲染进程错误日志（写 userData/logs/renderer-error.log）
-  logError: (msg: string): void => { ipcRenderer.send(IpcChannels.logError, msg) },
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),
   toggleMaximize: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winToggleMaximize),
   closeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winClose),

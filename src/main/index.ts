@@ -23,10 +23,7 @@ function logMainError(tag: string, err: unknown): void {
 }
 process.on('uncaughtException', (e) => { logMainError('uncaughtException', e) })
 process.on('unhandledRejection', (r) => { logMainError('unhandledRejection', r) })
-// 渲染进程报错：经 IPC 转发写日志（renderer 侧 window.onerror / unhandledrejection 触发）
-ipcMain.on(IpcChannels.logError, (_e, msg: unknown) => {
-  logMainError('renderer', msg)
-})
+// 渲染进程日志统一走 console → 下方 web-contents-created 的 console-message 捕获落盘，无需 logError IPC。
 
 // ---- 渲染层全量 console 落盘：userData/logs/renderer-console.log ----
 // 覆盖所有窗口（主窗口 / meeting / task / 通知等）的 console.log/warn/error。

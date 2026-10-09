@@ -12,18 +12,13 @@ try {
   })
 } catch (e) { console.warn('[main] 品牌初始化异常', e) }
 
-// ---- 渲染进程全局错误日志：window.onerror / unhandledrejection → 主进程写 renderer-error.log（不再闪现丢失） ----
-function safeLog(msg: string): void {
-  try {
-    if (window.pantry?.logError) window.pantry.logError(msg)
-  } catch (e) { console.warn('[main] logError 失败', e) }
-}
+// ---- 渲染进程全局错误：直接用 console（主进程 console-message 捕获落盘 renderer-console.log） ----
 window.addEventListener('error', (e) => {
-  safeLog(`[window.onerror] ${e.message || 'unknown'} @ ${e.filename || ''}:${e.lineno ?? ''}:${e.colno ?? ''}`)
+  console.error(`[window.onerror] ${e.message || 'unknown'} @ ${e.filename || ''}:${e.lineno ?? ''}:${e.colno ?? ''}`)
 })
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason
-  safeLog(`[unhandledrejection] ${r instanceof Error ? (r.stack || r.message) : String(r)}`)
+  console.error(`[unhandledrejection] ${r instanceof Error ? (r.stack || r.message) : String(r)}`)
 })
 
 const app = createApp(App)
@@ -38,5 +33,4 @@ try {
   RemoteControl.init()
 } catch (e) {
   console.error('[remote] RemoteControl 初始化失败（被控端将不会注册）', e)
-  safeLog('[remote] RemoteControl 初始化失败 ' + (e instanceof Error ? (e.stack || e.message) : String(e)))
 }
