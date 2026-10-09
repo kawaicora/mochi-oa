@@ -28,11 +28,14 @@ const pwdTip = ref('')
 
 // 自动下载开关
 const autoDownload = ref(true)
+// 开机自启开关
+const autoLaunch = ref(false)
 
 
 onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
   autoDownload.value = cfg.autoDownload !== false
+  autoLaunch.value = await window.pantry.getAutoLaunch()
   // 回填当前用户头像（登录/重启后从服务端 auth:me 载入，不再回退默认）
   avatar.value = server.state.avatar || ''
   // 回填手机号与紧急联系人（拓展信息 JSON）
@@ -95,6 +98,10 @@ async function onSave(): Promise<void> {
 
 async function onAutoDownloadChange(): Promise<void> {
   await window.pantry.serverSaveSettings({ autoDownload: autoDownload.value })
+}
+
+async function onAutoLaunchChange(): Promise<void> {
+  await window.pantry.setAutoLaunch(autoLaunch.value)
 }
 
 async function onChangePassword(): Promise<void> {
@@ -271,6 +278,17 @@ async function onSaveMainMail(): Promise<void> {
             </span>
           </label>
           <p class="sec-hint">文件夹等不可预览的仍需手动下载</p>
+        </div>
+
+        <div class="sec-group">
+          <div class="sec-title"><i class="fas fa-rocket"></i>&nbsp;启动</div>
+          <label class="switch-row">
+            <span class="switch-label">开机时自动启动并进入后台托盘</span>
+            <span class="switch" :class="{ on: autoLaunch }" @click="onAutoLaunchChange">
+              <i class="switch-knob"></i>
+            </span>
+          </label>
+          <p class="sec-hint">开启后随 Windows 登录自动运行</p>
         </div>
       </div>
 

@@ -179,6 +179,12 @@ app.whenReady().then(() => {
   })
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
+  // 开机自启：查询/设置登录项
+  ipcMain.handle(IpcChannels.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin)
+  ipcMain.handle(IpcChannels.setAutoLaunch, (_e, openAtLogin: unknown) => {
+    app.setLoginItemSettings({ openAtLogin: !!openAtLogin })
+    return { ok: true, openAtLogin: app.getLoginItemSettings().openAtLogin }
+  })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
     return {

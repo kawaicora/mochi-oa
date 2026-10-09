@@ -84,6 +84,9 @@ const api = {
   getWindowState: (): Promise<{ focused: boolean; visible: boolean; minimized: boolean }> =>
     ipcRenderer.invoke(IpcChannels.getWindowState),
   focusWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IpcChannels.focusWindow),
+  getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke(IpcChannels.getAutoLaunch),
+  setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.setAutoLaunch, openAtLogin),
 
   // 连接 / 状态 / 设置
   serverConnect: (serverUrl: string, token?: string): Promise<void> =>

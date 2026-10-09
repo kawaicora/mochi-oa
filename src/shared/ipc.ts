@@ -14,6 +14,9 @@ export const IpcChannels = {
   serverSetActiveCompany: 'server:setActiveCompany',
   // 渲染进程错误日志（写 userData/logs/renderer-error.log）
   logError: 'log:error',
+  // 开机自启
+  setAutoLaunch: 'app:setAutoLaunch',
+  getAutoLaunch: 'app:getAutoLaunch',
 
   // 账号
   serverRegister: 'server:register',
