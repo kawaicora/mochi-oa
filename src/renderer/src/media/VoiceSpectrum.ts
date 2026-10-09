@@ -36,7 +36,7 @@ export class VoiceAvatarSpectrum {
       maxHz: 2000,
       barCount: 180,
       multiplier : 2.0,
-      minDb: -80,
+      minDb: -50,
       maxDb: 0,
 
       innerOffset: 5,
