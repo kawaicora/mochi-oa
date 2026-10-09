@@ -17,11 +17,6 @@ import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
-// 走主进程 console：被 patchMainConsoleToFile 包装后会自动 ①终端输出 ②落盘 renderer-console.log([main] 格式) ③广播到渲染层控制台
-function logMain(msg: string): void {
-  console.log(msg)
-}
-
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
   win.webContents.send(channel, payload)
@@ -37,18 +32,18 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 推送 → renderer
   serverClient.on('state', (s) => {
     sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
-    void logMain(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
+    void console.log(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
     // 登录连接后启动本机系统信息上报（被控端）；断开即停
     // 协议：动态包(dev:sys) → 服务端返回 updated（设备完整）/ lost（缺失或基础信息不全）；
     //       lost → 立即重发全量 dev:register → 服务端返回 added → 之后只发动态。
     if (s.connected) {
-      void logMain('startSysReport 启动（被控端系统上报）')
+      void console.log('startSysReport 启动（被控端系统上报）')
       startSysReport(async (p, onAck) => {
         try {
           const ack = await serverClient.devSys(p)
           const status = ack?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
-          void logMain(`dev:sys deviceId=${p.deviceId} ack=${status}`)
+          void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
             const info = (p.info ?? {}) as Record<string, unknown>
             const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
@@ -61,14 +56,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
               ip: pub,
               username: st.nick || st.username || ''
             })
-            void logMain(`服务端返回 ${status}，已重发全量注册 regAck=${regAck?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
+            void console.log(`服务端返回 ${status}，已重发全量注册 regAck=${regAck?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
           }
         } catch (e) {
-          void logMain(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
+          void console.log(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
         }
       })
     } else {
-      void logMain('stopSysReport（未连接）')
+      void console.log('stopSysReport（未连接）')
       stopSysReport()
     }
   })

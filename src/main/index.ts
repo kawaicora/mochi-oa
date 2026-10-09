@@ -44,13 +44,14 @@ function patchMainConsoleToFile(): void {
 }
 patchMainConsoleToFile()
 
-// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
+// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log 且同时 console.error（统一到渲染层控制台），避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {
+  const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}`
+  console.error(line) // 走 patchMainConsoleToFile：终端 + renderer-console.log + 渲染层控制台
   try {
     const dir = join(app.getPath('userData'), 'logs')
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}\n`
-    appendFileSync(join(dir, 'main-error.log'), line, 'utf8')
+    appendFileSync(join(dir, 'main-error.log'), line + '\n', 'utf8')
   } catch {
     /* 日志写入失败静默，避免二次抛错 */
   }
@@ -286,11 +287,7 @@ app.whenReady().then(() => {
   // 启动即连接已保存的服务器地址（带 token 则自动恢复会话）
   const cfg = loadServerConfig()
   if (cfg.serverUrl) {
-    try {
-      const logDir = join(app.getPath('userData'), 'logs')
-      if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
-      appendFileSync(join(logDir, 'main.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
-    } catch { /* 忽略 */ }
+    console.log(`serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}`)
     serverClient.connect({ serverUrl: cfg.serverUrl, token: cfg.token })
   }
 
