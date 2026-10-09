@@ -213,7 +213,7 @@ app.whenReady().then(() => {
           sources.find((s) => s.display_id === primaryId && s.name.toLowerCase().includes('screen')) ||
           sources.find((s) => s.display_id === primaryId) ||
           sources[0]
-        if (match) callback({ video: match })
+        if (match) callback({ video: match, audio: 'loopback' })
         else callback({})
       } catch {
         callback({})

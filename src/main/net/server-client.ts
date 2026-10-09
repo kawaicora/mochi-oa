@@ -405,7 +405,9 @@ export class ServerClient extends EventEmitter {
     // 控制端请求在被控端执行命令 → 主进程执行后经 devExecResult 回传
     socket.on('dev:exec', (d: { deviceId?: string; shell?: string; cmd?: string }) => this.emit('devExec', d))
     // 交互终端：控制端输入 → 主进程写入常驻 shell stdin；输出经 devTermOut 回传
+    socket.on('dev:termOpen', (d: { deviceId?: string; shell?: string }) => this.emit('devTermOpen', d))
     socket.on('dev:termIn', (d: { deviceId?: string; data?: string }) => this.emit('devTermIn', d))
+    socket.on('dev:termClose', (d: { deviceId?: string }) => this.emit('devTermClose', d))
   }
 
   disconnect(): void {
