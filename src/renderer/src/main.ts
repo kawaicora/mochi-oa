@@ -12,6 +12,9 @@ try {
   })
 } catch (e) { console.warn('[main] 品牌初始化异常', e) }
 
+// ---- 主进程日志转发到本窗口控制台：主进程 console 广播 '__main_console'，这里原样输出 ----
+window.pantry?.onMainConsole?.((line) => console.log(line))
+
 // ---- 渲染进程全局错误：直接用 console（主进程 console-message 捕获落盘 renderer-console.log） ----
 window.addEventListener('error', (e) => {
   console.error(`[window.onerror] ${e.message || 'unknown'} @ ${e.filename || ''}:${e.lineno ?? ''}:${e.colno ?? ''}`)

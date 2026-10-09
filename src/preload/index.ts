@@ -41,6 +41,8 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api = {
   // 应用 / 窗口
   getAppInfo: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke(IpcChannels.appInfo),
+  // 主进程日志转发到渲染层控制台：主进程 console 广播 '__main_console'，渲染层 console.log 显示
+  onMainConsole: (cb: (line: string) => void): (() => void) => subscribe('__main_console', cb),
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   getBranding: (): Promise<{ name: string; iconPath: string | null }> => ipcRenderer.invoke(IpcChannels.brandingGet),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),

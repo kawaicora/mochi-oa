@@ -8,6 +8,9 @@ try {
   window.pantry?.getBranding?.().then((b) => { document.title = b.name }).catch(() => {})
 } catch { /* 忽略 */ }
 
+// 主进程日志转发到本窗口控制台
+window.pantry?.onMainConsole?.((line) => console.log(line))
+
 const app = createApp(TaskDetailWindow)
 app.use(createPinia())
 app.mount('#app')

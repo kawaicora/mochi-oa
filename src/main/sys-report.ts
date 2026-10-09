@@ -46,7 +46,7 @@ function deviceId(): string {
 }
 
 function networkIps(): Array<{ name: string; address: string; internal: boolean }> {
-  const nets = os.networkInterfaces()
+  const nets = os.networkInterfaces() || {}
   const out: Array<{ name: string; address: string; internal: boolean }> = []
   for (const name of Object.keys(nets)) {
     for (const n of nets[name] || []) {
@@ -130,7 +130,9 @@ async function refreshStatic(): Promise<void> {
         cpu: (p as { cpu?: number }).cpu != null ? Math.round((p as { cpu: number }).cpu) : 0
       }))
     }
-  } catch { /* 保留旧值 */ }
+  } catch { 
+    console.error('[sys-report] refreshStatic 异常，静态硬件信息采集失败')
+  }
 }
 
 let lastCpu = os.cpus()
@@ -165,41 +167,45 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
 
   const tick = async (): Promise<void> => {
     if (stopped) return
-    const now = Date.now()
-    if (now - lastStatic > 30_000) {
-      lastStatic = now
-      void refreshStatic() // 静态采集异步后台刷新，绝不阻塞上报（此前 await 卡住导致 dev:sys 从不发出）
+    try {
+      const now = Date.now()
+      if (now - lastStatic > 30_000) {
+        lastStatic = now
+        void refreshStatic() // 静态采集异步后台刷新，绝不阻塞上报（此前 await 卡住导致 dev:sys 从不发出）
+      }
+      const totalMem = os.totalmem()
+      const free = os.freemem()
+      const cpus = os.cpus()
+      const info: Record<string, unknown> = {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        type: os.type(),
+        release: os.release(),
+        arch: os.arch(),
+        uptime: Math.round(os.uptime()),
+        cpuModel: (cpus[0]?.model ?? '').trim(),
+        cpuCores: cpus.length,
+        totalMem,
+        freeMem: free,
+        ips: networkIps(),
+        board: staticInfo.board,
+        memDetail: staticInfo.memDetail,
+        gpuInfo: staticInfo.gpuInfo,
+        devices: staticInfo.devices,
+        disk: staticInfo.disk,
+        processes: staticInfo.processes
+      }
+      const perf: Record<string, unknown> = {
+        cpu: cpuUsage(),
+        memPercent: totalMem > 0 ? Math.max(0, Math.round(100 * (totalMem - free) / totalMem)) : 0,
+        memUsed: totalMem - free,
+        memTotal: totalMem,
+        gpus: staticInfo.gpus
+      }
+      try { emit({ deviceId: did, info, perf }, onAck) } catch (e) { console.error(`[sys-report] emit 失败: ${e instanceof Error ? e.message : String(e)}`) }
+    } catch (e) {
+      console.error(`[sys-report] tick 异常: ${e instanceof Error ? e.message + '\n' + (e.stack ?? '') : String(e)}`)
     }
-    const totalMem = os.totalmem()
-    const free = os.freemem()
-    const cpus = os.cpus()
-    const info: Record<string, unknown> = {
-      hostname: os.hostname(),
-      platform: os.platform(),
-      type: os.type(),
-      release: os.release(),
-      arch: os.arch(),
-      uptime: Math.round(os.uptime()),
-      cpuModel: (cpus[0]?.model ?? '').trim(),
-      cpuCores: cpus.length,
-      totalMem,
-      freeMem: free,
-      ips: networkIps(),
-      board: staticInfo.board,
-      memDetail: staticInfo.memDetail,
-      gpuInfo: staticInfo.gpuInfo,
-      devices: staticInfo.devices,
-      disk: staticInfo.disk,
-      processes: staticInfo.processes
-    }
-    const perf: Record<string, unknown> = {
-      cpu: cpuUsage(),
-      memPercent: totalMem > 0 ? Math.max(0, Math.round(100 * (totalMem - free) / totalMem)) : 0,
-      memUsed: totalMem - free,
-      memTotal: totalMem,
-      gpus: staticInfo.gpus
-    }
-    try { emit({ deviceId: did, info, perf }, onAck) } catch { /* 忽略单次失败 */ }
   }
 
   void tick()

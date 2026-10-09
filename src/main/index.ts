@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell, webContents } from 'electron'
 import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,7 +26,14 @@ function patchMainConsoleToFile(): void {
     const orig = fn.bind(console)
     return (...args: unknown[]): void => {
       orig(...args)
-      try { appendFileSync(file(), `[${new Date().toISOString()}] [${tag}] ${args.map(safeStr).join(' ')}\n`, 'utf8') } catch { /* 忽略 */ }
+      const line = `[${new Date().toISOString()}] [${tag}] ${args.map(safeStr).join(' ')}`
+      try { appendFileSync(file(), line + '\n', 'utf8') } catch { /* 忽略 */ }
+      // 转发到所有窗口渲染层控制台（Ctrl+Shift+I 可见），保证主进程日志也输出到控制台
+      try {
+        for (const wc of webContents.getAllWebContents()) {
+          if (!wc.isDestroyed()) wc.send('__main_console', line)
+        }
+      } catch { /* 忽略 */ }
     }
   }
   console.log = wrap(console.log, 'main')
@@ -282,7 +289,7 @@ app.whenReady().then(() => {
     try {
       const logDir = join(app.getPath('userData'), 'logs')
       if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
-      appendFileSync(join(logDir, 'renderer-console.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
+      appendFileSync(join(logDir, 'main.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
     } catch { /* 忽略 */ }
     serverClient.connect({ serverUrl: cfg.serverUrl, token: cfg.token })
   }
