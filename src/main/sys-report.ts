@@ -87,51 +87,52 @@ async function refreshStatic(): Promise<void> {
       withTimeout(si.processes(), 6000)
     ])
     staticInfo.board = mb ? ([mb.manufacturer, mb.model].filter(Boolean).join(' ').trim() || '未知') : staticInfo.board
-    if (memLayout) staticInfo.memDetail = (memLayout as Array<Record<string, unknown>>).map((m) => ({
-      capacity: (m as { size?: number }).size ? Math.round((m as { size: number }).size / 1e9) + 'GB' : '',
-      speed: (m as { clockSpeed?: number }).clockSpeed ? String((m as { clockSpeed: number }).clockSpeed) + 'MHz' : '',
-      manufacturer: (m as { manufacturer?: string }).manufacturer || '',
-      type: (m as { type?: string }).type || ''
-    }))
-    if (graphics) {
-      const controllers = (graphics as { controllers?: Array<Record<string, unknown>> }).controllers || []
-      staticInfo.gpuInfo = controllers.map((c) => ({
-        name: gpuName(c),
-        vram: (c as { vram?: number }).vram ? (c as { vram: number }).vram + 'GB' : '',
-        driver: (c as { driverVersion?: string }).driverVersion || ''
+    if (memLayout) {
+      staticInfo.memDetail = memLayout.map((m) => ({
+        capacity: m.size ? Math.round(m.size / 1e9) + 'GB' : '',
+        speed: m.clockSpeed ? String(m.clockSpeed) + 'MHz' : '',
+        manufacturer: m.manufacturer || '',
+        type: m.type || ''
       }))
-      staticInfo.gpus = controllers.map((c) => ({
+    }
+    if (graphics && graphics.controllers) {
+      staticInfo.gpuInfo = graphics.controllers.map((c) => ({
         name: gpuName(c),
-        load: (c as { utilizationGpu?: number }).utilizationGpu != null ? Math.min(100, Math.max(0, Math.round((c as { utilizationGpu: number }).utilizationGpu))) : 0
+        vram: c.vram ? c.vram + 'GB' : '',
+        driver: c.driverVersion || ''
+      }))
+      staticInfo.gpus = graphics.controllers.map((c) => ({
+        name: gpuName(c),
+        load: c.utilizationGpu != null ? Math.min(100, Math.max(0, Math.round(c.utilizationGpu))) : 0
       }))
     }
     const devices: Array<Record<string, unknown>> = []
     if (nets) {
-      for (const name of Object.keys(nets as Record<string, unknown>)) {
-        const n = (nets as Record<string, { mac?: string; operstate?: string; ip4?: string }>)[name]
+      for (const n of nets) {
         if (n && n.mac && n.mac !== '00:00:00:00:00:00' && n.operstate !== 'down') {
-          devices.push({ type: '网卡', name, mac: n.mac, ip: n.ip4 || '' })
+          devices.push({ type: '网卡', name: n.iface || '', mac: n.mac, ip: n.ip4 || '' })
         }
       }
     }
     if (disks) {
-      for (const d of disks as Array<{ name?: string; device?: string; size?: number }>) {
+      for (const d of disks) {
         devices.push({ type: '磁盘', name: d.name || d.device || '', size: d.size ? Math.round(d.size / 1e9) + 'GB' : '' })
       }
     }
     staticInfo.devices = devices
-    if (fsSizes) staticInfo.disk = (fsSizes as Array<{ mount?: string; used?: number; size?: number; use?: number }>).map((f) => `${f.mount}: ${Math.round((f.used ?? 0) / 1e9)}GB/${Math.round((f.size ?? 0) / 1e9)}GB(${f.use || 0}%)`).join('\n')
-    if (procs && (procs as { all?: Array<Record<string, unknown>> }).all) {
-      const all = (procs as { all: Array<Record<string, unknown>> }).all.slice().sort((a, b) => ((b as { mem_rss?: number }).mem_rss || 0) - ((a as { mem_rss?: number }).mem_rss || 0)).slice(0, 40)
-      staticInfo.processes = all.map((p) => ({
-        pid: (p as { pid?: number }).pid,
-        name: (p as { name?: string }).name || '',
-        mem: (p as { mem_rss?: number }).mem_rss ? Math.round((p as { mem_rss: number }).mem_rss / 1e6) : 0,
-        cpu: (p as { cpu?: number }).cpu != null ? Math.round((p as { cpu: number }).cpu) : 0
+    if (fsSizes) {
+      staticInfo.disk = fsSizes.map((f) => `${f.mount}: ${Math.round((f.used ?? 0) / 1e9)}GB/${Math.round((f.size ?? 0) / 1e9)}GB(${f.use || 0}%)`).join('\n')
+    }
+    if (procs && procs.all) {
+      staticInfo.processes = procs.all.slice().sort((a, b) => (b.mem_rss || 0) - (a.mem_rss || 0)).slice(0, 40).map((p) => ({
+        pid: p.pid,
+        name: p.name || '',
+        mem: p.mem_rss ? Math.round(p.mem_rss / 1e6) : 0,
+        cpu: p.cpu != null ? Math.round(p.cpu) : 0
       }))
     }
-  } catch { 
-    console.error('[sys-report] refreshStatic 异常，静态硬件信息采集失败')
+  } catch (e) {
+    console.error(`[sys-report] refreshStatic 异常: ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
