@@ -31,8 +31,32 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('state', (s) => {
     sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
     // 登录连接后启动本机系统信息上报（被控端）；断开即停
+    // 协议：动态包(dev:sys) → 服务端返回 updated（设备完整）/ lost（缺失或基础信息不全）；
+    //       lost → 立即重发全量 dev:register → 服务端返回 added → 之后只发动态。
     if (s.connected) {
-      startSysReport((p) => serverClient.devSys(p))
+      startSysReport(async (p, onAck) => {
+        try {
+          const ack = await serverClient.devSys(p)
+          const status = ack?.status ?? (ack?.ok ? 'updated' : 'lost')
+          onAck?.(status)
+          if (!ack?.ok || status === 'lost') {
+            const info = (p.info ?? {}) as Record<string, unknown>
+            const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
+            const pub = ips.find((x) => !x.internal)?.address ?? ips[0]?.address ?? ''
+            const st = serverClient.state
+            await serverClient.devRegister({
+              deviceId: p.deviceId,
+              name: String(info.hostname ?? '电脑').slice(0, 64),
+              os: `${info.type ?? ''} ${info.release ?? ''}`.trim().slice(0, 128),
+              ip: pub,
+              username: st.nick || st.username || ''
+            })
+            console.log(`[remote] 服务端返回 ${status}，已重发全量注册`)
+          }
+        } catch (e) {
+          console.warn('[remote] dev:sys 上报失败', e)
+        }
+      })
     } else {
       stopSysReport()
     }

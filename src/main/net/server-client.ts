@@ -1103,9 +1103,9 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:signal', { deviceId, signal })
   }
-  async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<void> {
-    if (!this.socket) return
-    this.socket.emit('dev:sys', payload)
+  async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:sys', payload)
   }
 
   // ─── 个人信息 ───────────────────────────────────────────

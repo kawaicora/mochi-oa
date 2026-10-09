@@ -149,7 +149,7 @@ function cpuUsage(): number {
   return total > 0 ? Math.max(0, Math.round(100 * (1 - idle / total))) : 0
 }
 
-export function startSysReport(emit: (payload: SysReportPayload) => void): void {
+export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status: string) => void) => void): void {
   if (timer) return
   const did = deviceId()
   stopped = false
@@ -194,7 +194,7 @@ export function startSysReport(emit: (payload: SysReportPayload) => void): void 
       memTotal: totalMem,
       gpus: staticInfo.gpus
     }
-    try { emit({ deviceId: did, info, perf }) } catch { /* 忽略单次失败 */ }
+    try { emit({ deviceId: did, info, perf }, onAck) } catch { /* 忽略单次失败 */ }
   }
 
   void tick()

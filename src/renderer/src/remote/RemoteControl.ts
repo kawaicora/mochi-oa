@@ -33,88 +33,31 @@ interface DevState {
 class RemoteControl {
   private deviceId = ''
   private info: { deviceId: string; hostname: string; os: string; ip: string } | null = null
-  private registered = false
-  private hbTimer: ReturnType<typeof setInterval> | null = null
   private pc: RTCPeerConnection | null = null
   private stream: MediaStream | null = null
   private activeDeviceId = ''
   private unsubs: Array<() => void> = []
-  private nickname = ''
 
-  /** 渲染进程启动时调用一次：订阅服务端状态 + dev 事件，登录后自动注册被控 */
+  /** 渲染进程启动时调用一次：订阅 dev 事件（注册/心跳/系统上报已收敛到主进程 sys-report，此处只做被控采集） */
   init(): void {
     if (this.unsubs.length > 0) return
     window.pantry.devGetInfo().then((info) => {
       this.info = info
       this.deviceId = info.deviceId
       console.log(`[remote] 本机信息 deviceId=${info.deviceId} hostname=${info.hostname} ip=${info.ip} os=${info.os}`)
-    }).catch((e) => console.warn('[remote] devGetInfo 失败（被控端将无法注册）', e))
+    }).catch((e) => console.warn('[remote] devGetInfo 失败（被控端将无法被查看）', e))
 
     this.unsubs.push(window.pantry.onDevView((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevEnumerate((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevStart((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.startCapture(d as DevStartPayload) }))
     this.unsubs.push(window.pantry.onDevStop((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.stopCapture() }))
     this.unsubs.push(window.pantry.onDevSignal((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.handleSignal(d.signal as DevSignalPayload) }))
-
-    // 登录后直接周期发，不依赖 serverState 推送时序（主进程只在状态变化时推送，订阅晚会永远错过注册）。
-    // 每 5s 拉一次当前状态：已连接则注册/保活，断开则重置。最小化/托盘下渲染进程定时器照常运行。
-    this.registerTimer = setInterval(() => void this.checkAndRegister(), 5000)
-  }
-
-  /** 周期检查登录态：已连接+已登录 → 注册/保活；断开 → 重置 */
-  private checkAndRegister(): void {
-    if (!this.deviceId) return
-    window.pantry.serverGetState().then((s) => {
-      if (s.connected && s.token) {
-        if (!this.registered) void this.tryRegister(s.username ?? '', s.nick ?? '')
-        else window.pantry.devHeartbeat(this.deviceId) // 注册成功后只保活；动态(cpu/mem/gpu)由 sys-report dev:sys 持续发
-      } else {
-        this.registered = false
-      }
-    }).catch(() => {})
   }
 
   destroy(): void {
     this.stopCapture()
-    if (this.hbTimer) clearInterval(this.hbTimer)
-    this.hbTimer = null
-    if (this.registerTimer) clearInterval(this.registerTimer)
-    this.registerTimer = null
     this.unsubs.forEach((u) => u())
     this.unsubs = []
-  }
-
-  // ── 注册 / 心跳 ────────────────────────────────────────
-  // 服务端 dev:register 幂等（按 deviceId 覆盖信息 + 更新 socket），
-  // 因此每次连接恢复（onServerState connected）都重复注册，保证容器/服务端重启后被控端自动重新上线，
-  // 不再依赖 registered 标志（重连后该标志残留 true 会导致"列表有设备但点开失败/dev:sys 被丢弃"）。
-  private async tryRegister(username: string, nick: string): Promise<void> {
-    if (!this.info) {
-      try { this.info = await window.pantry.devGetInfo() } catch (e) { console.warn('[remote] tryRegister 获取本机信息失败', e) }
-      if (this.info) this.deviceId = this.info.deviceId
-    }
-    if (!this.deviceId) { console.warn('[remote] tryRegister 无 deviceId，跳过注册'); return }
-    const name = this.info?.hostname || '电脑'
-    // 用户名：优先 nick，为空显示 username（不兜底主机名，主机名用 name 单独显示）
-    this.nickname = nick || username || ''
-    let ack: { ok: boolean; error?: string }
-    try {
-      ack = await window.pantry.devRegister({
-        deviceId: this.deviceId,
-        name,
-        os: this.info?.os ?? '',
-        ip: this.info?.ip ?? '',
-        username: this.nickname
-      })
-    } catch (e) {
-      console.error('[remote] dev:register 调用失败（IPC 异常）', e)
-      return
-    }
-    console.log(`[remote] dev:register ${this.deviceId} name=${name} =>`, ack.ok ? 'ok' : (ack as { error?: string }).error)
-    if (!ack.ok) return
-    this.registered = true
-    // 注册成功（服务端 added）后：全量信息不再重复发，保活由 checkAndRegister 每 5s devHeartbeat(deviceId) 完成；
-    // 动态部分（cpu/mem/gpu）由 sys-report dev:sys 持续上报。
   }
 
   // ── 设备枚举上报 ───────────────────────────────────────
