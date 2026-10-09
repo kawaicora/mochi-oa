@@ -34,7 +34,7 @@ function logRendererConsole(contents: Electron.WebContents): void {
   try {
     const dir = join(app.getPath('userData'), 'logs')
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  } catch { return }
+  } catch { console.warn('[logRendererConsole] create log directory failed'); return }
   // Electron 版本差异：新版事件为 (event: Event<{...params}>)；旧版为 (event, level, message, line, sourceId)。两者兼容。
   contents.on('console-message', (event: unknown, ...rest: unknown[]) => {
     try {
@@ -54,7 +54,7 @@ function logRendererConsole(contents: Electron.WebContents): void {
         source = String(ev.sourceId ?? rest[4] ?? '')
       }
       appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${message} (${source}:${line})\n`, 'utf8')
-    } catch { /* 日志写入失败静默 */ }
+    } catch { console.warn('[logRendererConsole] write log failed') }
   })
 }
 app.on('web-contents-created', (_e, contents) => {
