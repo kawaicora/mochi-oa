@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "2.9.89",
+  "version": "2.9.90",
   "description": "麻薯-办公协同客户端",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -63,6 +63,7 @@
     "bytenode": "^1.7.0",
     "flatpickr": "^4.6.13",
     "flv.js": "^1.6.2",
+    "iconv-lite": "^0.7.3",
     "lunar-javascript": "^1.7.7",
     "pinia": "^2.1.7",
     "socket.io-client": "^4.7.5",

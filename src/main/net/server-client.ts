@@ -404,6 +404,8 @@ export class ServerClient extends EventEmitter {
     socket.on('dev:signal', (d: { deviceId?: string; signal?: unknown }) => this.emit('devSignal', d))
     // 控制端请求在被控端执行命令 → 主进程执行后经 devExecResult 回传
     socket.on('dev:exec', (d: { deviceId?: string; shell?: string; cmd?: string }) => this.emit('devExec', d))
+    // 交互终端：控制端输入 → 主进程写入常驻 shell stdin；输出经 devTermOut 回传
+    socket.on('dev:termIn', (d: { deviceId?: string; data?: string }) => this.emit('devTermIn', d))
   }
 
   disconnect(): void {
@@ -1113,6 +1115,16 @@ export class ServerClient extends EventEmitter {
   async devExecResult(deviceId: string, result: { ok: boolean; exitCode: number; stdout: string; stderr: string }): Promise<void> {
     if (!this.socket) return
     this.socket.emit('dev:execResult', { deviceId, ...result })
+  }
+  /** 被控端实时回传终端输出（stdout/stderr 分路） */
+  async devTermOut(deviceId: string, data: string, isErr: boolean): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:termOut', { deviceId, data, isErr })
+  }
+  /** 被控端终端会话结束通知 */
+  async devTermClose(deviceId: string, code: number): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:termClose', { deviceId, code })
   }
 
   // ─── 个人信息 ───────────────────────────────────────────

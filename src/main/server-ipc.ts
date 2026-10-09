@@ -10,6 +10,7 @@ import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/p
 import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
+import * as iconv from 'iconv-lite'
 import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
@@ -35,11 +36,12 @@ function execRemote(deviceId: string, shell: string, cmd: string, timeout = 1500
     : ['-c', cmd]
   console.log(`[dev-exec] deviceId=${deviceId} shell=${shell} cmd=${cmd}（平台=${process.platform} exe=${exe}）`)
   const child = spawn(exe, args, { windowsHide: true })
+  const dec = win ? (b: Buffer) => iconv.decode(b, 'gbk') : (b: Buffer) => b.toString('utf8')
   let stdout = ''
   let stderr = ''
   const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 超时终止 */ } }, timeout)
-  child.stdout?.on('data', (b: Buffer) => { stdout += String(b) })
-  child.stderr?.on('data', (b: Buffer) => { stderr += String(b) })
+  child.stdout?.on('data', (b: Buffer) => { stdout += dec(b) })
+  child.stderr?.on('data', (b: Buffer) => { stderr += dec(b) })
   child.on('error', (e) => {
     clearTimeout(timer)
     void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout, stderr: (stderr || '') + (e.message || '') })
@@ -49,6 +51,45 @@ function execRemote(deviceId: string, shell: string, cmd: string, timeout = 1500
     console.log(`[dev-exec] deviceId=${deviceId} exit=${code ?? 0} stdout=${stdout.length}B stderr=${stderr.length}B`)
     void serverClient.devExecResult(deviceId, { ok: true, exitCode: code ?? 0, stdout, stderr })
   })
+}
+
+/** 持久交互终端会话：deviceId → 常驻 shell 子进程（保持 cwd/环境/变量，stdin 写入 / stdout,stderr 实时回传） */
+const termSessions = new Map<string, ReturnType<typeof spawn>>()
+function termDecode(win: boolean): (b: Buffer) => string {
+  return win ? (b) => iconv.decode(b, 'gbk') : (b) => b.toString('utf8')
+}
+function termOpen(deviceId: string, shell: string): void {
+  if (termSessions.has(deviceId)) return
+  const win = process.platform === 'win32'
+  const isCmd = win && shell === 'cmd'
+  const exe = win ? (isCmd ? 'cmd.exe' : 'powershell.exe') : '/bin/sh'
+  const args = win ? (isCmd ? ['/Q'] : ['-NoLogo', '-NoProfile', '-NonInteractive']) : ['-i']
+  const dec = termDecode(win)
+  console.log(`[dev-term] 打开会话 deviceId=${deviceId} shell=${shell} exe=${exe}`)
+  const child = spawn(exe, args, { windowsHide: true })
+  termSessions.set(deviceId, child)
+  const push = (stream: NodeJS.ReadableStream | null, isErr: boolean): void => {
+    stream?.on('data', (b: Buffer) => {
+      try { void serverClient.devTermOut(deviceId, dec(b), isErr) } catch { /* 忽略 */ }
+    })
+  }
+  push(child.stdout, false)
+  push(child.stderr, true)
+  child.on('close', (code) => {
+    termSessions.delete(deviceId)
+    void serverClient.devTermClose(deviceId, code ?? 0)
+  })
+  child.on('error', (e) => { void serverClient.devTermOut(deviceId, '\r\n[终端错误] ' + (e.message || ''), true) })
+}
+function termIn(deviceId: string, data: string): void {
+  const child = termSessions.get(deviceId)
+  if (!child) { void serverClient.devTermOut(deviceId, '\r\n[会话未建立] 请重新打开终端\r\n', true); return }
+  try { child.stdin?.write(data) } catch { /* 忽略 */ }
+}
+function termClose(deviceId: string): void {
+  const child = termSessions.get(deviceId)
+  termSessions.delete(deviceId)
+  if (child) { try { child.kill('SIGKILL') } catch { /* 忽略 */ } }
 }
 
 function broadcastToAllWindows(channel: string, payload: unknown): void {
@@ -165,6 +206,10 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     if (!deviceId || !cmd) { void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout: '', stderr: '空命令' }); return }
     execRemote(deviceId, String(p.shell ?? 'auto'), cmd)
   })
+  // 交互终端：控制端请求在被控端开/读写常驻 shell 会话
+  serverClient.on('devTermOpen', (d) => { const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown }; termOpen(String(p.deviceId ?? ''), String(p.shell ?? 'auto')) })
+  serverClient.on('devTermIn', (d) => { const p = (d ?? {}) as { deviceId?: unknown; data?: unknown }; termIn(String(p.deviceId ?? ''), String(p.data ?? '')) })
+  serverClient.on('devTermClose', (d) => { const p = (d ?? {}) as { deviceId?: unknown }; termClose(String(p.deviceId ?? '')) })
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {
