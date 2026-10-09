@@ -185,9 +185,9 @@ class VideoStream {
 
 
   /** 无可用摄像头时的统一回退视频轨：优先频谱头像流，空视频流兜底 */
-  GetAvatarVideoTrack(): MediaStreamTrack | null {
+  GetAvatarVideoTrack(avatar?: string): MediaStreamTrack | null {
 
-    return this.spectrum.GetVoiceAvatarStream(this.stream)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
+    return this.spectrum.GetVoiceAvatarStream(this.stream, avatar ? { avatar } : undefined)?.getVideoTracks()[0] ?? this.GetEmptyVideoStream().getVideoTracks()[0] ?? null
   }
 
   // ─── 滚动频谱 ─────────────────────────────────────────

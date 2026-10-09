@@ -13,6 +13,7 @@ import type { NotifTarget } from '@shared/ipc'
 import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
+import { useServerStore } from '@renderer/stores/server'
 
 // ─── RTC preload API 类型（主进程层同时实现，此处做类型断言） ───
 
@@ -72,6 +73,9 @@ interface ActiveCall {
 }
 
 export const useRtcStore = defineStore('rtc', () => {
+  // 当前用户头像（频谱画布用，绝对 URL 供 canvas 加载）
+  const server = useServerStore()
+  const myAvatarAbs = () => server.absFileUrl(server.state.avatar ?? '')
   // ─── 响应式 state ───
   const activeCall = ref<ActiveCall | null>(null)
   const incomingDm = ref<RtcDmIncomingEvent | null>(null)
@@ -360,7 +364,7 @@ export const useRtcStore = defineStore('rtc', () => {
     } catch (e) {
       if (e instanceof CameraUnavailableError) {
         // 无可用摄像头 → 回退频谱头像，不弹错误窗
-        const t = VideoStream.GetAvatarVideoTrack()
+        const t = VideoStream.GetAvatarVideoTrack(myAvatarAbs())
         await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
         engine?.replaceTrack(t, 'video')
         activeCall.value.isCameraOff = true
@@ -421,7 +425,7 @@ export const useRtcStore = defineStore('rtc', () => {
         } catch (err) {
           if (err instanceof CameraUnavailableError) {
             // 无可用摄像头 → 回退频谱头像，不弹错误窗
-            const t = VideoStream.GetAvatarVideoTrack()
+            const t = VideoStream.GetAvatarVideoTrack(myAvatarAbs())
             await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
             engine?.replaceTrack(t, 'video')
             activeCall.value.isCameraOff = true

@@ -556,6 +556,14 @@ onMounted(async () => {
       myNick.value = s.username ?? '我'
     }
     myAvatar.value = s.avatar ?? ''
+    // 服务端头像多为相对路径（/files/...），频谱 canvas 无法加载相对路径 → 拼成绝对 URL（与 UserAvatar 一致）
+    if (myAvatar.value && !/^https?:\/\//i.test(myAvatar.value)) {
+      try {
+        const st = await window.pantry.serverGetSettings()
+        const base = (st.serverUrl || '').replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '')
+        if (base) myAvatar.value = base + (myAvatar.value.startsWith('/') ? myAvatar.value : '/' + myAvatar.value)
+      } catch { /* 保持原值 */ }
+    }
   } catch {
     myNick.value = '我'
   }
