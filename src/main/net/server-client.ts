@@ -1090,9 +1090,10 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:register', payload)
   }
-  async devHeartbeat(deviceId: string): Promise<void> {
+  async devHeartbeat(deviceId: string | { deviceId?: unknown; name?: unknown; os?: unknown; ip?: unknown; username?: unknown }): Promise<void> {
     if (!this.socket) return
-    this.socket.emit('dev:heartbeat', { deviceId })
+    if (typeof deviceId === 'string') this.socket.emit('dev:heartbeat', { deviceId })
+    else this.socket.emit('dev:heartbeat', deviceId) // 携带完整设备信息，服务端按 deviceId upsert
   }
   async devDevices(deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }

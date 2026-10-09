@@ -306,7 +306,7 @@ const api = {
     ipcRenderer.invoke(IpcChannels.devGetInfo),
   devRegister: (p: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.devRegister, p),
-  devHeartbeat: (deviceId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.devHeartbeat, deviceId),
+  devHeartbeat: (info: { deviceId: string; name?: string; os?: string; ip?: string; username?: string }): Promise<void> => ipcRenderer.invoke(IpcChannels.devHeartbeat, info),
   devDevices: (deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.devDevices, deviceId, cams, mics),
   devSignal: (deviceId: string, signal: unknown): Promise<Ack> =>

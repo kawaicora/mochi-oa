@@ -376,7 +376,18 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
 
   // 远程设备控制（被控端）：渲染 → main → serverClient socket
   ipcMain.handle(IpcChannels.devRegister, (_e, payload) => serverClient.devRegister(payload as { deviceId: string; name: string; os: string; ip: string; username: string }))
-  ipcMain.handle(IpcChannels.devHeartbeat, (_e, deviceId) => { serverClient.devHeartbeat(String(deviceId ?? '')); return Promise.resolve() })
+  ipcMain.handle(IpcChannels.devHeartbeat, (_e, info) => {
+    // 心跳携带完整设备信息，服务端按 deviceId upsert（没有就添加，有就更新）
+    const p = (info ?? {}) as { deviceId?: unknown; name?: unknown; os?: unknown; ip?: unknown; username?: unknown }
+    serverClient.devHeartbeat({
+      deviceId: String(p.deviceId ?? ''),
+      name: String(p.name ?? ''),
+      os: String(p.os ?? ''),
+      ip: String(p.ip ?? ''),
+      username: String(p.username ?? '')
+    })
+    return Promise.resolve()
+  })
   ipcMain.handle(IpcChannels.devDevices, (_e, deviceId, cams, mics) => serverClient.devDevices(String(deviceId ?? ''), cams as Array<{ id: string; label: string }>, mics as Array<{ id: string; label: string }>))
   ipcMain.handle(IpcChannels.devSignal, (_e, deviceId, signal) => serverClient.devSignal(String(deviceId ?? ''), signal))
   // 本机信息（deviceId/hostname/os/ip），供被控端注册用

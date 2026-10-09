@@ -72,16 +72,18 @@ class RemoteControl {
   }
 
   // ── 注册 / 心跳 ────────────────────────────────────────
+  // 服务端 dev:register 幂等（按 deviceId 覆盖信息 + 更新 socket），
+  // 因此每次连接恢复（onServerState connected）都重复注册，保证容器/服务端重启后被控端自动重新上线，
+  // 不再依赖 registered 标志（重连后该标志残留 true 会导致"列表有设备但点开失败/dev:sys 被丢弃"）。
   private async tryRegister(username: string, nick: string): Promise<void> {
-    if (this.registered) return
     if (!this.info) {
       try { this.info = await window.pantry.devGetInfo() } catch (e) { console.warn('[remote] tryRegister 获取本机信息失败', e) }
       if (this.info) this.deviceId = this.info.deviceId
     }
     if (!this.deviceId) { console.warn('[remote] tryRegister 无 deviceId，跳过注册'); return }
-    this.registered = true
-    this.nickname = nick || username || this.info?.hostname || '电脑'
     const name = this.info?.hostname || '电脑'
+    // 用户名：优先 nick，为空显示 username（不兜底主机名，主机名用 name 单独显示）
+    this.nickname = nick || username || ''
     let ack: { ok: boolean; error?: string }
     try {
       ack = await window.pantry.devRegister({
@@ -93,13 +95,22 @@ class RemoteControl {
       })
     } catch (e) {
       console.error('[remote] dev:register 调用失败（IPC 异常）', e)
-      this.registered = false
       return
     }
     console.log(`[remote] dev:register ${this.deviceId} name=${name} =>`, ack.ok ? 'ok' : (ack as { error?: string }).error)
-    if (!ack.ok) { this.registered = false; return }
+    if (!ack.ok) return
+    this.registered = true
     if (!this.hbTimer) {
-      this.hbTimer = setInterval(() => { window.pantry.devHeartbeat(this.deviceId) }, 25_000)
+      // 心跳携带完整设备信息：服务端按 deviceId upsert（没有就添加，有就更新），即使 register 丢失也会由心跳自动重建设备
+      this.hbTimer = setInterval(() => {
+        window.pantry.devHeartbeat({
+          deviceId: this.deviceId,
+          name: this.info?.hostname || '电脑',
+          os: this.info?.os ?? '',
+          ip: this.info?.ip ?? '',
+          username: this.nickname
+        })
+      }, 25_000)
     }
   }
 
