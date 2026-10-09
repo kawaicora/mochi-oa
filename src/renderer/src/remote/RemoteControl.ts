@@ -56,6 +56,12 @@ class RemoteControl {
         else this.registered = false
       })
     )
+    // 订阅后立即拉一次当前状态：主进程只在状态变化时推送，渲染层若订阅晚于初始 connected 会永远错过注册，
+    // 导致被控端不注册/不发心跳（dev:sys 照发但设备无 name/os/ip）。
+    window.pantry.serverGetState().then((s) => {
+      if (s.connected && s.token) void this.tryRegister(s.username ?? '', s.nick ?? '')
+      else this.registered = false
+    }).catch((e) => console.warn('[remote] 拉取初始连接状态失败', e))
     this.unsubs.push(window.pantry.onDevView((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevEnumerate((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevStart((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.startCapture(d as DevStartPayload) }))
