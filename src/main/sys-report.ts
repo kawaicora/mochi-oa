@@ -76,9 +76,10 @@ let staticInfo: {
   gpuInfo: Array<Record<string, unknown>>
   devices: Array<Record<string, unknown>>
   disk: string
+  fs: Array<{ mount: string; used: number; size: number; use: number }>
   processes: Array<Record<string, unknown>>
   gpus: Array<{ name: string; load: number }>
-} = { board: '未知', memDetail: [], gpuInfo: [], devices: [], disk: '', processes: [], gpus: [] }
+} = { board: '未知', memDetail: [], gpuInfo: [], devices: [], disk: '', fs: [], processes: [], gpus: [] }
 let lastStatic = 0
 let gpuLoadTimer: NodeJS.Timeout | null = null
 
@@ -135,6 +136,7 @@ async function refreshStatic(): Promise<void> {
     staticInfo.devices = devices
     if (fsSizes) {
       staticInfo.disk = fsSizes.map((f) => `${f.mount}: ${Math.round((f.used ?? 0) / 1e9)}GB/${Math.round((f.size ?? 0) / 1e9)}GB(${f.use || 0}%)`).join('\n')
+      staticInfo.fs = fsSizes.map((f) => ({ mount: f.mount || '', used: f.used || 0, size: f.size || 0, use: f.use || 0 }))
     }
     if (procs && procs.all) {
       staticInfo.processes = procs.all.slice().sort((a, b) => (b.mem_rss || 0) - (a.mem_rss || 0)).slice(0, 40).map((p) => ({
@@ -207,6 +209,7 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
         gpuInfo: staticInfo.gpuInfo,
         devices: staticInfo.devices,
         disk: staticInfo.disk,
+        fs: staticInfo.fs,
         processes: staticInfo.processes
       }
       const perf: Record<string, unknown> = {
