@@ -50,29 +50,36 @@ class RemoteControl {
       console.log(`[remote] 本机信息 deviceId=${info.deviceId} hostname=${info.hostname} ip=${info.ip} os=${info.os}`)
     }).catch((e) => console.warn('[remote] devGetInfo 失败（被控端将无法注册）', e))
 
-    this.unsubs.push(
-      window.pantry.onServerState((s: DevState) => {
-        if (s.connected && s.token) this.tryRegister(s.username ?? '', s.nick ?? '')
-        else this.registered = false
-      })
-    )
-    // 订阅后立即拉一次当前状态：主进程只在状态变化时推送，渲染层若订阅晚于初始 connected 会永远错过注册，
-    // 导致被控端不注册/不发心跳（dev:sys 照发但设备无 name/os/ip）。
-    window.pantry.serverGetState().then((s) => {
-      if (s.connected && s.token) void this.tryRegister(s.username ?? '', s.nick ?? '')
-      else this.registered = false
-    }).catch((e) => console.warn('[remote] 拉取初始连接状态失败', e))
     this.unsubs.push(window.pantry.onDevView((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevEnumerate((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.enumerate() }))
     this.unsubs.push(window.pantry.onDevStart((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.startCapture(d as DevStartPayload) }))
     this.unsubs.push(window.pantry.onDevStop((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.stopCapture() }))
     this.unsubs.push(window.pantry.onDevSignal((d) => { if (this.deviceId && d.deviceId === this.deviceId) this.handleSignal(d.signal as DevSignalPayload) }))
+
+    // 登录后直接周期发，不依赖 serverState 推送时序（主进程只在状态变化时推送，订阅晚会永远错过注册）。
+    // 每 5s 拉一次当前状态：已连接则注册/保活，断开则重置。最小化/托盘下渲染进程定时器照常运行。
+    this.registerTimer = setInterval(() => void this.checkAndRegister(), 5000)
+  }
+
+  /** 周期检查登录态：已连接+已登录 → 注册/保活；断开 → 重置 */
+  private checkAndRegister(): void {
+    if (!this.deviceId) return
+    window.pantry.serverGetState().then((s) => {
+      if (s.connected && s.token) {
+        if (!this.registered) void this.tryRegister(s.username ?? '', s.nick ?? '')
+        else window.pantry.devHeartbeat(this.deviceId) // 注册成功后只保活；动态(cpu/mem/gpu)由 sys-report dev:sys 持续发
+      } else {
+        this.registered = false
+      }
+    }).catch(() => {})
   }
 
   destroy(): void {
     this.stopCapture()
     if (this.hbTimer) clearInterval(this.hbTimer)
     this.hbTimer = null
+    if (this.registerTimer) clearInterval(this.registerTimer)
+    this.registerTimer = null
     this.unsubs.forEach((u) => u())
     this.unsubs = []
   }
@@ -106,20 +113,8 @@ class RemoteControl {
     console.log(`[remote] dev:register ${this.deviceId} name=${name} =>`, ack.ok ? 'ok' : (ack as { error?: string }).error)
     if (!ack.ok) return
     this.registered = true
-    if (!this.hbTimer) {
-      // 心跳携带完整设备信息：服务端按 deviceId upsert（没有就添加，有就更新），即使 register 丢失也会由心跳自动重建设备
-      this.hbTimer = setInterval(() => {
-        const hb = {
-          deviceId: this.deviceId,
-          name: this.info?.hostname || '电脑',
-          os: this.info?.os ?? '',
-          ip: this.info?.ip ?? '',
-          username: this.nickname
-        }
-        console.log(`[remote] 心跳 dev:heartbeat`, hb)
-        window.pantry.devHeartbeat(hb)
-      }, 25_000)
-    }
+    // 注册成功（服务端 added）后：全量信息不再重复发，保活由 checkAndRegister 每 5s devHeartbeat(deviceId) 完成；
+    // 动态部分（cpu/mem/gpu）由 sys-report dev:sys 持续上报。
   }
 
   // ── 设备枚举上报 ───────────────────────────────────────
