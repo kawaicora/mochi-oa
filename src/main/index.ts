@@ -10,6 +10,33 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 
+// ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
+// 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
+function safeStr(v: unknown): string {
+  if (typeof v === 'string') return v
+  try { const s = JSON.stringify(v); return s == null ? String(v) : s } catch { return String(v) }
+}
+function patchMainConsoleToFile(): void {
+  const file = () => {
+    const dir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    return join(dir, 'renderer-console.log')
+  }
+  const wrap = (fn: (...a: unknown[]) => void, tag: string) => {
+    const orig = fn.bind(console)
+    return (...args: unknown[]): void => {
+      orig(...args)
+      try { appendFileSync(file(), `[${new Date().toISOString()}] [${tag}] ${args.map(safeStr).join(' ')}\n`, 'utf8') } catch { /* 忽略 */ }
+    }
+  }
+  console.log = wrap(console.log, 'main')
+  console.info = wrap(console.info, 'main-info')
+  console.warn = wrap(console.warn, 'main-warn')
+  console.error = wrap(console.error, 'main-error')
+  console.debug = wrap(console.debug, 'main-verbose') // verbose 也落盘 + 保留控制台输出
+}
+patchMainConsoleToFile()
+
 // ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {
   try {
@@ -255,7 +282,7 @@ app.whenReady().then(() => {
     try {
       const logDir = join(app.getPath('userData'), 'logs')
       if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true })
-      appendFileSync(join(logDir, 'main.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
+      appendFileSync(join(logDir, 'renderer-console.log'), `[${new Date().toISOString()}] [main] serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}\n`, 'utf8')
     } catch { /* 忽略 */ }
     serverClient.connect({ serverUrl: cfg.serverUrl, token: cfg.token })
   }

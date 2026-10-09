@@ -16,12 +16,12 @@ import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 
-/** 主进程落盘日志（userData/logs/main.log）：定位连接/被控上报链路 */
+/** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 async function logMain(msg: string): Promise<void> {
   try {
     const dir = join(app.getPath('userData'), 'logs')
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    await appendFile(join(dir, 'main.log'), `[${new Date().toISOString()}] [main] ${msg}\n`, 'utf8')
+    await appendFile(join(dir, 'renderer-console.log'), `[${new Date().toISOString()}] [main] ${msg}\n`, 'utf8')
   } catch { /* 忽略 */ }
 }
 
