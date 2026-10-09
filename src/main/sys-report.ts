@@ -23,7 +23,20 @@ import { app } from 'electron'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import * as si from 'systeminformation'
+import * as siNamespace from 'systeminformation'
+
+// systeminformation 的 d.ts 仅声明了 Systeminformation 命名空间（接口类型），方法函数无类型声明。
+// 运行时该方法都存在，此处显式声明本次用到的 API 形状，避免大量 any 强转与波浪线。
+type SiApi = {
+  motherboard(): Promise<{ manufacturer: string; model: string }>
+  memLayout(): Promise<Array<{ size?: number; clockSpeed?: number; type?: string; manufacturer?: string }>>
+  graphics(): Promise<{ controllers: Array<{ vendor?: string; model?: string; vram?: number; driverVersion?: string; utilizationGpu?: number }> }>
+  diskLayout(): Promise<Array<{ device?: string; name?: string; size?: number }>>
+  networkInterfaces(): Promise<Array<{ iface?: string; mac?: string; ip4?: string; operstate?: string }>>
+  fsSize(): Promise<Array<{ mount?: string; used?: number; size?: number; use?: number }>>
+  processes(): Promise<{ all: Array<{ pid?: number; name?: string; cpu?: number; mem_rss?: number }> }>
+}
+const si = (siNamespace as unknown) as SiApi
 
 export interface SysReportPayload {
   deviceId: string
