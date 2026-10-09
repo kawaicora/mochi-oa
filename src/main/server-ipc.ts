@@ -13,6 +13,7 @@ import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
+import { startSysReport, stopSysReport } from './sys-report'
 
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
@@ -27,7 +28,15 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
   // 推送 → renderer
-  serverClient.on('state', (s) => sendToMainWindow(getMainWindow(), IpcEvents.serverState, s))
+  serverClient.on('state', (s) => {
+    sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
+    // 登录连接后启动本机系统信息上报（被控端）；断开即停
+    if (s.connected) {
+      startSysReport((p) => serverClient.devSys(p))
+    } else {
+      stopSysReport()
+    }
+  })
   serverClient.on('message', (m) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessage, m))
   serverClient.on('presence', (p) => sendToMainWindow(getMainWindow(), IpcEvents.serverPresence, p))
   serverClient.on('userProfileUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.userProfileUpdated, d))
