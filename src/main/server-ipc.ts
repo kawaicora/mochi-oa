@@ -22,6 +22,35 @@ function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: u
   win.webContents.send(channel, payload)
 }
 
+/**
+ * 在被控端（本机）执行远程命令。Windows：按 shell 选 cmd.exe / powershell.exe；
+ * Linux/macOS：直接默认 /bin/sh。结果经 serverClient.devExecResult 回传服务端转发给控制端。
+ */
+function execRemote(deviceId: string, shell: string, cmd: string, timeout = 15000): void {
+  const win = process.platform === 'win32'
+  const isCmd = win && shell === 'cmd'
+  const exe = win ? (isCmd ? 'cmd.exe' : 'powershell.exe') : '/bin/sh'
+  const args = win
+    ? (isCmd ? ['/d', '/s', '/c', cmd] : ['-NoProfile', '-NonInteractive', '-Command', cmd])
+    : ['-c', cmd]
+  console.log(`[dev-exec] deviceId=${deviceId} shell=${shell} cmd=${cmd}（平台=${process.platform} exe=${exe}）`)
+  const child = spawn(exe, args, { windowsHide: true })
+  let stdout = ''
+  let stderr = ''
+  const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 超时终止 */ } }, timeout)
+  child.stdout?.on('data', (b: Buffer) => { stdout += String(b) })
+  child.stderr?.on('data', (b: Buffer) => { stderr += String(b) })
+  child.on('error', (e) => {
+    clearTimeout(timer)
+    void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout, stderr: (stderr || '') + (e.message || '') })
+  })
+  child.on('close', (code) => {
+    clearTimeout(timer)
+    console.log(`[dev-exec] deviceId=${deviceId} exit=${code ?? 0} stdout=${stdout.length}B stderr=${stderr.length}B`)
+    void serverClient.devExecResult(deviceId, { ok: true, exitCode: code ?? 0, stdout, stderr })
+  })
+}
+
 function broadcastToAllWindows(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, payload)
@@ -128,6 +157,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('devStart', (d) => broadcastToAllWindows(IpcEvents.devStart, d ?? {}))
   serverClient.on('devStop', (d) => broadcastToAllWindows(IpcEvents.devStop, d ?? {}))
   serverClient.on('devSignal', (d) => broadcastToAllWindows(IpcEvents.devSignal, d ?? {}))
+  // 控制端请求在被控端执行命令：主进程用所选 shell 执行（Windows: cmd/powershell；Linux: 默认 sh），结果回传
+  serverClient.on('devExec', (d) => {
+    const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown; cmd?: unknown }
+    const deviceId = String(p.deviceId ?? '')
+    const cmd = typeof p.cmd === 'string' ? p.cmd.trim() : ''
+    if (!deviceId || !cmd) { void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout: '', stderr: '空命令' }); return }
+    execRemote(deviceId, String(p.shell ?? 'auto'), cmd)
+  })
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {

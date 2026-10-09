@@ -402,6 +402,8 @@ export class ServerClient extends EventEmitter {
     socket.on('dev:start', (d: { deviceId?: string; kind?: string; device?: unknown }) => this.emit('devStart', d))
     socket.on('dev:stop', (d: { deviceId?: string }) => this.emit('devStop', d))
     socket.on('dev:signal', (d: { deviceId?: string; signal?: unknown }) => this.emit('devSignal', d))
+    // 控制端请求在被控端执行命令 → 主进程执行后经 devExecResult 回传
+    socket.on('dev:exec', (d: { deviceId?: string; shell?: string; cmd?: string }) => this.emit('devExec', d))
   }
 
   disconnect(): void {
@@ -1106,6 +1108,11 @@ export class ServerClient extends EventEmitter {
   async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack & { status?: string }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:sys', payload)
+  }
+  /** 被控端把远程命令执行结果回传（经服务端转发给控制端） */
+  async devExecResult(deviceId: string, result: { ok: boolean; exitCode: number; stdout: string; stderr: string }): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:execResult', { deviceId, ...result })
   }
 
   // ─── 个人信息 ───────────────────────────────────────────
