@@ -41,7 +41,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       startSysReport(async (p, onAck) => {
         try {
           const ack = await serverClient.devSys(p)
-          const status = ack?.status ?? (ack?.ok ? 'updated' : 'lost')
+          // 服务端 ack 为 { ok, status }，normalizeAck 会把 status 归入 data，故从 ack.data.status 读取
+          const status = (ack as { data?: { status?: string } }).data?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
           void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
@@ -56,7 +57,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
               ip: pub,
               username: st.nick || st.username || ''
             })
-            void console.log(`服务端返回 ${status}，已重发全量注册 regAck=${regAck?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
+            void console.log(`服务端返回 ${status}，已重发全量注册 regAck=${(regAck as { data?: { status?: string } }).data?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
           }
         } catch (e) {
           void console.log(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
