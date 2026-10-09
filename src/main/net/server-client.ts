@@ -1086,7 +1086,7 @@ export class ServerClient extends EventEmitter {
   }
 
   // ─── 远程设备控制（被控端上报/信令） ───────────────────────
-  async devRegister(payload: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack> {
+  async devRegister(payload: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack & { status?: string }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:register', payload)
   }
@@ -1103,7 +1103,7 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:signal', { deviceId, signal })
   }
-  async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack> {
+  async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack & { status?: string }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:sys', payload)
   }
