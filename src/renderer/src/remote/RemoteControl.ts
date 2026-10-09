@@ -103,13 +103,15 @@ class RemoteControl {
     if (!this.hbTimer) {
       // 心跳携带完整设备信息：服务端按 deviceId upsert（没有就添加，有就更新），即使 register 丢失也会由心跳自动重建设备
       this.hbTimer = setInterval(() => {
-        window.pantry.devHeartbeat({
+        const hb = {
           deviceId: this.deviceId,
           name: this.info?.hostname || '电脑',
           os: this.info?.os ?? '',
           ip: this.info?.ip ?? '',
           username: this.nickname
-        })
+        }
+        console.log(`[remote] 心跳 dev:heartbeat`, hb)
+        window.pantry.devHeartbeat(hb)
       }, 25_000)
     }
   }
