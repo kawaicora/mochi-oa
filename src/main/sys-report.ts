@@ -23,11 +23,10 @@ import { app } from 'electron'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import siRaw from 'systeminformation'
 
-// systeminformation 是 CommonJS 包，方法（motherboard 等）挂在 module.exports 上（即 default 导出），
-// 不能用 import * as（ESM namespace 里没有这些方法）。d.ts 仅声明 Systeminformation 命名空间接口，
-// 此处显式声明本次用到的 API 形状。
+// systeminformation 是 CommonJS 包，方法挂在 module.exports 上；ESM 的 import * as / default 在打包后
+// 都可能取不到方法（此前 import * as 与 import default 均导致 si.motherboard is not a function）。
+// 主进程是 Node 环境，直接用 require 拿 module.exports 最稳。d.ts 仅声明命名空间接口，此处显式声明形状。
 type SiApi = {
   motherboard(): Promise<{ manufacturer: string; model: string }>
   memLayout(): Promise<Array<{ size?: number; clockSpeed?: number; type?: string; manufacturer?: string }>>
@@ -37,7 +36,7 @@ type SiApi = {
   fsSize(): Promise<Array<{ mount?: string; used?: number; size?: number; use?: number }>>
   processes(): Promise<{ all: Array<{ pid?: number; name?: string; cpu?: number; mem_rss?: number }> }>
 }
-const si = (siRaw as unknown) as SiApi
+const si = (require('systeminformation') as unknown) as SiApi
 
 export interface SysReportPayload {
   deviceId: string
