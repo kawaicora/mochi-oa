@@ -74,7 +74,22 @@ const VML_NS = 'urn:schemas-microsoft-com:vml'
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const EMU_PT = 12700
+
+/** 页眉/页脚里的锚定图片（Word 里常见的「整页背景图」实现方式） */
+interface HeaderImage {
+  src: string
+  hAlign: string
+  vAlign: string
+  w: number
+  h: number
+  behind: boolean
+  part: string
+}
+
+/** JSZip 实例类型（jszip 的类型是 export = JSZip，没有 default） */
+type JSZipType = Awaited<ReturnType<(typeof import('jszip'))['loadAsync']>>
 
 /**
  * DrawingML 浮动对象的锚点信息（长度单位 pt）。
@@ -311,6 +326,110 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
     applied += 1
   }
   return applied
+}
+
+/**
+ * 收集页眉/页脚里的锚定图片。
+ *
+ * Word 里"整页背景图"通常不是 w:background，而是放在页眉里的锚定图片
+ * （对齐方式常为 page + center）。docx-preview 不会渲染页眉里的锚定图，
+ * 所以这里单独取出来，渲染后按页面参照系自行定位。
+ */
+async function collectHeaderImages(zip: JSZipType): Promise<HeaderImage[]> {
+  const out: HeaderImage[] = []
+  const MIME: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml'
+  }
+  const resolvePart = (baseDir: string, target: string): string => {
+    if (target.startsWith('/')) return target.slice(1)
+    const parts = (baseDir + '/' + target).split('/')
+    const stack: string[] = []
+    for (const p of parts) {
+      if (p === '.' || p === '') continue
+      if (p === '..') stack.pop()
+      else stack.push(p)
+    }
+    return stack.join('/')
+  }
+  const parts = Object.keys(zip.files).filter((n) => !zip.files[n].dir && /^word\/(header|footer)\d*\.xml$/.test(n))
+  for (const part of parts) {
+    const entry = zip.file(part)
+    if (!entry) continue
+    const xml = await entry.async('string')
+    const relsPath = part.replace(/^word\//, 'word/_rels/') + '.rels'
+    const relsEntry = zip.file(relsPath)
+    const relMap = new Map<string, string>()
+    if (relsEntry) {
+      const relsDoc = new DOMParser().parseFromString(await relsEntry.async('string'), 'application/xml')
+      for (const r of Array.from(relsDoc.getElementsByTagName('Relationship'))) {
+        const id = r.getAttribute('Id')
+        const t = r.getAttribute('Target')
+        if (id && t) relMap.set(id, t)
+      }
+    }
+    const doc = new DOMParser().parseFromString(xml, 'application/xml')
+    for (const d of Array.from(doc.getElementsByTagNameNS(WORD_NS, 'drawing'))) {
+      const node = d.getElementsByTagNameNS(WP_NS, 'anchor')[0] ?? d.getElementsByTagNameNS(WP_NS, 'inline')[0]
+      if (!node) continue
+      const ext = node.getElementsByTagNameNS(WP_NS, 'extent')[0]
+      const w = Number(ext?.getAttribute('cx') ?? 0) / EMU_PT
+      const h = Number(ext?.getAttribute('cy') ?? 0) / EMU_PT
+      const align = (tag: string): string =>
+        node.getElementsByTagNameNS(WP_NS, tag)[0]?.getElementsByTagNameNS(WP_NS, 'align')[0]?.textContent ?? ''
+      const blip = d.getElementsByTagNameNS(A_NS, 'blip')[0]
+      const rid = blip?.getAttributeNS(REL_NS, 'embed') ?? blip?.getAttribute('r:embed') ?? ''
+      const target = relMap.get(rid)
+      if (!target) continue
+      const mediaPath = resolvePart('word', target)
+      const mediaEntry = zip.file(mediaPath)
+      if (!mediaEntry) continue
+      const ext2 = (mediaPath.split('.').pop() ?? '').toLowerCase()
+      const bytes = await mediaEntry.async('uint8array')
+      out.push({
+        src: URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: MIME[ext2] ?? 'application/octet-stream' })),
+        hAlign: align('positionH'),
+        vAlign: align('positionV'),
+        w,
+        h,
+        behind: node.getElementsByTagNameNS(WP_NS, 'anchor')[0]?.getAttribute('behindDoc') === '1',
+        part
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 把页眉/页脚图片铺到页面上。
+ * 按 LibreOffice 的分层语义：页眉/页脚是独立于正文的一层，其内容位于正文之下，
+ * 这里用 z-index:-1 —— 按 CSS 绘制顺序，负 z-index 子元素画在元素自身背景之后、
+ * 正文内容之前，正好等价。
+ */
+function applyHeaderImages(host: HTMLElement, images: HeaderImage[]): number {
+  if (images.length === 0) return 0
+  const section = host.querySelector('section.docx') as HTMLElement | null
+  if (!section) return 0
+  const PT2PX = 96 / 72
+  const pageW = section.clientWidth / PT2PX
+  const pageH = section.clientHeight / PT2PX
+  for (const im of images) {
+    const el = document.createElement('img')
+    el.src = im.src
+    el.alt = ''
+    el.style.position = 'absolute'
+    el.style.width = `${im.w}pt`
+    el.style.height = `${im.h}pt`
+    el.style.left =
+      (im.hAlign === 'center' ? (pageW - im.w) / 2 : im.hAlign === 'right' ? pageW - im.w : 0) + 'pt'
+    el.style.top =
+      (im.vAlign === 'center' ? (pageH - im.h) / 2 : im.vAlign === 'bottom' ? pageH - im.h : 0) + 'pt'
+    // 页眉层位于正文之下；behindDoc 的图更要垫底
+    el.style.zIndex = '-1'
+    el.style.pointerEvents = 'none'
+    section.appendChild(el)
+  }
+  return images.length
 }
 
 /**
@@ -720,11 +839,17 @@ async function openLocation(): Promise<void> {
 async function prepareDocxBlob(
   data: ArrayBuffer,
   mime: string
-): Promise<{ blob: Blob; anchors: DrawingAnchor[] }> {
-  const fallback = { blob: new Blob([data], { type: mime }), anchors: [] as DrawingAnchor[] }
+): Promise<{ blob: Blob; anchors: DrawingAnchor[]; headerImages: HeaderImage[] }> {
+  const fallback = {
+    blob: new Blob([data], { type: mime }),
+    anchors: [] as DrawingAnchor[],
+    headerImages: [] as HeaderImage[]
+  }
   try {
     const JSZip = (await import('jszip')).default
     const zip = await JSZip.loadAsync(data)
+    // 页眉/页脚里的锚定图（整页背景图）单独收集
+    const headerImages = await collectHeaderImages(zip)
     const targets = Object.keys(zip.files).filter((n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n))
     const anchors: DrawingAnchor[] = []
     let changed = false
@@ -742,8 +867,8 @@ async function prepareDocxBlob(
         changed = true
       }
     }
-    if (!changed) return { blob: fallback.blob, anchors }
-    return { blob: await zip.generateAsync({ type: 'blob', mimeType: mime }), anchors }
+    if (!changed) return { blob: fallback.blob, anchors, headerImages }
+    return { blob: await zip.generateAsync({ type: 'blob', mimeType: mime }), anchors, headerImages }
   } catch (e) {
     console.warn('[docx] 预处理失败，按原始文件渲染', e)
     return fallback
@@ -777,7 +902,7 @@ onMounted(async () => {
     if (destroyed) return
     const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     // 预处理：摊平/归一化 VML，收集 DrawingML 锚点，接上 SVG 图标
-    const { blob, anchors } = await prepareDocxBlob(r.data, mime)
+    const { blob, anchors, headerImages } = await prepareDocxBlob(r.data, mime)
     if (destroyed) return
     await renderAsync(blob, host, undefined, {
       className: 'docx',
@@ -807,6 +932,9 @@ onMounted(async () => {
     // DrawingML 浮动对象：按锚点改为绝对定位 + 遮罩 + z 序（behindDoc）
     const anchored = applyDrawingAnchors(host, anchors)
     if (anchored) console.log(`[docx] 已按锚点定位 ${anchored} 个浮动对象`)
+    // 页眉/页脚里的整页背景图
+    const heads = applyHeaderImages(host, headerImages)
+    if (heads) console.log(`[docx] 已渲染 ${heads} 张页眉/页脚图片`)
     pages.value = host.querySelectorAll('section.docx').length
     loading.value = false
     await nextTick()
