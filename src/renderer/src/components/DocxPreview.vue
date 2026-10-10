@@ -450,6 +450,11 @@ function walkShape(
   // 由渲染后的 DOM 修复阶段读取并转成实际 padding（inset 缺省 = 左右 0.1in / 上下 0.05in）
   const insets = readTextboxInset(el)
   keep.push(`mso-inset-left:${fmtPt(insets.l)}pt`, `mso-inset-top:${fmtPt(insets.t)}pt`, `mso-inset-right:${fmtPt(insets.r)}pt`, `mso-inset-bottom:${fmtPt(insets.b)}pt`)
+  // 把 VML 原始形状类型带进渲染结果：docx-preview 会把 v:oval / v:roundrect 都输出成 <image>，
+  // 修复阶段补底色时需要知道该补椭圆还是矩形，否则图标会被画成方块。
+  keep.push(`mso-vml-shape:${el.localName}`)
+  const arc = el.getAttribute('arcsize')
+  if (arc) keep.push(`mso-arcsize:${arc}`)
   clone.setAttribute(
     'style',
     `position:absolute;left:${fmtPt(ctx.x)}pt;top:${fmtPt(ctx.y)}pt;width:${fmtPt(ctx.w)}pt;height:${fmtPt(
@@ -534,13 +539,32 @@ function repairVmlShapes(host: HTMLElement): number {
       const children = Array.from(img.children)
       if (!hasFill && children.length === 0 && !img.getAttribute('width')) continue
       if (hasFill) {
-        const rect = document.createElementNS(SVG_NS, 'rect')
-        rect.setAttribute('x', '0')
-        rect.setAttribute('y', '0')
-        rect.setAttribute('width', '100%')
-        rect.setAttribute('height', '100%')
-        rect.setAttribute('fill', fill as string)
-        svg.insertBefore(rect, img)
+        // 按 VML 原始形状类型补底色：椭圆用 <ellipse>、圆角矩形带 rx、其余才是矩形
+        const shapeKind = (new RegExp('mso-vml-shape:([a-z]+)').exec(svgStyle)?.[1] ?? '').toLowerCase()
+        let fillShape: Element
+        if (shapeKind === 'oval' || shapeKind === 'circle') {
+          fillShape = document.createElementNS(SVG_NS, 'ellipse')
+          fillShape.setAttribute('cx', '50%')
+          fillShape.setAttribute('cy', '50%')
+          fillShape.setAttribute('rx', '50%')
+          fillShape.setAttribute('ry', '50%')
+        } else {
+          fillShape = document.createElementNS(SVG_NS, 'rect')
+          fillShape.setAttribute('x', '0')
+          fillShape.setAttribute('y', '0')
+          fillShape.setAttribute('width', '100%')
+          fillShape.setAttribute('height', '100%')
+          if (shapeKind === 'roundrect') {
+            // VML arcsize 为千分比（默认 16667→ 实际是 1/6），按短边取圆角
+            const arc = Number(new RegExp('mso-arcsize:([\\d.]+)').exec(svgStyle)?.[1] ?? '')
+            const frac = Number.isFinite(arc) && arc > 0 ? Math.min(arc, 50000) / 100000 : 1 / 6
+            const w = parseFloat(svg.getAttribute('width') ?? '0') || 0
+            const h = parseFloat(svg.getAttribute('height') ?? '0') || 0
+            fillShape.setAttribute('rx', String(Math.min(w, h) * frac))
+          }
+        }
+        fillShape.setAttribute('fill', fill as string)
+        svg.insertBefore(fillShape, img)
       }
       for (const child of children) {
         // 文本内容套一层带 padding 的 div，还原 VML 的 textbox inset
