@@ -313,6 +313,63 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
   return applied
 }
 
+/**
+ * 解码 VML 自由形状（o:spt="100"）的真实轮廓。
+ * Word 把这类形状的几何放在 o:gfxdata 里：base64 → zip → drs/e2oDoc.xml，
+ * 其中是 DrawingML 的 a:custGeom/a:pathLst。转成 SVG 的 d 字符串后按路径绘制，
+ * 否则只能画成矩形（图标会变成方块）。
+ */
+async function decodeGfxPath(b64: string): Promise<string> {
+  try {
+    const JSZip = (await import('jszip')).default
+    const clean = b64.replace(/&#10;/g, '').replace(/\s/g, '')
+    // 渲染进程没有 Buffer，用 atob 转成字节数组
+    const bin = atob(clean)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const zip = await JSZip.loadAsync(bytes)
+    const entry = zip.file('drs/e2oDoc.xml')
+    if (!entry) return ''
+    const xml = await entry.async('string')
+    const doc = new DOMParser().parseFromString(xml, 'application/xml')
+    const pathEl = doc.getElementsByTagNameNS(A_NS, 'path')[0]
+    if (!pathEl) return ''
+    const w = Number(pathEl.getAttribute('w') ?? 0)
+    const h = Number(pathEl.getAttribute('h') ?? 0)
+    if (!(w > 0) || !(h > 0)) return ''
+    const parts: string[] = []
+    for (const cmd of Array.from(pathEl.children)) {
+      const pts = Array.from(cmd.getElementsByTagNameNS(A_NS, 'pt')).map(
+        (p) => `${p.getAttribute('x')} ${p.getAttribute('y')}`
+      )
+      switch (cmd.localName) {
+        case 'moveTo':
+          if (pts[0]) parts.push(`M ${pts[0]}`)
+          break
+        case 'lnTo':
+          if (pts[0]) parts.push(`L ${pts[0]}`)
+          break
+        case 'cubicBezTo':
+          if (pts.length === 3) parts.push(`C ${pts.join(' ')}`)
+          break
+        case 'quadBezTo':
+          if (pts.length === 2) parts.push(`Q ${pts.join(' ')}`)
+          break
+        case 'close':
+          parts.push('Z')
+          break
+        default:
+          break
+      }
+    }
+    if (parts.length === 0) return ''
+    // 用 "-" 分隔坐标空间与 d，避免占用 CSS 里的 ":" 和 ";"（d 里已用空格/逗号）
+    return `${w},${h}-${parts.join(' ')}`
+  } catch {
+    return ''
+  }
+}
+
 /** 解析 VML style 字符串为键值表 */
 function styleMap(el: Element): Record<string, string> {
   const out: Record<string, string> = {}
@@ -388,7 +445,8 @@ function walkShape(
   parent: Ctx | null,
   out: Element[],
   margins: { left: number; top: number },
-  inheritZ: string
+  inheritZ: string,
+  pathMap?: Map<string, string>
 ): void {
   const st = styleMap(el)
   let ctx: Ctx
@@ -455,6 +513,10 @@ function walkShape(
   keep.push(`mso-vml-shape:${el.localName}`)
   const arc = el.getAttribute('arcsize')
   if (arc) keep.push(`mso-arcsize:${arc}`)
+  // 自由形状的真实轮廓（来自 o:gfxdata → e2oDoc 的 custGeom 路径）
+  const gfx = el.getAttribute('o:gfxdata')
+  const shapePath = gfx ? pathMap?.get(gfxKey(gfx)) : ''
+  if (shapePath) keep.push(`mso-vml-path:${shapePath}`)
   clone.setAttribute(
     'style',
     `position:absolute;left:${fmtPt(ctx.x)}pt;top:${fmtPt(ctx.y)}pt;width:${fmtPt(ctx.w)}pt;height:${fmtPt(
@@ -486,7 +548,7 @@ function readTextboxInset(el: Element): { l: number; t: number; r: number; b: nu
  *    mso-position-horizontal-relative（VML 缺省 = 相对页边距/栏），
  *    所以 x = 页左边距 + margin-left，y = margin-top（不再叠加页上边距）。
  */
-function normalizeVmlPositioning(xml: string): string {
+function normalizeVmlPositioning(xml: string, pathMap?: Map<string, string>): string {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
   const picts = Array.from(doc.getElementsByTagNameNS(W_NS, 'pict'))
@@ -496,9 +558,9 @@ function normalizeVmlPositioning(xml: string): string {
   for (const pict of picts) {
     for (const child of Array.from(pict.children)) {
       const ln = child.localName
-      if (ln !== 'shape' && ln !== 'rect' && ln !== 'group') continue
+      if (ln !== 'shape' && ln !== 'rect' && ln !== 'group' && ln !== 'oval' && ln !== 'roundrect') continue
       const out: Element[] = []
-      walkShape(child, null, out, margins, styleMap(child)['z-index'] ?? '0')
+      walkShape(child, null, out, margins, styleMap(child)['z-index'] ?? '0', pathMap)
       for (const el of out) pict.insertBefore(el, child)
       pict.removeChild(child)
       changed += 1
@@ -506,6 +568,28 @@ function normalizeVmlPositioning(xml: string): string {
   }
   if (changed === 0) return xml
   return new XMLSerializer().serializeToString(doc)
+}
+
+/** o:gfxdata 的归一化键：原始 XML 里含 &#10; 实体，getAttribute 返回的是解码后的值，两侧要统一 */
+function gfxKey(s: string): string {
+  return s.replace(/&#10;/g, '').replace(/\s/g, '')
+}
+
+/** 预先解码文档里所有 o:gfxdata（同一份数据只解一次） */
+async function buildGfxPathMap(xml: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (!xml.includes('o:gfxdata')) return map
+  const seen = new Set<string>()
+  const re = /o:gfxdata="([^"]+)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml))) {
+    const key = gfxKey(m[1])
+    if (seen.has(key)) continue
+    seen.add(key)
+    const d = await decodeGfxPath(m[1])
+    if (d) map.set(key, d)
+  }
+  return map
 }
 
 /**
@@ -531,6 +615,8 @@ function repairVmlShapes(host: HTMLElement): number {
       return m ? parseFloat(m[1]) : 0
     }
     const pad = { l: ins('left'), t: ins('top'), r: ins('right'), b: ins('bottom') }
+    // 自由形状轮廓（坐标空间与 d 之间用 "-" 分隔）
+    const pathData = (new RegExp('mso-vml-path:([^;]*)').exec(svgStyle)?.[1] ?? '').trim()
     for (const img of Array.from(svg.children)) {
       if (img.tagName.toLowerCase() !== 'image') continue
       if (img.getAttribute('href') || img.getAttribute('xlink:href')) continue // 真图片，保留
@@ -538,11 +624,23 @@ function repairVmlShapes(host: HTMLElement): number {
       const hasFill = !!fill && fill !== 'none' && fill !== 'null'
       const children = Array.from(img.children)
       if (!hasFill && children.length === 0 && !img.getAttribute('width')) continue
-      if (hasFill) {
-        // 按 VML 原始形状类型补底色：椭圆用 <ellipse>、圆角矩形带 rx、其余才是矩形
+      if (hasFill || pathData) {
+        // 按 VML 原始形状类型补图形：有 custGeom 路径 → 画真实轮廓；
+        // 椭圆用 <ellipse>、圆角矩形带 rx、其余才是矩形
         const shapeKind = (new RegExp('mso-vml-shape:([a-z]+)').exec(svgStyle)?.[1] ?? '').toLowerCase()
         let fillShape: Element
-        if (shapeKind === 'oval' || shapeKind === 'circle') {
+        if (pathData) {
+          const [space, ...rest] = pathData.split('-')
+          const [pw, ph] = space.split(',').map(Number)
+          const d = rest.join('-')
+          // 用实测尺寸而不是 width/height 属性：docx-preview 对部分形状不写这两个属性
+          const box = svg.getBoundingClientRect()
+          const sw = box.width || parseFloat(svg.getAttribute('width') ?? '0') || 1
+          const sh = box.height || parseFloat(svg.getAttribute('height') ?? '0') || 1
+          fillShape = document.createElementNS(SVG_NS, 'path')
+          fillShape.setAttribute('d', d)
+          if (pw > 0 && ph > 0) fillShape.setAttribute('transform', `scale(${sw / pw},${sh / ph})`)
+        } else if (shapeKind === 'oval' || shapeKind === 'circle') {
           fillShape = document.createElementNS(SVG_NS, 'ellipse')
           fillShape.setAttribute('cx', '50%')
           fillShape.setAttribute('cy', '50%')
@@ -636,7 +734,8 @@ async function prepareDocxBlob(
       let xml = await entry.async('string')
       const before = xml
       xml = preferSvgBlips(xml)
-      xml = normalizeVmlPositioning(xml)
+      const pathMap = await buildGfxPathMap(xml)
+      xml = normalizeVmlPositioning(xml, pathMap)
       if (name === 'word/document.xml') anchors.push(...collectDrawingAnchors(xml))
       if (xml !== before) {
         zip.file(name, xml)
