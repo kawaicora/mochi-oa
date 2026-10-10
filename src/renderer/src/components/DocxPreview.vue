@@ -726,6 +726,7 @@ async function buildGfxPathMap(xml: string): Promise<Map<string, string>> {
  */
 function repairVmlShapes(host: HTMLElement): number {
   let fixed = 0
+  const made = { rect: 0, ellipse: 0, path: 0 }
   for (const svg of Array.from(host.querySelectorAll('svg'))) {
     // 读取由 XML 预处理写入的 VML 文本框内边距
     const svgStyle = svg.getAttribute('style') ?? ''
@@ -782,6 +783,9 @@ function repairVmlShapes(host: HTMLElement): number {
         }
         fillShape.setAttribute('fill', fill as string)
         svg.insertBefore(fillShape, img)
+        if (fillShape.tagName.toLowerCase() === 'path') made.path += 1
+        else if (fillShape.tagName.toLowerCase() === 'ellipse') made.ellipse += 1
+        else made.rect += 1
       }
       for (const child of children) {
         // 文本内容套一层带 padding 的 div，还原 VML 的 textbox inset
@@ -800,6 +804,7 @@ function repairVmlShapes(host: HTMLElement): number {
       fixed += 1
     }
   }
+  if (fixed) console.log(`[docx] 修复 VML 形状 ${fixed} 个（轮廓 path=${made.path} ellipse=${made.ellipse} rect=${made.rect}）`)
   return fixed
 }
 
@@ -1138,5 +1143,8 @@ onBeforeUnmount(() => {
 .docx-host :deep(section.docx) {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
   margin-bottom: 16px;
+  /* 建立层叠上下文：否则 z-index:-1 的页眉背景图/垫底图会画到页面白底之后（肉眼不可见），
+     而不是"元素背景之后、正文之前"。isolation 只影响层叠，不改布局。 */
+  isolation: isolate;
 }
 </style>
