@@ -50,6 +50,7 @@ export default defineConfig({
             'pdfjs-dist',
             'docx-preview',
             'xlsx',
+            'jszip',
             'flv.js',
             'three/examples/jsm/loaders/OBJLoader.js',
             'three/examples/jsm/loaders/FBXLoader.js',

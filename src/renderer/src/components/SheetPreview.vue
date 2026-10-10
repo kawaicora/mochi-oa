@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
- * Excel（.xlsx / .xls / .csv）预览（SheetJS）。
+ * Excel（.xlsx / .xls / .csv）预览（SheetJS + 自解析样式）。
  * 通过 IPC 读取本地字节 → SheetJS 解析工作簿 → 自绘表格：
- *  - 多工作表切换（底部页签）、列标（A/B/C）+ 行号，表头/行号吸附
+ *  - 多工作表切换（页签）、列标（A/B/C）+ 行号，表头/行号吸附
+ *  - 还原 Office 观感：填充色、字体（名称/字号/加粗/斜体/下划线/颜色）、对齐、边框、列宽行高
  *  - 合并单元格（rowspan/colspan）、数字右对齐、日期格式化
  *  - 大表保护：按需分块构建 + 行/列上限（避免卡死渲染进程）
  *  - Esc 关闭、打开文件所在路径
+ * 注：SheetJS 社区版只解析出填充色，字体/边框/对齐由 utils/xlsx-style.ts 直接解析 styles.xml 补全。
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { CellObject, Range, WorkBook, WorkSheet } from 'xlsx'
+import { readXlsxStyles, type CellStyle, type SheetStyleMap } from '../utils/xlsx-style'
 
 const props = defineProps<{ path: string; name: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -23,6 +26,8 @@ interface GridCell {
   /** 被合并区域覆盖，跳过渲染 */
   skip: boolean
   align: 'l' | 'r' | 'c'
+  /** xlsx 原始样式（填充/字体/边框/对齐） */
+  style?: CellStyle
 }
 
 const scrollEl = ref<HTMLElement | null>(null)
@@ -48,6 +53,14 @@ let range: Range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
 /** 合并单元格：左上角 → 跨度；被覆盖格 → true */
 let mergeTop = new Map<string, { cs: number; rs: number }>()
 let mergeCovered = new Set<string>()
+/** 工作表名 → (单元格地址 → 样式) */
+let styleBook: SheetStyleMap = new Map()
+/** 当前工作表的单元格样式表 */
+let sheetStyle = new Map<string, CellStyle>()
+
+/** 列宽（px）与行高（px），来自 xlsx 的 !cols / !rows */
+const colWidths = ref<number[]>([])
+const rowHeights = ref<number[]>([])
 
 const colKey = (r: number, c: number): string => `${r},${c}`
 
@@ -110,17 +123,74 @@ function buildRow(ws: WorkSheet, r: number): GridCell[] {
       row.push({ t: '', cs: 1, rs: 1, skip: true, align: 'l' })
       continue
     }
-    const cell = ws[XLSX!.utils.encode_cell({ r: r + or, c: c + oc })] as CellObject | undefined
+    const addr = XLSX!.utils.encode_cell({ r: r + or, c: c + oc })
+    const cell = ws[addr] as CellObject | undefined
     const span = mergeTop.get(key)
     row.push({
       t: cellText(cell),
       cs: span?.cs ?? 1,
       rs: span?.rs ?? 1,
       skip: false,
-      align: alignOf(cell)
+      align: alignOf(cell),
+      style: sheetStyle.get(addr)
     })
   }
   return row
+}
+
+/** 单元格最终 CSS（xlsx 样式优先，其次按数据类型对齐） */
+function cellCss(cell: GridCell): Record<string, string> {
+  const s = cell.style
+  const out: Record<string, string> = {}
+  if (s?.bg) out.background = s.bg
+  if (s?.color) out.color = s.color
+  if (s?.bold) out.fontWeight = '700'
+  if (s?.italic) out.fontStyle = 'italic'
+  if (s?.underline) out.textDecoration = 'underline'
+  if (s?.fontSize) out.fontSize = `${s.fontSize}pt`
+  if (s?.fontFamily) out.fontFamily = `"${s.fontFamily}", "Microsoft YaHei", sans-serif`
+  out.textAlign = s?.align ?? (cell.align === 'r' ? 'right' : cell.align === 'c' ? 'center' : 'left')
+  if (s?.valign) out.verticalAlign = s.valign
+  out.whiteSpace = s?.wrap ? 'pre-wrap' : 'nowrap'
+  if (s?.border) {
+    if (s.border.top) out.borderTop = s.border.top
+    if (s.border.right) out.borderRight = s.border.right
+    if (s.border.bottom) out.borderBottom = s.border.bottom
+    if (s.border.left) out.borderLeft = s.border.left
+  }
+  return out
+}
+
+/** xlsx 列宽（字符数/像素）→ px */
+function colWidthsFrom(ws: WorkSheet): number[] {
+  const cols = ws['!cols'] ?? []
+  const out: number[] = []
+  for (let c = 0; c < renderedCols.value; c++) {
+    const def = cols[c] as { wpx?: number; wch?: number; width?: number; hidden?: boolean } | undefined
+    if (!def) {
+      out.push(96)
+      continue
+    }
+    const px = def.wpx ?? (def.wch != null ? def.wch * 7 + 5 : def.width != null ? def.width * 7 + 5 : 96)
+    out.push(Math.max(24, Math.min(800, Math.round(px))))
+  }
+  return out
+}
+
+/** xlsx 行高（磅/像素）→ px */
+function rowHeightsFrom(ws: WorkSheet): number[] {
+  const rows = ws['!rows'] ?? []
+  const out: number[] = []
+  for (let r = 0; r < Math.min(totalRows.value, MAX_ROWS); r++) {
+    const def = rows[r] as { hpx?: number; hpt?: number } | undefined
+    if (!def) {
+      out.push(0)
+      continue
+    }
+    const px = def.hpx ?? (def.hpt != null ? def.hpt * 1.3333 : 0)
+    out.push(px > 0 ? Math.max(16, Math.round(px)) : 0)
+  }
+  return out
 }
 
 /** 按需增量构建到 visibleRows */
@@ -156,7 +226,10 @@ function selectSheet(name: string): void {
   totalCols.value = range.e.c - range.s.c + 1
   gridRows.value = []
   visibleRows.value = 0
+  sheetStyle = styleBook.get(name) ?? new Map()
   if (ws) buildMerges(ws)
+  colWidths.value = ws ? colWidthsFrom(ws) : []
+  rowHeights.value = ws ? rowHeightsFrom(ws) : []
   updateNotice()
   loadMore()
   scrollEl.value?.scrollTo({ top: 0, left: 0 })
@@ -189,6 +262,9 @@ onMounted(async () => {
   try {
     XLSX = await import('xlsx')
     if (destroyed) return
+    // 自行解析样式（SheetJS 社区版只给填充色，字体/边框/对齐需要解析 styles.xml）
+    styleBook = await readXlsxStyles(r.data.slice(0))
+    if (destroyed) return
     const data = new Uint8Array(r.data.slice(0))
     wb = XLSX.read(data, { type: 'array', cellDates: true, cellText: true, cellNF: false, cellHTML: false })
     const names = wb.SheetNames ?? []
@@ -210,6 +286,8 @@ onBeforeUnmount(() => {
   wb = null
   mergeTop = new Map()
   mergeCovered = new Set()
+  styleBook = new Map()
+  sheetStyle = new Map()
   gridRows.value = []
 })
 </script>
@@ -240,7 +318,11 @@ onBeforeUnmount(() => {
       </div>
 
       <div ref="scrollEl" class="sheet-scroll">
-        <table v-if="!loading && !error" class="sheet-table">
+        <table v-if="!loading && !error" class="sheet-table" :class="{ 'sheet-fixed': colWidths.length > 0 }">
+          <colgroup>
+            <col style="width: 46px" />
+            <col v-for="(w, i) in colWidths" :key="i" :style="{ width: w + 'px' }" />
+          </colgroup>
           <thead>
             <tr class="sheet-colhead">
               <th class="sheet-corner"></th>
@@ -248,7 +330,11 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, ri) in gridRows.slice(0, renderRows)" :key="ri">
+            <tr
+              v-for="(row, ri) in gridRows.slice(0, renderRows)"
+              :key="ri"
+              :style="rowHeights[ri] ? { height: rowHeights[ri] + 'px' } : undefined"
+            >
               <th class="sheet-rownum">{{ ri + 1 }}</th>
               <template v-for="(cell, ci) in row" :key="ci">
                 <td
@@ -256,6 +342,7 @@ onBeforeUnmount(() => {
                   :colspan="cell.cs > 1 ? Math.min(cell.cs, renderedCols - ci) : undefined"
                   :rowspan="cell.rs > 1 ? Math.min(cell.rs, renderRows - ri) : undefined"
                   :class="['sheet-cell', 'al-' + cell.align]"
+                  :style="cellCss(cell)"
                 >
                   {{ cell.t }}
                 </td>
@@ -410,16 +497,30 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--dt-text);
 }
+/* 有列宽定义时按 Excel 的固定列宽排版 */
+.sheet-table.sheet-fixed {
+  table-layout: fixed;
+}
 .sheet-table th,
 .sheet-table td {
   border-right: 1px solid #e6e9ee;
   border-bottom: 1px solid #e6e9ee;
-  padding: 4px 8px;
+  padding: 3px 6px;
   min-width: 56px;
   max-width: 360px;
   white-space: pre-wrap;
   word-break: break-word;
-  vertical-align: top;
+  vertical-align: bottom;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 固定列宽模式下由 colgroup 决定宽度，避免 min-width 干扰 */
+.sheet-table.sheet-fixed th,
+.sheet-table.sheet-fixed td {
+  min-width: 0;
+}
+.sheet-table tbody td {
+  background: #fff;
 }
 .sheet-table thead th {
   position: sticky;
