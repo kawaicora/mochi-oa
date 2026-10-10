@@ -86,6 +86,8 @@ interface HeaderImage {
   h: number
   behind: boolean
   part: string
+  /** 页眉类型：default=除首页外的各页，first=仅首页，even=偶数页 */
+  type: 'default' | 'first' | 'even'
 }
 
 /** JSZip 实例类型（jszip 的类型是 export = JSZip，没有 default） */
@@ -335,7 +337,31 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
  * （对齐方式常为 page + center）。docx-preview 不会渲染页眉里的锚定图，
  * 所以这里单独取出来，渲染后按页面参照系自行定位。
  */
-async function collectHeaderImages(zip: JSZipType): Promise<HeaderImage[]> {
+async function collectHeaderImages(zip: JSZipType, docXml: string): Promise<HeaderImage[]> {
+  // 页眉类型：由 document.xml 的 w:headerReference / w:footerReference 决定
+  const typeByPart = new Map<string, HeaderImage['type']>()
+  {
+    const doc = new DOMParser().parseFromString(docXml, 'application/xml')
+    const wbRels = zip.file('word/_rels/document.xml.rels')
+    const relMap = new Map<string, string>()
+    if (wbRels) {
+      const rx = new DOMParser().parseFromString(await wbRels.async('string'), 'application/xml')
+      for (const r of Array.from(rx.getElementsByTagName('Relationship'))) {
+        const id = r.getAttribute('Id')
+        const t = r.getAttribute('Target')
+        if (id && t) relMap.set(id, t.replace(/^\.\//, ''))
+      }
+    }
+    for (const ref of Array.from(doc.getElementsByTagNameNS(WORD_NS, 'headerReference')).concat(
+      Array.from(doc.getElementsByTagNameNS(WORD_NS, 'footerReference'))
+    )) {
+      const rid = ref.getAttributeNS(REL_NS, 'id') ?? ref.getAttribute('r:id') ?? ''
+      const target = relMap.get(rid)
+      if (!target) continue
+      const t = (ref.getAttributeNS(WORD_NS, 'type') ?? ref.getAttribute('w:type') ?? 'default') as HeaderImage['type']
+      typeByPart.set('word/' + target, t)
+    }
+  }
   const out: HeaderImage[] = []
   const MIME: Record<string, string> = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -393,7 +419,8 @@ async function collectHeaderImages(zip: JSZipType): Promise<HeaderImage[]> {
         w,
         h,
         behind: node.getElementsByTagNameNS(WP_NS, 'anchor')[0]?.getAttribute('behindDoc') === '1',
-        part
+        part,
+        type: typeByPart.get(part) ?? 'default'
       })
     }
   }
@@ -408,28 +435,39 @@ async function collectHeaderImages(zip: JSZipType): Promise<HeaderImage[]> {
  */
 function applyHeaderImages(host: HTMLElement, images: HeaderImage[]): number {
   if (images.length === 0) return 0
-  const section = host.querySelector('section.docx') as HTMLElement | null
-  if (!section) return 0
-  const PT2PX = 96 / 72
-  const pageW = section.clientWidth / PT2PX
-  const pageH = section.clientHeight / PT2PX
+  const sections = Array.from(host.querySelectorAll('section.docx')) as HTMLElement[]
+  if (sections.length === 0) return 0
+  let applied = 0
+  // 有首页页眉时，default 页眉不作用于首页（与 Word 的页眉类型语义一致）
+  const hasFirst = images.some((i) => i.type === 'first')
   for (const im of images) {
-    const el = document.createElement('img')
-    el.src = im.src
-    el.alt = ''
-    el.style.position = 'absolute'
-    el.style.width = `${im.w}pt`
-    el.style.height = `${im.h}pt`
-    el.style.left =
-      (im.hAlign === 'center' ? (pageW - im.w) / 2 : im.hAlign === 'right' ? pageW - im.w : 0) + 'pt'
-    el.style.top =
-      (im.vAlign === 'center' ? (pageH - im.h) / 2 : im.vAlign === 'bottom' ? pageH - im.h : 0) + 'pt'
-    // 页眉层位于正文之下；behindDoc 的图更要垫底
-    el.style.zIndex = '-1'
-    el.style.pointerEvents = 'none'
-    section.appendChild(el)
+    let targets: HTMLElement[]
+    if (im.type === 'first') targets = sections.slice(0, 1)
+    else if (im.type === 'even') targets = sections.filter((_, i) => i % 2 === 1)
+    else targets = hasFirst ? sections.slice(1) : sections
+    for (const section of targets) {
+      const PT2PX = 96 / 72
+      const pageW = section.clientWidth / PT2PX
+      const pageH = section.clientHeight / PT2PX
+      const el = document.createElement('img')
+      el.src = im.src
+      el.alt = ''
+      el.style.position = 'absolute'
+      el.style.width = `${im.w}pt`
+      el.style.height = `${im.h}pt`
+      el.style.left =
+        (im.hAlign === 'center' ? (pageW - im.w) / 2 : im.hAlign === 'right' ? pageW - im.w : 0) + 'pt'
+      el.style.top =
+        (im.vAlign === 'center' ? (pageH - im.h) / 2 : im.vAlign === 'bottom' ? pageH - im.h : 0) + 'pt'
+      // 页眉层位于正文之下；behindDoc 的图更要垫底
+      el.style.zIndex = '-1'
+      el.style.pointerEvents = 'none'
+      el.dataset.headerType = im.type
+      section.appendChild(el)
+      applied += 1
+    }
   }
-  return images.length
+  return applied
 }
 
 /**
@@ -740,7 +778,11 @@ function repairVmlShapes(host: HTMLElement): number {
     for (const img of Array.from(svg.children)) {
       if (img.tagName.toLowerCase() !== 'image') continue
       if (img.getAttribute('href') || img.getAttribute('xlink:href')) continue // 真图片，保留
-      const fill = img.getAttribute('fill')
+      // VML 的 fillcolor 常带主题索引后缀（如 "#FFFFFF [3212]"），SVG 只认颜色本身，
+      // 原样写入会成为非法值导致图形完全不绘制。只取 #RRGGBB 部分。
+      const rawFill = img.getAttribute('fill')
+      const fillMatch = rawFill ? /^#?([0-9a-fA-F]{6})/.exec(rawFill.trim()) : null
+      const fill = fillMatch ? '#' + fillMatch[1].toLowerCase() : rawFill
       const hasFill = !!fill && fill !== 'none' && fill !== 'null'
       const children = Array.from(img.children)
       if (!hasFill && children.length === 0 && !img.getAttribute('width')) continue
@@ -853,8 +895,10 @@ async function prepareDocxBlob(
   try {
     const JSZip = (await import('jszip')).default
     const zip = await JSZip.loadAsync(data)
-    // 页眉/页脚里的锚定图（整页背景图）单独收集
-    const headerImages = await collectHeaderImages(zip)
+    const docEntry = zip.file('word/document.xml')
+    const docXml = docEntry ? await docEntry.async('string') : ''
+    // 页眉/页脚里的锚定图（整页背景图）单独收集，并按 w:type 区分首页/默认
+    const headerImages = await collectHeaderImages(zip, docXml)
     const targets = Object.keys(zip.files).filter((n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n))
     const anchors: DrawingAnchor[] = []
     let changed = false
