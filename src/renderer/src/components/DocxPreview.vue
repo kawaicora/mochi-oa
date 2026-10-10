@@ -71,6 +71,247 @@ function errText(e: unknown): string {
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const VML_NS = 'urn:schemas-microsoft-com:vml'
+const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+const EMU_PT = 12700
+
+/**
+ * DrawingML 浮动对象的锚点信息（长度单位 pt）。
+ * docx-preview 对 wp:anchor 的处理是：把图片塞进一个 0×0 的 inline-block，
+ * 再用 position:relative + left/top 做偏移 —— 偏移是相对「文档流位置」而不是
+ * 页面/页边距参照系，也不产生真正的浮动，所以位置会偏、文字也不会环绕。
+ * 这里把锚点信息在解析前抽出来，渲染后再据此改成绝对定位。
+ */
+interface DrawingAnchor {
+  /** inline=随文；anchor=浮动；shape=docx-preview 不渲染的 wps 形状（需自绘） */
+  kind: 'inline' | 'anchor' | 'shape'
+  hRef: string
+  hOff: number
+  hAlign: string
+  vRef: string
+  vOff: number
+  vAlign: string
+  w: number
+  h: number
+  behind: boolean
+  wrap: string
+  geom: string
+  /** 自绘形状的填充/描边 */
+  fill?: string
+  line?: string
+  /** 是否含图片（用于与渲染出的 <img> 按文档顺序配对） */
+  hasPic: boolean
+}
+
+/** 从 DrawingML 文档里抽取锚点列表（按文档顺序） */
+function collectDrawingAnchors(xml: string): DrawingAnchor[] {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const out: DrawingAnchor[] = []
+  // 注意：<w:drawing> 属于 WordprocessingML 命名空间，其子节点 wp:inline/wp:anchor 才是 wp 命名空间
+  const drawings = Array.from(doc.getElementsByTagNameNS(WORD_NS, 'drawing'))
+  const numPt = (v: string | null | undefined): number => (v ? Number(v) / EMU_PT : 0)
+  for (const d of drawings) {
+    const inline = d.getElementsByTagNameNS(WP_NS, 'inline')[0]
+    const anchor = d.getElementsByTagNameNS(WP_NS, 'anchor')[0]
+    const node = inline ?? anchor
+    if (!node) continue
+    const ext = node.getElementsByTagNameNS(WP_NS, 'extent')[0]
+    const w = numPt(ext?.getAttribute('cx'))
+    const h = numPt(ext?.getAttribute('cy'))
+    const readPos = (tag: string): { ref: string; off: number; align: string } => {
+      const el = node.getElementsByTagNameNS(WP_NS, tag)[0]
+      if (!el) return { ref: '', off: 0, align: '' }
+      const offEl = el.getElementsByTagNameNS(WP_NS, 'posOffset')[0]
+      const alignEl = el.getElementsByTagNameNS(WP_NS, 'align')[0]
+      return {
+        ref: el.getAttribute('relativeFrom') ?? '',
+        off: numPt(offEl?.textContent),
+        align: alignEl?.textContent ?? ''
+      }
+    }
+    const posH = readPos('positionH')
+    const posV = readPos('positionV')
+    const pic = d.getElementsByTagNameNS(A_NS, 'blip').length > 0
+    // wps 形状（文本框/几何图形）：docx-preview 不渲染，需要自绘
+    const sp = d.getElementsByTagName('wps:wsp')[0] ?? null
+    const solidFill = sp?.getElementsByTagNameNS(A_NS, 'solidFill')[0]
+    const ln = sp?.getElementsByTagNameNS(A_NS, 'ln')[0]
+    out.push({
+      kind: anchor ? 'anchor' : inline ? 'inline' : 'shape',
+      hRef: posH.ref,
+      hOff: posH.off,
+      hAlign: posH.align,
+      vRef: posV.ref,
+      vOff: posV.off,
+      vAlign: posV.align,
+      w,
+      h,
+      behind: anchor?.getAttribute('behindDoc') === '1',
+      wrap: (anchor?.getElementsByTagNameNS(WP_NS, 'wrapThrough').length ? 'through' : '') ||
+        (anchor?.getElementsByTagNameNS(WP_NS, 'wrapSquare').length ? 'square' : '') ||
+        (anchor?.getElementsByTagNameNS(WP_NS, 'wrapTopAndBottom').length ? 'topAndBottom' : '') ||
+        (anchor?.getElementsByTagNameNS(WP_NS, 'wrapNone').length ? 'none' : ''),
+      geom: d.getElementsByTagNameNS(A_NS, 'prstGeom')[0]?.getAttribute('prst') ?? '',
+      fill: solidFill?.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
+        ? '#' + solidFill.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+        : undefined,
+      line: ln?.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
+        ? '#' + ln.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+        : undefined,
+      hasPic: pic
+    })
+  }
+  return out
+}
+
+/**
+ * 把 SVG 图片接上：Word 的矢量图标写在 mc:AlternateContent 的 a:extLst/asvg:svgBlip 里，
+ * 外层 a:blip 指向的是 PNG 回退图。docx-preview 只认 a:blip，所以图标只会以位图回退图呈现。
+ * 这里直接把 a:blip 的 r:embed 改成 SVG 的关系 id，让矢量图生效。
+ */
+function preferSvgBlips(xml: string): string {
+  if (!xml.includes('svgBlip')) return xml
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const svgBlips = Array.from(doc.getElementsByTagNameNS('http://schemas.microsoft.com/office/drawing/2016/SVG/main', 'svgBlip'))
+  let n = 0
+  for (const svg of svgBlips) {
+    const rid = svg.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed') ?? svg.getAttribute('r:embed')
+    if (!rid) continue
+    // 该 svgBlip 所属的 a:blip（同一 a:extLst 的兄弟链上找最近的 blip）
+    let host: Element | null = svg.parentElement
+    while (host && host.localName !== 'blip') host = host.parentElement
+    if (!host) continue
+    host.setAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'r:embed', rid)
+    n += 1
+  }
+  return n > 0 ? new XMLSerializer().serializeToString(doc) : xml
+}
+
+/** prstGeom 预设几何 → CSS 裁剪。
+ *  取值依据 LibreOffice oox/source/drawingml/customshapes/presetShapeDefinitions.xml：
+ *  snip2DiagRect 剪掉「右上 + 左下」两个角，剪切量 = 短边 × adj2/100000（adj2 默认 16667 = 1/6），
+ *  且 x/y 用同一个绝对长度；roundRect 圆角 = 短边 × 1/6。 */
+function applyGeometryMask(el: HTMLElement, geom: string, w: number, h: number): void {
+  // w/h 单位为 pt，剪切量同理用 pt
+  const s = Math.min(w, h) / 6
+  switch (geom) {
+    case 'snip2DiagRect':
+      el.style.clipPath = `polygon(0 0, calc(100% - ${s}pt) 0, 100% ${s}pt, 100% 100%, ${s}pt 100%, 0 calc(100% - ${s}pt))`
+      break
+    case 'snip1Rect':
+      el.style.clipPath = `polygon(0 0, calc(100% - ${s}pt) 0, 100% ${s}pt, 100% 100%, 0 100%)`
+      break
+    case 'snip2SameRect':
+      el.style.clipPath = `polygon(${s}pt 0, calc(100% - ${s}pt) 0, 100% ${s}pt, 100% 100%, ${s}pt 100%, 0 calc(100% - ${s}pt), 0 ${s}pt)`
+      break
+    case 'roundRect':
+      el.style.borderRadius = `${s}pt`
+      break
+    case 'ellipse':
+    case 'circle':
+      el.style.borderRadius = '50%'
+      break
+    default:
+      break
+  }
+}
+
+/**
+ * 渲染后把 DrawingML 浮动对象改成真正的绝对定位：
+ *  - 参照系：H 的 margin/column → 页左边距 + 偏移；page → 偏移；align → 按页宽算
+ *  - V 的 paragraph → 「段落顶部 + 偏移」，段落顶部由 DOM 实测（Word 的 paragraph 参照系语义）
+ *  - behindDoc=1 → z-index:-1：按 CSS 绘制顺序，负 z-index 子元素画在元素自身背景之后、
+ *    正文内容之前，正好等价于「图片垫在文字底下」
+ *  - 应用 prstGeom 遮罩；对 docx-preview 完全不渲染的 wps 形状按锚点自绘
+ */
+function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): number {
+  const section = host.querySelector('section.docx') as HTMLElement | null
+  if (!section || anchors.length === 0) return 0
+  const secRect = section.getBoundingClientRect()
+  const cs = getComputedStyle(section)
+  const PT2PX = 96 / 72
+  const padL = (parseFloat(cs.paddingLeft) || 0) / PT2PX
+  const padT = (parseFloat(cs.paddingTop) || 0) / PT2PX
+  const padR = (parseFloat(cs.paddingRight) || 0) / PT2PX
+  const pageWpt = section.clientWidth / PT2PX
+
+  const imgs = Array.from(host.querySelectorAll('img')) as HTMLImageElement[]
+  let applied = 0
+  let imgIdx = 0
+
+  for (const a of anchors) {
+    // 目标元素：有图 → 对应的 <img> 外层容器；无图（wps 形状）→ 自绘
+    let box: HTMLElement | null = null
+    let target: HTMLElement | null = null
+    if (a.hasPic) {
+      const img = imgs[imgIdx]
+      imgIdx += 1
+      if (!img) continue
+      target = img
+      box = (img.parentElement as HTMLElement | null) ?? img
+    }
+
+    // 位置换算（pt）
+    let leftPt: number
+    if (a.hAlign === 'center') leftPt = (pageWpt - a.w) / 2
+    else if (a.hAlign === 'right') leftPt = pageWpt - padR - a.w
+    else leftPt = (a.hRef === 'page' ? 0 : padL) + a.hOff
+
+    let topPt: number | null = null
+    if (a.vAlign === 'center' || a.vAlign === 'bottom') {
+      const pageHpt = section.clientHeight / PT2PX
+      topPt = a.vAlign === 'center' ? (pageHpt - a.h) / 2 : pageHpt - (parseFloat(cs.paddingBottom) || 0) / PT2PX - a.h
+    } else if (a.vRef === 'paragraph' || a.vRef === 'line') {
+      // 段落顶部由 DOM 实测，再把偏移加上
+      const para = box?.closest('p') as HTMLElement | null
+      const paraTopPt = para ? (para.getBoundingClientRect().top - secRect.top) / PT2PX : 0
+      topPt = paraTopPt + a.vOff
+    } else {
+      topPt = (a.vRef === 'page' ? 0 : padT) + a.vOff
+    }
+
+    if (a.kind === 'inline') {
+      // 随文图片本来就在流里，只处理遮罩
+      if (target && a.geom) applyGeometryMask(target, a.geom, a.w, a.h)
+      continue
+    }
+
+    if (!box) {
+      // docx-preview 未渲染的 wps 形状：按锚点自绘一个盒子
+      box = document.createElement('div')
+      box.style.cssText = `position:absolute;left:${leftPt}pt;top:${topPt}pt;width:${a.w}pt;height:${a.h}pt;`
+      if (a.fill) box.style.background = a.fill
+      if (a.line) box.style.border = `1px solid ${a.line}`
+      if (a.geom) applyGeometryMask(box, a.geom, a.w, a.h)
+      box.style.zIndex = a.behind ? '-1' : '2'
+      section.appendChild(box)
+      applied += 1
+      continue
+    }
+
+    // 浮动对象 → 绝对定位
+    box.style.position = 'absolute'
+    box.style.left = `${leftPt}pt`
+    box.style.top = `${topPt}pt`
+    box.style.width = `${a.w}pt`
+    box.style.height = `${a.h}pt`
+    box.style.margin = '0'
+    box.style.float = 'none'
+    // z-index:-1 → 绘制在正文之下、页面底色之上
+    box.style.zIndex = a.behind ? '-1' : '2'
+    if (target) {
+      target.style.position = 'static'
+      target.style.left = '0'
+      target.style.top = '0'
+      target.style.width = '100%'
+      target.style.height = '100%'
+      if (a.geom) applyGeometryMask(target, a.geom, a.w, a.h)
+    }
+    applied += 1
+  }
+  return applied
+}
 
 /** 解析 VML style 字符串为键值表 */
 function styleMap(el: Element): Record<string, string> {
@@ -348,28 +589,38 @@ async function openLocation(): Promise<void> {
 }
 
 /**
- * 预处理 .docx：把 word/*.xml 里的 VML 组合（v:group）摊平成绝对定位形状。
+ * 预处理 .docx：
+ *  1) 摊平 VML 组合（v:group）并把 VML 形状归一化为绝对定位；
+ *  2) 收集 DrawingML 浮动对象的锚点信息（渲染后据此做绝对定位/遮罩/z 序）；
+ *  3) 把 SVG 图标（asvg:svgBlip）接到 a:blip 上，避免只显示位图回退图。
  * 预处理失败时回退为原始文件，保证预览本身不受影响。
  */
-async function prepareDocxBlob(data: ArrayBuffer, mime: string): Promise<Blob> {
-  const fallback = new Blob([data], { type: mime })
+async function prepareDocxBlob(
+  data: ArrayBuffer,
+  mime: string
+): Promise<{ blob: Blob; anchors: DrawingAnchor[] }> {
+  const fallback = { blob: new Blob([data], { type: mime }), anchors: [] as DrawingAnchor[] }
   try {
     const JSZip = (await import('jszip')).default
     const zip = await JSZip.loadAsync(data)
     const targets = Object.keys(zip.files).filter((n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n))
+    const anchors: DrawingAnchor[] = []
     let changed = false
     for (const name of targets) {
       const entry = zip.file(name)
       if (!entry) continue
-      const xml = await entry.async('string')
-      const fixed = normalizeVmlPositioning(xml)
-      if (fixed && fixed !== xml) {
-        zip.file(name, fixed)
+      let xml = await entry.async('string')
+      const before = xml
+      xml = preferSvgBlips(xml)
+      xml = normalizeVmlPositioning(xml)
+      if (name === 'word/document.xml') anchors.push(...collectDrawingAnchors(xml))
+      if (xml !== before) {
+        zip.file(name, xml)
         changed = true
       }
     }
-    if (!changed) return fallback
-    return await zip.generateAsync({ type: 'blob', mimeType: mime })
+    if (!changed) return { blob: fallback.blob, anchors }
+    return { blob: await zip.generateAsync({ type: 'blob', mimeType: mime }), anchors }
   } catch (e) {
     console.warn('[docx] 预处理失败，按原始文件渲染', e)
     return fallback
@@ -402,8 +653,8 @@ onMounted(async () => {
     const { renderAsync } = await import('docx-preview')
     if (destroyed) return
     const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    // 先摊平 VML 组合，否则组合内的文本框会被 docx-preview 整体丢弃
-    const blob = await prepareDocxBlob(r.data, mime)
+    // 预处理：摊平/归一化 VML，收集 DrawingML 锚点，接上 SVG 图标
+    const { blob, anchors } = await prepareDocxBlob(r.data, mime)
     if (destroyed) return
     await renderAsync(blob, host, undefined, {
       className: 'docx',
@@ -430,6 +681,9 @@ onMounted(async () => {
     if (destroyed) return
     // 修复 VML 形状/文本框（见 repairVmlShapes 注释），否则浮动文本框里的文字与色块会丢失
     repairVmlShapes(host)
+    // DrawingML 浮动对象：按锚点改为绝对定位 + 遮罩 + z 序（behindDoc）
+    const anchored = applyDrawingAnchors(host, anchors)
+    if (anchored) console.log(`[docx] 已按锚点定位 ${anchored} 个浮动对象`)
     pages.value = host.querySelectorAll('section.docx').length
     loading.value = false
     await nextTick()
