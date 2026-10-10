@@ -72,12 +72,14 @@
     "vue": "^3.4.31"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "@types/three": "^0.186.0",
     "@vitejs/plugin-vue": "^5.0.5",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
-    "typescript": "^5.5.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
     "vite": "^5.3.1",
     "vite-plugin-javascript-obfuscator": "^3.1.0",
     "vue-tsc": "^2.0.26"

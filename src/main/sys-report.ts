@@ -23,22 +23,13 @@ import { app } from 'electron'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { any } from 'three/tsl';
 
 // systeminformation 是 CommonJS 包，方法挂在 module.exports 上；ESM 的 import * as / default 在打包后
 // 都可能取不到方法（此前 import * as 与 import default 均导致 si.motherboard is not a function）。
 // 主进程是 Node 环境，直接用 require 拿 module.exports 最稳。d.ts 仅声明命名空间接口，此处显式声明形状。
-type SiApi = {
-  // 注意：systeminformation 的主板方法名是 baseboard()（无 motherboard 方法）
-  baseboard(): Promise<{ manufacturer: string; model: string }>
-  memLayout(): Promise<Array<{ size?: number; clockSpeed?: number; type?: string; manufacturer?: string }>>
-  graphics(): Promise<{ controllers: Array<{ vendor?: string; model?: string; vram?: number; driverVersion?: string; utilizationGpu?: number }> }>
-  diskLayout(): Promise<Array<{ device?: string; name?: string; size?: number }>>
-  networkInterfaces(): Promise<Array<{ iface?: string; mac?: string; ip4?: string; operstate?: string }>>
-  fsSize(): Promise<Array<{ mount?: string; used?: number; size?: number; use?: number }>>
-  processes(): Promise<{ all: Array<{ pid?: number; name?: string; cpu?: number; mem_rss?: number }> }>
-}
-const si = (require('systeminformation') as unknown) as SiApi
 
+const si:any = require("systeminformation");
 export interface SysReportPayload {
   deviceId: string
   info: Record<string, unknown>
@@ -48,6 +39,65 @@ export interface SysReportPayload {
 let timer: NodeJS.Timeout | null = null
 let stopped = false
 
+
+let mb: { manufacturer: string; model: string } | undefined
+let memLayout: {
+    size?: number | undefined;
+    clockSpeed?: number | undefined;
+    type?: string | undefined;
+    manufacturer?: string | undefined;
+}[] | undefined
+let graphics: {
+  controllers: {
+  vendor?: string | undefined;
+  model?: string | undefined;
+  vram?: number | undefined;
+  driverVersion?: string | undefined;
+  utilizationGpu?: number | undefined;
+  }[];
+} | undefined
+let disks:{
+    device: string ,
+    type: string ,
+    name: string ,
+    vendor: string,
+    size: number,
+    bytesPerSector: number,
+    totalCylinders: number,
+    totalHeads: number,
+    totalSectors: number,
+    totalTracks: number,
+    tracksPerCylinder: number,
+    sectorsPerTrack: number,
+    firmwareRevision: string,
+    serialNum: string,
+    interfaceType: string,
+    smartStatus: string,
+
+}[] | undefined
+let nets: {
+iface?: string | undefined;
+mac?: string | undefined;
+ip4?: string | undefined;
+operstate?: string | undefined;
+}[] | undefined
+let fsSizes: {
+  mount?: string | undefined;
+  used?: number | undefined;
+  size?: number | undefined;
+  use?: number | undefined;
+  }[] | undefined
+let devices:any = null
+let procs: {
+  all: {
+  pid?: number | undefined;
+  name?: string | undefined;
+  cpu?: number | undefined;
+  mem_rss?: number | undefined;
+  }[];
+  } | undefined
+let data:any = null
+let isStartGetData: boolean = false
 function deviceId(): string {
   const f = path.join(app.getPath('userData'), 'device-id.json')
   try {
@@ -70,83 +120,131 @@ function networkIps(): Array<{ name: string; address: string; internal: boolean 
   return out
 }
 
-// ── 静态硬件缓存（约 30s 刷新）──────────────────────────
+function getStaticData(callback?: (data: any) => void): Promise<any> {
+  return new Promise((resolve) => {
+    process.nextTick(() => {
+      const data:any = {};
+
+      data.version = si.version();
+
+      Promise.all([
+        si.system(),
+        si.bios(),
+        si.baseboard(),
+        si.chassis(),
+        si.osInfo(),
+        si.uuid(),
+        si.versions(),
+        si.cpu(),
+        si.cpuFlags(),
+        si.graphics(),
+        si.networkInterfaces(),
+        si.memLayout(),
+        si.diskLayout(),
+        si.audio(),
+        si.bluetoothDevices(),
+        si.usb(),
+        si.printer(),
+        si.fsSize()
+      ]).then((res) => {
+        data.system = res[0];
+        data.bios = res[1];
+        data.baseboard = res[2];
+        data.chassis = res[3];
+        data.os = res[4];
+        data.uuid = res[5];
+        data.versions = res[6];
+        data.cpu = res[7];
+        data.cpu.flags = res[8];
+        data.graphics = res[9];
+        data.net = res[10];
+        data.memLayout = res[11];
+        data.diskLayout = res[12];
+        data.audio = res[13];
+        data.bluetooth = res[14];
+        data.usb = res[15];
+        data.printer = res[16];
+        data.fsSize = res[17];
+        if (callback) {
+          callback(data);
+        }
+        resolve(data);
+      });
+    });
+  });
+}
+// ── 静态硬件缓存──────────────────────────
 let staticInfo: {
   board: string
   memDetail: Array<Record<string, unknown>>
   gpuInfo: Array<Record<string, unknown>>
-  devices: Array<Record<string, unknown>>
   disk: string
   fs: Array<{ mount: string; used: number; size: number; use: number }>
   processes: Array<Record<string, unknown>>
   gpus: Array<{ name: string; load: number }>
-} = { board: '未知', memDetail: [], gpuInfo: [], devices: [], disk: '', fs: [], processes: [], gpus: [] }
+} = { board: '未知', memDetail: [], gpuInfo: [], disk: '', fs: [], processes: [], gpus: [] }
 let lastStatic = 0
 let gpuLoadTimer: NodeJS.Timeout | null = null
 
 function gpuName(c: { vendor?: string; model?: string }): string {
   return [c.vendor, c.model].filter(Boolean).join(' ').trim() || 'GPU'
 }
-
+let isTryGetStaticData: boolean = false
 async function refreshStatic(): Promise<void> {
   try {
-    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | undefined> =>
-      Promise.race([p, new Promise<undefined>((res) => setTimeout(() => res(undefined), ms))])
-    const [mb, memLayout, graphics, disks, nets, fsSizes, procs] = await Promise.all([
-      withTimeout(si.baseboard(), 4000),
-      withTimeout(si.memLayout(), 4000),
-      withTimeout(si.graphics(), 4000),
-      withTimeout(si.diskLayout(), 4000),
-      withTimeout(si.networkInterfaces(), 4000),
-      withTimeout(si.fsSize(), 4000),
-      withTimeout(si.processes(), 6000)
-    ])
-    staticInfo.board = mb ? ([mb.manufacturer, mb.model].filter(Boolean).join(' ').trim() || '未知') : staticInfo.board
-    if (memLayout) {
-      staticInfo.memDetail = memLayout.map((m) => ({
-        capacity: m.size ? Math.round(m.size / 1e9) + 'GB' : '',
-        speed: m.clockSpeed ? String(m.clockSpeed) + 'MHz' : '',
-        manufacturer: m.manufacturer || '',
-        type: m.type || ''
-      }))
+    if (!isTryGetStaticData) {
+      isTryGetStaticData = true
+      getStaticData((res:any) => {
+        // Handle the static data
+        data = res;
+      })
     }
-    if (graphics && graphics.controllers) {
-      staticInfo.gpuInfo = graphics.controllers.map((c) => ({
-        name: gpuName(c),
-        vram: c.vram ? c.vram + 'GB' : '',
-        driver: c.driverVersion || ''
-      }))
-      staticInfo.gpus = graphics.controllers.map((c) => ({
-        name: gpuName(c),
-        load: c.utilizationGpu != null ? Math.min(100, Math.max(0, Math.round(c.utilizationGpu))) : 0
-      }))
+    
+    
+    if(data === null) {
+      console.info(`数据未准备好，等待下一次刷新`)
+      return
     }
-    const devices: Array<Record<string, unknown>> = []
-    if (nets) {
-      for (const n of nets) {
-        if (n && n.mac && n.mac !== '00:00:00:00:00:00' && n.operstate !== 'down') {
-          devices.push({ type: '网卡', name: n.iface || '', mac: n.mac, ip: n.ip4 || '' })
-        }
+      mb = data.baseboard;
+      memLayout = data.memLayout;
+      graphics = data.graphics;
+      disks = data.diskLayout;
+      nets = data.networkInterfaces;
+      fsSizes = data.fsSize;
+      procs = data.processes;
+      staticInfo.board = mb ? ([mb.manufacturer, mb.model].filter(Boolean).join(' ').trim() || '未知') : staticInfo.board
+      if (memLayout) {
+        staticInfo.memDetail = memLayout.map((m) => ({
+          capacity: m.size ? Math.round(m.size / 1e9) + 'GB' : '',
+          speed: m.clockSpeed ? String(m.clockSpeed) + 'MHz' : '',
+          manufacturer: m.manufacturer || '',
+          type: m.type || ''
+        }))
       }
-    }
-    if (disks) {
-      for (const d of disks) {
-        devices.push({ type: '磁盘', name: d.name || d.device || '', size: d.size ? Math.round(d.size / 1e9) + 'GB' : '' })
+      if (graphics && graphics.controllers) {
+        staticInfo.gpuInfo = graphics.controllers.map((c) => ({
+          name: gpuName(c),
+          vram: c.vram ? c.vram + 'GB' : '',
+          driver: c.driverVersion || ''
+        }))
+        staticInfo.gpus = graphics.controllers.map((c) => ({
+          name: gpuName(c),
+          load: c.utilizationGpu != null ? Math.min(100, Math.max(0, Math.round(c.utilizationGpu))) : 0
+        }))
       }
-    }
-    staticInfo.devices = devices
-    if (fsSizes) {
-      staticInfo.disk = fsSizes.map((f) => `${f.mount}: ${Math.round((f.used ?? 0) / 1e9)}GB/${Math.round((f.size ?? 0) / 1e9)}GB(${f.use || 0}%)`).join('\n')
-      staticInfo.fs = fsSizes.map((f) => ({ mount: f.mount || '', used: f.used || 0, size: f.size || 0, use: f.use || 0 }))
-    }
-    if (procs && procs.all) {
-      staticInfo.processes = procs.all.slice().sort((a, b) => (b.mem_rss || 0) - (a.mem_rss || 0)).slice(0, 40).map((p) => ({
-        pid: p.pid,
-        name: p.name || '',
-        mem: p.mem_rss ? Math.round(p.mem_rss / 1e6) : 0,
-        cpu: p.cpu != null ? Math.round(p.cpu) : 0
-      }))
-    }
+      
+      if (fsSizes) {
+        staticInfo.disk = fsSizes.map((f) => `${f.mount}: ${Math.round((f.used ?? 0) / 1e9)}GB/${Math.round((f.size ?? 0) / 1e9)}GB(${f.use || 0}%)`).join('\n')
+        staticInfo.fs = fsSizes.map((f) => ({ mount: f.mount || '', used: f.used || 0, size: f.size || 0, use: f.use || 0 }))
+      }
+      if (procs && procs.all) {
+        staticInfo.processes = procs.all.slice().sort((a, b) => (b.mem_rss || 0) - (a.mem_rss || 0)).slice(0, 40).map((p) => ({
+          pid: p.pid,
+          name: p.name || '',
+          mem: p.mem_rss ? Math.round(p.mem_rss / 1e6) : 0,
+          cpu: p.cpu != null ? Math.round(p.cpu) : 0
+        }))
+      }
   } catch (e) {
     console.error(`[sys-report] refreshStatic 异常: ${e instanceof Error ? e.message : String(e)}`)
   }
@@ -181,17 +279,13 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
   lastStatic = Date.now()
   const baseInfoUpdateCDTime = 30 * 1_000
   const tickUpdateCDTime = 1 * 1_000
-  void refreshStatic()
-  gpuLoadTimer = setInterval(() => void refreshStatic(), baseInfoUpdateCDTime) // GPU 使用率随静态一起刷新
+  
 
   const tick = async (): Promise<void> => {
     if (stopped) return
     try {
       const now = Date.now()
-      if (now - lastStatic > baseInfoUpdateCDTime) {
-        lastStatic = now
-        void refreshStatic() // 静态采集异步后台刷新，绝不阻塞上报（此前 await 卡住导致 dev:sys 从不发出）
-      }
+      void refreshStatic()
       const totalMem = os.totalmem()
       const free = os.freemem()
       const cpus = os.cpus()
@@ -210,7 +304,6 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
         board: staticInfo.board,
         memDetail: staticInfo.memDetail,
         gpuInfo: staticInfo.gpuInfo,
-        devices: staticInfo.devices,
         disk: staticInfo.disk,
         fs: staticInfo.fs,
         processes: staticInfo.processes
@@ -234,7 +327,6 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
 
 export function stopSysReport(): void {
   stopped = true
-  if (gpuLoadTimer) { clearInterval(gpuLoadTimer); gpuLoadTimer = null }
   if (timer) {
     clearInterval(timer)
     timer = null

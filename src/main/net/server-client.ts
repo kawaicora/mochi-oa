@@ -67,7 +67,6 @@ function safeLog(payload: unknown): string {
   try {
     let s = JSON.stringify(payload ?? {})
     s = s.replace(/"enc":"[^"]{8,}"/g, '"enc":"***"').replace(/token[=:][^"&,}]{6,}/gi, 'token=***')
-    if (s.length > 300) return s.slice(0, 300) + `…(len=${s.length})`
     return s
   } catch {
     return String(payload)
