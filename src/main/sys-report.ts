@@ -179,14 +179,16 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
   stopped = false
   lastCpu = os.cpus()
   lastStatic = Date.now()
+  const baseInfoUpdateCDTime = 30 * 1_000
+  const tickUpdateCDTime = 1 * 1_000
   void refreshStatic()
-  gpuLoadTimer = setInterval(() => void refreshStatic(), 30_000) // GPU 使用率随静态一起刷新
+  gpuLoadTimer = setInterval(() => void refreshStatic(), baseInfoUpdateCDTime) // GPU 使用率随静态一起刷新
 
   const tick = async (): Promise<void> => {
     if (stopped) return
     try {
       const now = Date.now()
-      if (now - lastStatic > 30_000) {
+      if (now - lastStatic > baseInfoUpdateCDTime) {
         lastStatic = now
         void refreshStatic() // 静态采集异步后台刷新，绝不阻塞上报（此前 await 卡住导致 dev:sys 从不发出）
       }
@@ -227,7 +229,7 @@ export function startSysReport(emit: (payload: SysReportPayload, onAck?: (status
   }
 
   void tick()
-  timer = setInterval(() => void tick(), 5000)
+  timer = setInterval(() => void tick(), tickUpdateCDTime)
 }
 
 export function stopSysReport(): void {
