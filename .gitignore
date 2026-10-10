@@ -10,3 +10,4 @@ tools/.shot/
 *.tsbuildinfo
 功能反馈截图
 electron.vite.config.*.mjs
+.dsh-verify

@@ -5,6 +5,9 @@ import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
 import ModelPreview from './ModelPreview.vue'
 import MediaPreview from './MediaPreview.vue'
+import PdfPreview from './PdfPreview.vue'
+import DocxPreview from './DocxPreview.vue'
+import SheetPreview from './SheetPreview.vue'
 import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
@@ -311,21 +314,60 @@ function is3dModelUrl(url: string): boolean {
   return /\.(fbx|obj|stl|glb|gltf|dae)(\?|$)/i.test(url)
 }
 
+/** 聊天内可预览的 Office 文档类型 */
+type OfficePreviewKind = 'pdf' | 'word' | 'excel'
+
+/** 按扩展名判断可预览类型：PDF / Word(.docx) / Excel(.xlsx/.xls/.csv)；旧版二进制 .doc 不支持 */
+function officePreviewKind(url: string): OfficePreviewKind | null {
+  if (/\.pdf(\?|$)/i.test(url)) return 'pdf'
+  if (/\.docx(\?|$)/i.test(url)) return 'word'
+  if (/\.(xlsx|xls|csv)(\?|$)/i.test(url)) return 'excel'
+  return null
+}
+
+/** 取消息对应的本地绝对路径：优先自动下载缓存，其次按需下载（失败返回 null） */
+async function ensureLocalPath(m: { content: string; id: string }): Promise<string | null> {
+  const cached = app.localCache[m.id]?.path
+  if (cached) return cached
+  // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
+  const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
+  return r.ok && r.path ? r.path : null
+}
+
 /** 3D 预览弹窗 */
 const previewModel = ref<{ path: string; name: string } | null>(null)
+/** PDF 预览弹窗 */
+const previewPdf = ref<{ path: string; name: string } | null>(null)
+/** Word 预览弹窗 */
+const previewDocx = ref<{ path: string; name: string } | null>(null)
+/** Excel 预览弹窗 */
+const previewSheet = ref<{ path: string; name: string } | null>(null)
 /** 单独窗口预览：图片大图 / 视频全屏播放 */
 const previewMedia = ref<{ kind: 'image' | 'video'; m: ServerChatMessage } | null>(null)
+
 async function openModelPreview(m: { content: string; id: string }): Promise<void> {
-  let path = app.localCache[m.id]?.path
+  const path = await ensureLocalPath(m)
   if (!path) {
-    const r = await window.pantry.serverDownloadFile(m.content)
-    if (!r.ok || !r.path) {
-      flashToast('模型文件下载失败')
-      return
-    }
-    path = r.path
+    flashToast('模型文件下载失败')
+    return
   }
   previewModel.value = { path, name: fileNameOf(m.content) }
+}
+
+/** 打开聊天内 Office 文档预览（PDF / Word / Excel），按需下载到本地后交给对应预览组件 */
+async function openOfficePreview(m: { content: string; id: string }): Promise<void> {
+  const kind = officePreviewKind(m.content)
+  if (!kind) return
+  const label = kind === 'pdf' ? 'PDF' : kind === 'word' ? 'Word' : 'Excel'
+  const path = await ensureLocalPath(m)
+  if (!path) {
+    flashToast(`${label} 文件下载失败`)
+    return
+  }
+  const payload = { path, name: fileNameOf(m.content) }
+  if (kind === 'pdf') previewPdf.value = payload
+  else if (kind === 'word') previewDocx.value = payload
+  else previewSheet.value = payload
 }
 </script>
 
@@ -386,13 +428,20 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
               <img v-else-if="m.kind === 'image' && isImageUrl(m.content)" :src="app.localPreviewUrl(m)" class="msg-img" @error="app.fallbackPreview(m)" @click="previewMedia = { kind: 'image', m }" />
               <!-- 音频：内联播放控件 -->
               <MsgAudio v-else-if="m.kind === 'audio'" :m="m" />
-              <!-- 文件：3D 模型显示预览按钮，否则普通文件 -->
+              <!-- 文件：3D 模型 / Office 文档（PDF、Word、Excel）显示预览按钮，否则普通文件链接 -->
               <template v-else-if="m.kind === 'file' || m.kind === 'image'">
                 <div v-if="m.kind === 'file' && is3dModelUrl(m.content)" class="msg-model">
                   <i class="fas fa-cube msg-model-icon"></i>
                   <span class="msg-model-name" :title="fileNameOf(m.content)">{{ fileNameOf(m.content) }}</span>
                   <button class="msg-folder-dl" @click="openModelPreview(m)">
                     <i class="fas fa-cube"></i>&nbsp;3D 预览
+                  </button>
+                </div>
+                <div v-else-if="m.kind === 'file' && officePreviewKind(m.content)" class="msg-model">
+                  <i :class="[fileIcon(m.content), 'msg-model-icon', 'msg-office-' + officePreviewKind(m.content)]"></i>
+                  <span class="msg-model-name" :title="fileNameOf(m.content)">{{ fileNameOf(m.content) }}</span>
+                  <button class="msg-folder-dl" @click="openOfficePreview(m)">
+                    <i class="far fa-eye"></i>&nbsp;预览
                   </button>
                 </div>
                 <a v-else :href="app.localPreviewUrl(m)" target="_blank" class="msg-file">
@@ -486,6 +535,15 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 
     <!-- 3D 模型预览 -->
     <ModelPreview v-if="previewModel" :path="previewModel.path" :name="previewModel.name" @close="previewModel = null" />
+
+    <!-- PDF 预览 -->
+    <PdfPreview v-if="previewPdf" :path="previewPdf.path" :name="previewPdf.name" @close="previewPdf = null" />
+
+    <!-- Word 预览 -->
+    <DocxPreview v-if="previewDocx" :path="previewDocx.path" :name="previewDocx.name" @close="previewDocx = null" />
+
+    <!-- Excel 预览 -->
+    <SheetPreview v-if="previewSheet" :path="previewSheet.path" :name="previewSheet.name" @close="previewSheet = null" />
 
     <!-- 图片/视频单独预览 -->
     <MediaPreview v-if="previewMedia" :kind="previewMedia.kind" :m="previewMedia.m" @close="previewMedia = null" />
@@ -663,6 +721,15 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
   font-size: 22px;
   color: #7b6bf0;
   flex-shrink: 0;
+}
+.msg-office-pdf {
+  color: #e2574c;
+}
+.msg-office-word {
+  color: #2b579a;
+}
+.msg-office-excel {
+  color: #217346;
 }
 .msg-model-name {
   flex: 1;
