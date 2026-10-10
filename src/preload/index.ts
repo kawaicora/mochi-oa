@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
 import type {
   Ack,
@@ -274,6 +274,15 @@ const api = {
   pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePick, filter ?? null),
   pickFiles: (filter?: 'image' | 'video' | 'audio'): Promise<string[]> => ipcRenderer.invoke(IpcChannels.filePickMulti, filter ?? null),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePickFolder),
+  // 拖放上传：从 File 对象取磁盘绝对路径（Electron 30+ 用 webUtils；旧版回退 File.path）
+  pathForFile: (file: File): string => {
+    try {
+      if (typeof webUtils?.getPathForFile === 'function') return webUtils.getPathForFile(file)
+    } catch {
+      /* 回退到旧版 File.path */
+    }
+    return (file as unknown as { path?: string }).path ?? ''
+  },
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     ipcRenderer.invoke(IpcChannels.serverListFolderFiles, folderPath),
   serverDownloadFolder: (relPath: string): Promise<Ack & { data?: { destDir?: string; count?: number } }> =>

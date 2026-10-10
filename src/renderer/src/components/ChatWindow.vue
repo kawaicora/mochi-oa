@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
@@ -158,6 +158,130 @@ onMounted(() => {
       sending.value = false
     }
   })
+})
+
+// ─── 拖放上传 ───
+/** 是否正处于拖放悬停状态（用于显示投放遮罩） */
+const dragActive = ref(false)
+/** dragenter/dragleave 会在子元素间反复触发，用计数器避免遮罩闪烁 */
+let dragDepth = 0
+
+interface DropItem {
+  path: string
+  isDir: boolean
+  name: string
+}
+
+/** 拖拽内容里是否含文件（拖动选中文字时 types 不含 Files） */
+function dragHasFiles(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types
+  if (!types) return false
+  return Array.prototype.indexOf.call(types, 'Files') >= 0
+}
+
+function onDragEnter(e: DragEvent): void {
+  if (!selected.value || !dragHasFiles(e)) return
+  e.preventDefault()
+  dragDepth += 1
+  dragActive.value = true
+}
+
+function onDragOver(e: DragEvent): void {
+  if (!selected.value || !dragHasFiles(e)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  if (!dragActive.value) dragActive.value = true
+}
+
+function onDragLeave(e: DragEvent): void {
+  if (!dragActive.value) return
+  e.preventDefault()
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragActive.value = false
+}
+
+/** 从拖放事件收集待发送项：文件取绝对路径，文件夹标记出来交给 sendFolder */
+function collectDropItems(e: DragEvent): DropItem[] {
+  const dt = e.dataTransfer
+  if (!dt) return []
+  const files = Array.from(dt.files ?? [])
+  if (files.length === 0) return []
+  // File 对象拿不到 isDirectory，用 webkitGetAsEntry 判断（与 files 顺序一一对应）
+  const dirFlags: boolean[] = []
+  const items = dt.items ? Array.from(dt.items) : []
+  for (let i = 0; i < files.length; i++) {
+    let isDir = false
+    const it = items[i]
+    if (it && it.kind === 'file' && typeof it.webkitGetAsEntry === 'function') {
+      try {
+        isDir = it.webkitGetAsEntry()?.isDirectory === true
+      } catch {
+        isDir = false
+      }
+    }
+    dirFlags.push(isDir)
+  }
+  const out: DropItem[] = []
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]
+    // pathForFile 应返回字符串；类型不符时回退到旧版 File.path，避免把对象当成路径
+    let path = ''
+    try {
+      const r = window.pantry.pathForFile(f)
+      if (typeof r === 'string') path = r
+    } catch {
+      path = ''
+    }
+    if (!path) {
+      const legacy = (f as File & { path?: string }).path
+      if (typeof legacy === 'string') path = legacy
+    }
+    if (!path) continue
+    out.push({ path, isDir: dirFlags[i] === true, name: f.name })
+  }
+  return out
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  if (dragActive.value) e.preventDefault()
+  dragDepth = 0
+  dragActive.value = false
+  if (!selected.value || sending.value) return
+  e.preventDefault()
+  const items = collectDropItems(e)
+  if (items.length === 0) {
+    flashToast('未识别到可发送的文件')
+    return
+  }
+  sending.value = true
+  try {
+    for (const it of items) {
+      // 文件夹走 sendFolder（整目录打包上传），文件走 sendFile
+      if (it.isDir) await app.sendFolder(it.path)
+      else await app.sendFile(it.path)
+    }
+  } finally {
+    sending.value = false
+  }
+}
+
+/** 拖到聊天区以外时阻止 Electron 默认「打开该文件」的导航行为 */
+function preventWindowDrop(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  if (e.type === 'drop') {
+    dragDepth = 0
+    dragActive.value = false
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', preventWindowDrop)
+  window.addEventListener('drop', preventWindowDrop)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', preventWindowDrop)
+  window.removeEventListener('drop', preventWindowDrop)
 })
 
 const emojiList = [
@@ -372,7 +496,22 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 </script>
 
 <template>
-  <section class="chat-panel">
+  <section
+    class="chat-panel"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <!-- 拖放投放遮罩 -->
+    <div v-if="dragActive" class="drop-mask">
+      <div class="drop-box">
+        <i class="fas fa-cloud-upload-alt"></i>
+        <p>松手即可发送到「{{ selected?.name }}」</p>
+        <span>支持文件与文件夹，可一次拖入多个</span>
+      </div>
+    </div>
+
     <!-- 空态 -->
     <template v-if="!selected">
       <div class="chat-empty">
@@ -561,6 +700,41 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
   min-width: 0;
   background: #fff;
   position: relative;
+}
+/* 拖放投放遮罩 */
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 137, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.drop-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 38px;
+  border: 2px dashed var(--dt-primary);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.drop-box > .fas {
+  font-size: 34px;
+  color: var(--dt-primary);
+}
+.drop-box p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dt-text);
+}
+.drop-box span {
+  font-size: 12px;
+  color: var(--dt-text-4);
 }
 .chat-empty {
   flex: 1;
