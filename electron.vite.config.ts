@@ -62,6 +62,7 @@ export default defineConfig({
     ],
     build: {
       outDir: 'out/renderer',
+      minify: 'esbuild',
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
