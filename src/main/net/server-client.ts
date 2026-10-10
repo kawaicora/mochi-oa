@@ -10,6 +10,7 @@ import os from 'node:os'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { getClientLocation } from './location'
+import { decodeUrlPath } from '../url-name'
 import { constants, publicEncrypt, randomUUID } from 'node:crypto'
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { join, basename, normalize, sep } from 'node:path'
@@ -1013,7 +1014,8 @@ export class ServerClient extends EventEmitter {
       let count = 0
       for (const f of files) {
         if (!f.url || !f.relPath) continue
-        const localRel = stripCompany(f.relPath)
+        // 服务端返回的相对路径可能是百分号编码的，落盘前逐段还原中文
+        const localRel = decodeUrlPath(stripCompany(f.relPath))
         if (!localRel) continue
         const target = normalize(join(destDir, localRel))
         const baseNorm = normalize(destDir)

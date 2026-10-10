@@ -16,6 +16,7 @@ import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
+import { decodeUrlName } from './url-name'
 
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
@@ -553,7 +554,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     try {
       const rawUrl = String(url)
       const safeUrl = (u: string): string => String(u).replace(/token=[^&]+/g, 'token=***')
-      const name = basename(rawUrl.split('?')[0] ?? '').trim() || 'download.bin'
+      // URL 里的文件名可能是百分号编码（如 %E7%8E%84...xlsx），落盘前必须还原成中文，
+      // 否则保存下来的文件名会是一串 %XX，且同名去重会叠成 "xxx (6) (6).xlsx" 这种乱名。
+      const name = decodeUrlName(basename(rawUrl.split('?')[0] ?? '').trim()) || 'download.bin'
       // 统一下载到设置里的存储路径（downloadDir），与手动下载一致
       const dir = loadServerConfig().downloadDir
       await mkdir(dir, { recursive: true })

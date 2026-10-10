@@ -5,13 +5,16 @@
  *  - 多工作表切换（页签）、列标（A/B/C）+ 行号，表头/行号吸附
  *  - 还原 Office 观感：填充色、字体（名称/字号/加粗/斜体/下划线/颜色）、对齐、边框、列宽行高
  *  - 合并单元格（rowspan/colspan）、数字右对齐、日期格式化
+ *  - 绘图层：按 xl/drawings 的单元格锚点覆盖贴图 / 形状 / 图表占位
  *  - 大表保护：按需分块构建 + 行/列上限（避免卡死渲染进程）
  *  - Esc 关闭、打开文件所在路径
- * 注：SheetJS 社区版只解析出填充色，字体/边框/对齐由 utils/xlsx-style.ts 直接解析 styles.xml 补全。
+ * 注：SheetJS 社区版只解析出填充色，字体/边框/对齐由 utils/xlsx-style.ts 补全，
+ *     贴图/形状/图表由 utils/xlsx-drawing.ts 解析。
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { CellObject, Range, WorkBook, WorkSheet } from 'xlsx'
 import { readXlsxStyles, type CellStyle, type SheetStyleMap } from '../utils/xlsx-style'
+import { readXlsxDrawings, type DrawingItem } from '../utils/xlsx-drawing'
 
 const props = defineProps<{ path: string; name: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -45,6 +48,10 @@ const notice = ref('')
 const CHUNK = 200
 const MAX_ROWS = 2000
 const MAX_COLS = 100
+/** 行号列宽度（与 CSS .sheet-corner/.sheet-rownum 的 min-width 保持一致） */
+const ROWNUM_W = 46
+/** 无列宽定义时的默认列宽 */
+const DEFAULT_COL_W = 96
 
 let destroyed = false
 let XLSX: typeof import('xlsx') | null = null
@@ -55,17 +62,29 @@ let mergeTop = new Map<string, { cs: number; rs: number }>()
 let mergeCovered = new Set<string>()
 /** 工作表名 → (单元格地址 → 样式) */
 let styleBook: SheetStyleMap = new Map()
+/** 工作表名 → 绘图层对象 */
+let drawingBook = new Map<string, DrawingItem[]>()
 /** 当前工作表的单元格样式表 */
 let sheetStyle = new Map<string, CellStyle>()
 
 /** 列宽（px）与行高（px），来自 xlsx 的 !cols / !rows */
 const colWidths = ref<number[]>([])
 const rowHeights = ref<number[]>([])
+/** 当前工作表要绘制的图片/形状/图表 */
+const sheetDrawings = ref<DrawingItem[]>([])
+/** 计算好像素位置的绘图层对象（按 DOM 实测的列/行几何换算） */
+const placements = ref<Array<{ item: DrawingItem; x: number; y: number; w: number; h: number }>>([])
+const tableEl = ref<HTMLTableElement | null>(null)
+let resizeObs: ResizeObserver | null = null
 
 const colKey = (r: number, c: number): string => `${r},${c}`
 
 const renderedCols = computed(() => Math.min(totalCols.value, MAX_COLS))
 const renderRows = computed(() => Math.min(gridRows.value.length, visibleRows.value))
+/** 表格总宽 = 行号列 + 各列声明宽度之和。
+ *  必须显式给 table 设宽度：table-layout:fixed 且 width:auto 时浏览器会按容器宽度
+ *  压缩/拉伸各列，导致列宽与 xlsx 里声明的宽度对不上（就是"表格宽度不一致"的原因）。 */
+const tableWidth = computed(() => ROWNUM_W + colWidths.value.reduce((a, b) => a + b, 0))
 const colLetters = computed(() => {
   const out: string[] = []
   for (let c = 0; c < renderedCols.value; c++) out.push(XLSX ? XLSX.utils.encode_col(c) : String(c + 1))
@@ -168,11 +187,56 @@ function colWidthsFrom(ws: WorkSheet): number[] {
   for (let c = 0; c < renderedCols.value; c++) {
     const def = cols[c] as { wpx?: number; wch?: number; width?: number; hidden?: boolean } | undefined
     if (!def) {
-      out.push(96)
+      out.push(DEFAULT_COL_W)
       continue
     }
-    const px = def.wpx ?? (def.wch != null ? def.wch * 7 + 5 : def.width != null ? def.width * 7 + 5 : 96)
-    out.push(Math.max(24, Math.min(800, Math.round(px))))
+    // Excel 列宽单位是「字符数」：px ≈ 字符数 × 7 + 5（Calibri 11）；隐藏列按 0 处理
+    if (def.hidden) {
+      out.push(0)
+      continue
+    }
+    const px = def.wpx ?? (def.wch != null ? def.wch * 7 + 5 : def.width != null ? def.width * 7 + 5 : DEFAULT_COL_W)
+    out.push(Math.max(12, Math.min(1200, Math.round(px))))
+  }
+  return out
+}
+
+/** 按 DOM 实测几何把绘制对象定位到表格上（锚点是「单元格 + 单元格内偏移」） */
+function layoutDrawings(): void {
+  const table = tableEl.value
+  if (!table || sheetDrawings.value.length === 0) {
+    placements.value = []
+    return
+  }
+  const colThs = Array.from(table.querySelectorAll('thead .sheet-colno')) as HTMLElement[]
+  const trs = Array.from(table.querySelectorAll('tbody tr')) as HTMLElement[]
+  const pos = (col: number, row: number, dx: number, dy: number): { x: number; y: number } | null => {
+    const th = colThs[col]
+    const tr = trs[row]
+    if (!th || !tr) return null
+    return { x: th.offsetLeft + dx, y: tr.offsetTop + dy }
+  }
+  const out: Array<{ item: DrawingItem; x: number; y: number; w: number; h: number }> = []
+  for (const item of sheetDrawings.value) {
+    const a = pos(item.from.col, item.from.row, item.from.dx, item.from.dy)
+    const b = pos(item.to.col, item.to.row, item.to.dx, item.to.dy)
+    if (!a || !b) continue // 锚点超出当前已渲染的行/列范围
+    const w = b.x - a.x
+    const h = b.y - a.y
+    if (w <= 0 || h <= 0) continue
+    out.push({ item, x: a.x, y: a.y, w, h })
+  }
+  placements.value = out
+}
+
+/** 形状（prstGeom）→ 内联样式 */
+function shapeStyle(p: { item: DrawingItem; w: number; h: number }): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (p.item.fill) out.background = p.item.fill
+  if (p.item.line) out.border = `1px solid ${p.item.line}`
+  if (p.item.round) {
+    // roundRect 的 adj 默认 16667 → 圆角半径 = 短边 * 1/6
+    out.borderRadius = `${Math.round(Math.min(p.w, p.h) * 0.16667)}px`
   }
   return out
 }
@@ -227,11 +291,13 @@ function selectSheet(name: string): void {
   gridRows.value = []
   visibleRows.value = 0
   sheetStyle = styleBook.get(name) ?? new Map()
+  sheetDrawings.value = drawingBook.get(name) ?? []
   if (ws) buildMerges(ws)
   colWidths.value = ws ? colWidthsFrom(ws) : []
   rowHeights.value = ws ? rowHeightsFrom(ws) : []
   updateNotice()
   loadMore()
+  void nextTick(() => layoutDrawings())
   scrollEl.value?.scrollTo({ top: 0, left: 0 })
 }
 
@@ -252,6 +318,8 @@ function errText(e: unknown): string {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+  // 列宽/行高变化会改变锚点像素位置，重新布局绘图层
+  resizeObs = new ResizeObserver(() => layoutDrawings())
   const r = await window.pantry.serverReadFileBytes(props.path)
   if (destroyed) return
   if (!r.ok || !r.data) {
@@ -262,16 +330,28 @@ onMounted(async () => {
   try {
     XLSX = await import('xlsx')
     if (destroyed) return
-    // 自行解析样式（SheetJS 社区版只给填充色，字体/边框/对齐需要解析 styles.xml）
+    // 自行解析样式与绘图层（SheetJS 社区版只给填充色，也不解析 drawings）
     styleBook = await readXlsxStyles(r.data.slice(0))
     if (destroyed) return
+    drawingBook = await readXlsxDrawings(r.data.slice(0))
+    if (destroyed) return
     const data = new Uint8Array(r.data.slice(0))
-    wb = XLSX.read(data, { type: 'array', cellDates: true, cellText: true, cellNF: false, cellHTML: false })
+    // cellStyles 必须为 true：SheetJS 只在这个模式下解析工作表的 <cols>/<row ht>，
+    // 否则 !cols/!rows 为空，列宽行高会全部退回默认值（表格宽度不一致的根因）。
+    wb = XLSX.read(data, {
+      type: 'array',
+      cellDates: true,
+      cellText: true,
+      cellNF: false,
+      cellHTML: false,
+      cellStyles: true
+    })
     const names = wb.SheetNames ?? []
     if (names.length === 0) throw new Error('工作簿中没有任何工作表')
     sheetNames.value = names
     loading.value = false
     await nextTick()
+    if (tableEl.value) resizeObs.observe(tableEl.value)
     selectSheet(names[0]!)
   } catch (e) {
     if (destroyed) return
@@ -283,11 +363,17 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   destroyed = true
   window.removeEventListener('keydown', onKey)
+  resizeObs?.disconnect()
+  resizeObs = null
+  for (const p of placements.value) if (p.item.src) URL.revokeObjectURL(p.item.src)
+  placements.value = []
   wb = null
   mergeTop = new Map()
   mergeCovered = new Set()
   styleBook = new Map()
+  drawingBook = new Map()
   sheetStyle = new Map()
+  sheetDrawings.value = []
   gridRows.value = []
 })
 </script>
@@ -318,7 +404,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div ref="scrollEl" class="sheet-scroll">
-        <table v-if="!loading && !error" class="sheet-table" :class="{ 'sheet-fixed': colWidths.length > 0 }">
+        <table
+          ref="tableEl"
+          v-if="!loading && !error"
+          class="sheet-table"
+          :class="{ 'sheet-fixed': colWidths.length > 0 }"
+          :style="colWidths.length ? { width: tableWidth + 'px' } : undefined"
+        >
           <colgroup>
             <col style="width: 46px" />
             <col v-for="(w, i) in colWidths" :key="i" :style="{ width: w + 'px' }" />
@@ -350,6 +442,33 @@ onBeforeUnmount(() => {
             </tr>
           </tbody>
         </table>
+
+        <!-- 绘图层：贴图 / 形状 / 图表占位（按单元格锚点绝对定位覆盖在网格上） -->
+        <div v-if="placements.length" class="sheet-draw-layer">
+          <template v-for="(p, i) in placements" :key="i">
+            <img
+              v-if="p.item.kind === 'pic' && p.item.src"
+              class="sheet-draw-pic"
+              :src="p.item.src"
+              :alt="p.item.name"
+              :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' }"
+            />
+            <div
+              v-else-if="p.item.kind === 'shape'"
+              class="sheet-draw-shape"
+              :title="p.item.name"
+              :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px', ...shapeStyle(p) }"
+            ></div>
+            <div
+              v-else
+              class="sheet-draw-chart"
+              :title="p.item.name"
+              :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' }"
+            >
+              <i class="fas fa-chart-area"></i><span>图表</span>
+            </div>
+          </template>
+        </div>
 
         <div v-if="hasMore" class="sheet-more">
           <button class="sheet-more-btn" @click="loadMore">显示更多（已显示 {{ renderRows }} 行）</button>
@@ -490,6 +609,40 @@ onBeforeUnmount(() => {
   background: #f0f2f5;
   position: relative;
 }
+/* 绘图层：与表格同坐标系，覆盖在单元格之上 */
+.sheet-draw-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.sheet-draw-pic,
+.sheet-draw-shape,
+.sheet-draw-chart {
+  position: absolute;
+  pointer-events: auto;
+}
+.sheet-draw-pic {
+  object-fit: fill;
+}
+.sheet-draw-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px dashed #b9c0cc;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--dt-text-4);
+  font-size: 12px;
+}
+.sheet-draw-chart > .fas {
+  font-size: 18px;
+}
 .sheet-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -514,10 +667,19 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 固定列宽模式下由 colgroup 决定宽度，避免 min-width 干扰 */
+/* 固定列宽模式下完全由 colgroup + table 宽度决定，避免 min-width/max-width 干扰 */
 .sheet-table.sheet-fixed th,
 .sheet-table.sheet-fixed td {
   min-width: 0;
+  max-width: none;
+  white-space: nowrap;
+}
+/* 行号列与列标宽度固定，不随内容变化 */
+.sheet-table.sheet-fixed .sheet-corner,
+.sheet-table.sheet-fixed .sheet-rownum {
+  width: 46px;
+  min-width: 46px;
+  max-width: 46px;
 }
 .sheet-table tbody td {
   background: #fff;
@@ -537,7 +699,7 @@ onBeforeUnmount(() => {
 .sheet-corner {
   left: 0;
   z-index: 3 !important;
-  min-width: 44px !important;
+  min-width: 46px !important;
 }
 .sheet-colno {
   min-width: 56px;
@@ -551,7 +713,7 @@ onBeforeUnmount(() => {
   font-weight: 500;
   font-size: 11px;
   text-align: center;
-  min-width: 44px !important;
+  min-width: 46px !important;
   white-space: nowrap;
 }
 .sheet-cell.al-r {
