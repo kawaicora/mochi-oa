@@ -725,6 +725,14 @@ function walkShape(
   keep.push(`mso-vml-shape:${el.localName}`)
   const arc = el.getAttribute('arcsize')
   if (arc) keep.push(`mso-arcsize:${arc}`)
+  // VML 形状预设编号（o:spt）：20=直线，1=矩形，202=文本框，100=自由形状，203=组合
+  const spt = el.getAttribute('o:spt')
+  if (spt) keep.push(`mso-spt:${spt}`)
+  // 描边色：直线类形状没有填充色，只有 strokecolor
+  const strokeColor = el.getAttribute('strokecolor')
+  if (strokeColor) keep.push(`mso-vml-stroke:${(strokeColor.match(/^#?[0-9a-fA-F]{6}/) ?? [strokeColor])[0]}`)
+  const strokeW = el.getAttribute('strokeweight')
+  if (strokeW) keep.push(`mso-vml-strokew:${strokeW}`)
   // 自由形状的真实轮廓（来自 o:gfxdata → e2oDoc 的 custGeom 路径）
   const gfx = el.getAttribute('o:gfxdata')
   const shapePath = gfx ? pathMap?.get(gfxKey(gfx)) : ''
@@ -819,7 +827,7 @@ async function buildGfxPathMap(xml: string): Promise<Map<string, string>> {
  */
 function repairVmlShapes(host: HTMLElement): number {
   let fixed = 0
-  const made = { rect: 0, ellipse: 0, path: 0 }
+  const made = { rect: 0, ellipse: 0, path: 0, line: 0 }
   for (const svg of Array.from(host.querySelectorAll('svg'))) {
     // 读取由 XML 预处理写入的 VML 文本框内边距
     const svgStyle = svg.getAttribute('style') ?? ''
@@ -839,6 +847,31 @@ function repairVmlShapes(host: HTMLElement): number {
       const fillMatch = rawFill ? /^#?([0-9a-fA-F]{6})/.exec(rawFill.trim()) : null
       const fill = fillMatch ? '#' + fillMatch[1].toLowerCase() : rawFill
       const hasFill = !!fill && fill !== 'none' && fill !== 'null'
+      // 直线类形状（VML o:spt="20"）没有填充、只有描边，必须单独画，否则整条线丢失
+      const spt = new RegExp('mso-spt:(\\d+)').exec(svgStyle)?.[1] ?? ''
+      const strokeRaw = new RegExp('mso-vml-stroke:(#[0-9a-fA-F]{6})').exec(svgStyle)?.[1] ?? ''
+      if (spt === '20' || spt === 'line') {
+        const box = svg.getBoundingClientRect()
+        const line = document.createElementNS(SVG_NS, 'line')
+        if (box.width >= box.height) {
+          line.setAttribute('x1', '0')
+          line.setAttribute('y1', '50%')
+          line.setAttribute('x2', '100%')
+          line.setAttribute('y2', '50%')
+        } else {
+          line.setAttribute('x1', '50%')
+          line.setAttribute('y1', '0')
+          line.setAttribute('x2', '50%')
+          line.setAttribute('y2', '100%')
+        }
+        line.setAttribute('stroke', strokeRaw || '#000000')
+        line.setAttribute('stroke-width', '1')
+        svg.insertBefore(line, img)
+        made.line = (made.line ?? 0) + 1
+        img.remove()
+        fixed += 1
+        continue
+      }
       const children = Array.from(img.children)
       if (!hasFill && children.length === 0 && !img.getAttribute('width')) continue
       if (hasFill || pathData) {
@@ -901,7 +934,7 @@ function repairVmlShapes(host: HTMLElement): number {
       fixed += 1
     }
   }
-  if (fixed) console.log(`[docx] 修复 VML 形状 ${fixed} 个（轮廓 path=${made.path} ellipse=${made.ellipse} rect=${made.rect}）`)
+  if (fixed) console.log(`[docx] 修复 VML 形状 ${fixed} 个（path=${made.path} ellipse=${made.ellipse} rect=${made.rect} line=${made.line}）`)
   return fixed
 }
 
