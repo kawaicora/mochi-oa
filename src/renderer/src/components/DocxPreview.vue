@@ -495,23 +495,78 @@ async function decodeGfxPath(b64: string): Promise<string> {
     const h = Number(pathEl.getAttribute('h') ?? 0)
     if (!(w > 0) || !(h > 0)) return ''
     const parts: string[] = []
+    let curX = 0
+    let curY = 0
+    const f2 = (n: number): string => (Math.round(n * 100) / 100).toString()
     for (const cmd of Array.from(pathEl.children)) {
       const pts = Array.from(cmd.getElementsByTagNameNS(A_NS, 'pt')).map(
         (p) => `${p.getAttribute('x')} ${p.getAttribute('y')}`
       )
       switch (cmd.localName) {
         case 'moveTo':
-          if (pts[0]) parts.push(`M ${pts[0]}`)
+          if (pts[0]) {
+            parts.push(`M ${pts[0]}`)
+            curX = Number(cmd.getElementsByTagNameNS(A_NS, 'pt')[0]?.getAttribute('x') ?? 0)
+            curY = Number(cmd.getElementsByTagNameNS(A_NS, 'pt')[0]?.getAttribute('y') ?? 0)
+          }
           break
         case 'lnTo':
-          if (pts[0]) parts.push(`L ${pts[0]}`)
+          if (pts[0]) {
+            parts.push(`L ${pts[0]}`)
+            const p = cmd.getElementsByTagNameNS(A_NS, 'pt')[0]
+            curX = Number(p?.getAttribute('x') ?? 0)
+            curY = Number(p?.getAttribute('y') ?? 0)
+          }
           break
         case 'cubicBezTo':
-          if (pts.length === 3) parts.push(`C ${pts.join(' ')}`)
+          if (pts.length === 3) {
+            parts.push(`C ${pts.join(' ')}`)
+            const p = cmd.getElementsByTagNameNS(A_NS, 'pt')[2]
+            curX = Number(p?.getAttribute('x') ?? 0)
+            curY = Number(p?.getAttribute('y') ?? 0)
+          }
           break
         case 'quadBezTo':
-          if (pts.length === 2) parts.push(`Q ${pts.join(' ')}`)
+          if (pts.length === 2) {
+            parts.push(`Q ${pts.join(' ')}`)
+            const p = cmd.getElementsByTagNameNS(A_NS, 'pt')[1]
+            curX = Number(p?.getAttribute('x') ?? 0)
+            curY = Number(p?.getAttribute('y') ?? 0)
+          }
           break
+        case 'arcTo': {
+          // DrawingML 的弧：当前点即弧起点（LO 的 arc 预设先 moveTo 到起点再 arcTo），
+          // 圆心 = 当前点 - (wR·cos stAng, hR·sin stAng)；角度单位为 1/60000 度。
+          // 用三次贝塞尔分段逼近（每段 ≤ 90°），避免 SVG A 命令的起点/终点语义差异。
+          const wR = Number(cmd.getAttribute('wR') ?? 0)
+          const hR = Number(cmd.getAttribute('hR') ?? 0)
+          const stAng = ((Number(cmd.getAttribute('stAng') ?? 0) / 60000) * Math.PI) / 180
+          const swAng = ((Number(cmd.getAttribute('swAng') ?? 0) / 60000) * Math.PI) / 180
+          if (wR > 0 && hR > 0 && Math.abs(swAng) > 1e-9) {
+            const cx = curX - wR * Math.cos(stAng)
+            const cy = curY - hR * Math.sin(stAng)
+            const segs = Math.max(1, Math.ceil(Math.abs(swAng) / (Math.PI / 2)))
+            const delta = swAng / segs
+            const k = (4 / 3) * Math.tan(delta / 4)
+            let a0 = stAng
+            for (let s = 0; s < segs; s++) {
+              const a1 = a0 + delta
+              const p0x = cx + wR * Math.cos(a0)
+              const p0y = cy + hR * Math.sin(a0)
+              const p1x = cx + wR * Math.cos(a1)
+              const p1y = cy + hR * Math.sin(a1)
+              const c1x = p0x - k * wR * Math.sin(a0)
+              const c1y = p0y + k * hR * Math.cos(a0)
+              const c2x = p1x + k * wR * Math.sin(a1)
+              const c2y = p1y - k * hR * Math.cos(a1)
+              parts.push(`C ${f2(c1x)} ${f2(c1y)} ${f2(c2x)} ${f2(c2y)} ${f2(p1x)} ${f2(p1y)}`)
+              curX = p1x
+              curY = p1y
+              a0 = a1
+            }
+          }
+          break
+        }
         case 'close':
           parts.push('Z')
           break
