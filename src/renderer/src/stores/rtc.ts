@@ -91,11 +91,14 @@ export const useRtcStore = defineStore('rtc', () => {
 
   // ─── 事件订阅 ───
 
-  async function maybeNotify(title: string, body: string, target?: NotifTarget): Promise<void> {
+  async function maybeNotify(title: string, body: string, target?: NotifTarget, force = false): Promise<void> {
     try {
       const st = await rtcPantry.getWindowState()
-      if (st && !st.focused) await rtcPantry.notify({ title, body, target })
-    } catch { /* 忽略 */ }
+      // force=true（远程控制等高风险请求）：无论窗口是否聚焦都发系统通知
+      if (force || (st && !st.focused)) await rtcPantry.notify({ title, body, target })
+    } catch (e) {
+      console.error('[rtc] 系统通知发送失败', title, e)
+    }
   }
 
   function wire(): () => void {
@@ -103,7 +106,14 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcDmIncoming((d) => {
         if (activeCall.value) return // 已有通话，忽略新来电
         incomingDm.value = d
-        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, '通话', { kind: 'main' })
+        const isRemote = d.kind === 'remote'
+        const who = d.from.nick ?? `用户 ${d.from.userId}`
+        const title = isRemote ? '远程控制请求' : `${who} 正在呼叫你`
+        const body = isRemote
+          ? `${who} 请求远程控制你的电脑。同意后对方将看到并操作你的屏幕。`
+          : d.kind === 'video' ? '视频通话' : '语音通话'
+        // 远程控制涉及他人操控本机，有风险：无论窗口是否聚焦都显著系统通知提醒
+        void maybeNotify(title, body, { kind: 'main' }, isRemote)
       })
     )
 

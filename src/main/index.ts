@@ -119,6 +119,8 @@ let trayEnabled = false
 let isQuitting = false
 
 // 单实例锁：避免重复启动（用户数据隔离靠 PANTRY_USER_DATA 环境变量）
+// Windows 通知中心需 AppUserModelID 才能显示系统通知（远程控制/来电/闹钟等），必须在创建窗口前设置
+app.setAppUserModelId('com.kawaicora.mochi-oa')
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
