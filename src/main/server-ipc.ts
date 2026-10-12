@@ -840,7 +840,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     if (!path) return { ok: false, error: '缺少本地文件路径' }
     const win = new BrowserWindow({
       width: 1100, height: 820, minWidth: 700, minHeight: 520,
-      resizable: true, autoHideMenuBar: true, backgroundColor: '#f0f2f5',
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#f0f2f5',
       webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
     })
     const query: Record<string, string> = { kind, path, name }

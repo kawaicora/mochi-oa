@@ -1161,6 +1161,12 @@ onBeforeUnmount(() => {
   align-items: stretch;
   justify-content: stretch;
   padding: 0;
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  z-index: auto;
 }
 .docx-mask--standalone .docx-box {
   width: 100%;
