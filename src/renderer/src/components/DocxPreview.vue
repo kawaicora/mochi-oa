@@ -885,8 +885,10 @@ function repairVmlShapes(host: HTMLElement): number {
           const d = rest.join('-')
           // 用实测尺寸而不是 width/height 属性：docx-preview 对部分形状不写这两个属性
           const box = svg.getBoundingClientRect()
-          const sw = box.width || parseFloat(svg.getAttribute('width') ?? '0') || 1
-          const sh = box.height || parseFloat(svg.getAttribute('height') ?? '0') || 1
+          const wpt = ((m) => (m ? parseFloat(m[1]) : 0))(/width:([\d.]+)pt/.exec(svgStyle))
+          const hpt = ((m) => (m ? parseFloat(m[1]) : 0))(/height:([\d.]+)pt/.exec(svgStyle))
+          const sw = box.width || wpt * (4 / 3) || 1
+          const sh = box.height || hpt * (4 / 3) || 1
           fillShape = document.createElementNS(SVG_NS, 'path')
           fillShape.setAttribute('d', d)
           if (pw > 0 && ph > 0) fillShape.setAttribute('transform', `scale(${sw / pw},${sh / ph})`)
