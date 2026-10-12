@@ -301,7 +301,7 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
       if (a.fill) box.style.background = a.fill
       if (a.line) box.style.border = `1px solid ${a.line}`
       if (a.geom) applyGeometryMask(box, a.geom, a.w, a.h)
-      box.style.zIndex = a.behind ? '-1' : '2'
+      box.style.zIndex = a.behind ? '0' : '2'
       section.appendChild(box)
       applied += 1
       continue
@@ -316,13 +316,16 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
     box.style.margin = '0'
     box.style.float = 'none'
     // z-index:-1 → 绘制在正文之下、页面底色之上
-    box.style.zIndex = a.behind ? '-1' : '2'
+    box.style.zIndex = a.behind ? '0' : '2'
     if (target) {
       target.style.position = 'static'
       target.style.left = '0'
       target.style.top = '0'
       target.style.width = '100%'
       target.style.height = '100%'
+      // docx-preview 会把 behind 图渲染成 z-index:-1（落到页面白底背景之后不可见），
+      // 这里把图片本体也提升到纸面之上
+      target.style.zIndex = a.behind ? '0' : '2'
       if (a.geom) applyGeometryMask(target, a.geom, a.w, a.h)
     }
     applied += 1
@@ -459,8 +462,7 @@ function applyHeaderImages(host: HTMLElement, images: HeaderImage[]): number {
         (im.hAlign === 'center' ? (pageW - im.w) / 2 : im.hAlign === 'right' ? pageW - im.w : 0) + 'pt'
       el.style.top =
         (im.vAlign === 'center' ? (pageH - im.h) / 2 : im.vAlign === 'bottom' ? pageH - im.h : 0) + 'pt'
-      // 页眉层位于正文之下；behindDoc 的图更要垫底
-      el.style.zIndex = '-1'
+      // 页眉图不设负 z-index：-1 会被页面 section 的白底背景盖住（与验证页 applyHeaderImages 保持一致，保持默认层级可见）
       el.style.pointerEvents = 'none'
       el.dataset.headerType = im.type
       section.appendChild(el)
@@ -1076,6 +1078,11 @@ onMounted(async () => {
     // 页眉/页脚里的整页背景图
     const heads = applyHeaderImages(host, headerImages)
     if (heads) console.log(`[docx] 已渲染 ${heads} 张页眉/页脚图片`)
+    // 兜底：docx-preview 给 behind 背景图设的内联 z-index:-1 会被页面白底背景盖住（视觉不可见），
+    // 统一提升到纸面之上（内联样式检测，避免 getComputedStyle 时序差异）
+    for (const img of host.querySelectorAll('img')) {
+      if ((img.style.zIndex || '') === '-1') img.style.zIndex = '0'
+    }
     pages.value = host.querySelectorAll('section.docx').length
     loading.value = false
     await nextTick()
