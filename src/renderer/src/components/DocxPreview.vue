@@ -1051,7 +1051,9 @@ onMounted(async () => {
       ignoreFonts: false,
       breakPages: true,
       ignoreLastRenderedPageBreak: true,
-      experimental: true,
+      // experimental:true 会把制表符(tab)改走 tabStopClass 定位，列表项(圆点后的 tab)会产生多余大空格；
+      // 关闭（与网页版验证页默认一致）后 tab 渲染为紧凑的 \u2003，避免"圆点后面出现空格"。
+      experimental: false,
       // 图片转 data URL，避免依赖 blob 生命周期
       useBase64URL: true,
       renderHeaders: true,
