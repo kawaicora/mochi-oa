@@ -117,8 +117,201 @@ interface DrawingAnchor {
   /** 自绘形状的填充/描边 */
   fill?: string
   line?: string
+  /** 描边宽度（EMU→pt），line 形状高度用它 */
+  lnW?: number
+  /** custGeom 自定义几何图标（docx-preview 不渲染 → 按 OOXML 转 SVG path） */
+  cust?: {
+    paths: { d: string; w: string; h: string; fill: string; stroke: string }[]
+    fill: string
+    xOff: number
+    yOff: number
+    w: number
+    h: number
+  } | null
   /** 是否含图片（用于与渲染出的 <img> 按文档顺序配对） */
   hasPic: boolean
+}
+
+/**
+ * 按 OOXML 标准解析 a:custGeom（自定义几何路径）→ SVG path。
+ * custGeom = gdLst(guide公式) + pathLst(moveTo/lnTo/cubicBezTo/quadBezTo/arcTo/close, pt坐标)
+ * 坐标是 path w/h 归一化空间内的数值；填充来自 spPr 的 solidFill。
+ * spPr 可能用 a:spPr（独立 Freeform）或 wps:spPr（组合内子形状），两者都兼容。
+ */
+function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
+  const cust = sp.getElementsByTagNameNS(A_NS, 'custGeom')[0]
+  if (!cust) return null
+  const pathLst = cust.getElementsByTagNameNS(A_NS, 'pathLst')[0]
+  if (!pathLst) return null
+  // --- gdLst 几何公式表（name -> fmla）---
+  const guides: Record<string, string> = {}
+  const gdLst = cust.getElementsByTagNameNS(A_NS, 'gdLst')[0]
+  if (gdLst) for (const g of Array.from(gdLst.getElementsByTagNameNS(A_NS, 'gd'))) guides[g.getAttribute('name') ?? ''] = g.getAttribute('fmla') || '0'
+  // --- avLst 调整值（$0,$1..；fmla 或直接数字）---
+  const av: string[] = []
+  const avLst = cust.getElementsByTagNameNS(A_NS, 'avLst')[0]
+  if (avLst) for (const g of Array.from(avLst.getElementsByTagNameNS(A_NS, 'gd'))) av.push(g.getAttribute('fmla') || '0')
+  // --- 预定义坐标 token（GetAdjCoordinate）---
+  const builtin = (tok: string, W: number, H: number): number | undefined => {
+    const mn = Math.min(W, H), mx = Math.max(W, H)
+    switch (tok) {
+      case 'w': case 'r': case 'logwidth': return W
+      case 'h': case 'b': case 'logheight': return H
+      case 'l': case 't': return 0
+      case 'ls': return mx
+      case 'ss': return mn
+      case '3cd4': return 270 * 60000
+      case '3cd8': return 135 * 60000
+      case '5cd8': return 225 * 60000
+      case '7cd8': return 315 * 60000
+      case 'cd2': return 180 * 60000
+      case 'cd3': return 120 * 60000
+      case 'cd4': return 90 * 60000
+      case 'cd8': return 45 * 60000
+      case 'hd10': return H / 10
+      case 'hd8': return H / 8
+      case 'hd6': return H / 6
+      case 'hd5': return H / 5
+      case 'hd4': return H / 4
+      case 'hd3': return H / 3
+      case 'hd2': case 'vc': return H / 2
+      case 'wd32': return W / 32
+      case 'wd12': return W / 12
+      case 'wd10': return W / 10
+      case 'wd8': return W / 8
+      case 'wd6': return W / 6
+      case 'wd5': return W / 5
+      case 'wd4': return W / 4
+      case 'wd3': return W / 3
+      case 'wd2': case 'hc': return W / 2
+      case 'ssd32': return mn / 32
+      case 'ssd16': return mn / 16
+      case 'ssd8': return mn / 8
+      case 'ssd6': return mn / 6
+      case 'ssd4': return mn / 4
+      case 'ssd2': return mn / 2
+      default: return undefined
+    }
+  }
+  const evalFmla = (fmla: string, W: number, H: number, stack: Set<string>): number => {
+    const t = String(fmla || '0').trim().split(/\s+/)
+    const op = t[0]
+    const p = t.slice(1, 4).map((x) => resolve(x, W, H, stack))
+    switch (op) {
+      case '*/': return p.length > 2 ? (p[0] / (p[1] || 1)) * p[2] : 0
+      case '+-': return p.length > 2 ? p[0] + p[1] - p[2] : 0
+      case '+/': return p.length > 2 ? (p[0] + p[1]) / (p[2] || 1) : 0
+      case '+': return (p[0] || 0) + (p[1] || 0)
+      case '-': return (p[0] || 0) - (p[1] || 0)
+      case '*': return (p[0] || 0) * (p[1] || 0)
+      case '/': return (p[1] || 0) ? (p[0] || 0) / p[1] : 0
+      case 'abs': return Math.abs(p[0] || 0)
+      case 'at2': return Math.atan2(p[0] || 0, p[1] || 0)
+      case 'cos': return (p[0] || 0) + (p[1] || 0) * Math.cos(((p[2] || 0) * Math.PI) / 180)
+      case 'sin': return (p[0] || 0) + (p[1] || 0) * Math.sin(((p[2] || 0) * Math.PI) / 180)
+      case 'tan': return (p[0] || 0) + (p[1] || 0) * Math.tan(((p[2] || 0) * Math.PI) / 180)
+      case 'max': return Math.max(p[0] || 0, p[1] || 0)
+      case 'min': return Math.min(p[0] || 0, p[1] || 0)
+      case 'mod': return (p[0] || 0) % (p[1] || 1)
+      case 'pin': return Math.max(p[0] || 0, Math.min(p[1] || 0, p[2] || 0))
+      case 'sqrt': return Math.sqrt(Math.abs(p[0] || 0))
+      case 'cat2': return Math.atan2((p[2] || 0) - (p[0] || 0), (p[3] || 0) - (p[1] || 0))
+      default: return 0
+    }
+  }
+  const resolve = (tok: string | null | undefined, W: number, H: number, stack: Set<string>): number => {
+    if (tok === null || tok === undefined) return 0
+    if (typeof tok === 'number') return tok
+    const s = String(tok).trim()
+    if (/^-?[0-9]+(\.[0-9]+)?$/.test(s)) return parseFloat(s)
+    if (s[0] === '$') { const i = parseInt(s.slice(1), 10); return resolve(av[i], W, H, stack) }
+    const b = builtin(s, W, H)
+    if (b !== undefined) return b
+    if (Object.prototype.hasOwnProperty.call(guides, s)) {
+      if (stack && stack.has(s)) return 0
+      const ns = stack ? new Set(stack) : new Set<string>(); ns.add(s)
+      return evalFmla(guides[s], W, H, ns)
+    }
+    return 0
+  }
+  const coord = (v: string | null | undefined, W: number, H: number): number => {
+    if (v === null || v === undefined) return 0
+    if (/^-?[0-9]+(\.[0-9]+)?$/.test(String(v).trim())) return parseFloat(v)
+    return resolve(v, W, H, new Set<string>())
+  }
+  // arcTo：椭圆弧。OOXML stAng/swAng = 60000 分之一度，逆时针，0 指向 +x（y 轴向下）。
+  // 圆心 = 当前点沿主轴 +x 偏移 wR、+y 偏移 hR；弧从 stAng 起扫 swAng（ECMA-376 §20.1.9.8）
+  const arcToCmd = (cur: { x: number; y: number }, wR: number, hR: number, stAng: number, swAng: number): string => {
+    const st = (stAng / 60000) * Math.PI / 180
+    const sw = (swAng / 60000) * Math.PI / 180
+    const end = st + sw
+    const cx = cur.x, cy = cur.y + hR
+    const x2 = cx + wR * Math.cos(end)
+    const y2 = cy + hR * Math.sin(end)
+    const large = Math.abs(sw) > Math.PI ? 1 : 0
+    const sweep = sw > 0 ? 1 : 0
+    return `A ${wR} ${hR} 0 ${large} ${sweep} ${x2} ${y2} `
+  }
+  const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape'
+  const findSpPr = (el: Element) =>
+    el.getElementsByTagNameNS(A_NS, 'spPr')[0] || el.getElementsByTagNameNS(WPS_NS, 'spPr')[0] || null
+  const SCHEME: Record<string, string> = { bg1: '#FFFFFF', bg2: '#F2F2F2', dk1: '#000000', lt1: '#FFFFFF', dk2: '#000000', lt2: '#000000', tx1: '#000000', tx2: '#000000', accent1: '#4472C4', accent2: '#ED7D31', accent3: '#A5A5A5', accent4: '#FFC000', accent5: '#5B9BD5', accent6: '#70AD47', hlink: '#0563C1', folHlink: '#954F72' }
+  let fill = '#000000'
+  const spPr = findSpPr(sp)
+  if (spPr) {
+    const sf = spPr.getElementsByTagNameNS(A_NS, 'solidFill')[0]
+    if (sf) {
+      const sc = sf.getElementsByTagNameNS(A_NS, 'srgbClr')[0]
+      const sch = sf.getElementsByTagNameNS(A_NS, 'schemeClr')[0]
+      if (sc) fill = '#' + sc.getAttribute('val')
+      else if (sch) fill = SCHEME[sch.getAttribute('val') ?? ''] || '#000000'
+    }
+  }
+  const paths: { d: string; w: string; h: string; fill: string; stroke: string }[] = []
+  for (const path of Array.from(pathLst.getElementsByTagNameNS(A_NS, 'path'))) {
+    const pW = parseFloat(path.getAttribute('w') || '') || 1
+    const pH = parseFloat(path.getAttribute('h') || '') || 1
+    let d = ''
+    let cur = { x: 0, y: 0 }
+    for (let ci = 0; ci < path.childNodes.length; ci++) {
+      const el = path.childNodes[ci]
+      if (el.nodeType !== 1) continue
+      const ln = (el as Element).localName
+      const pts = Array.from(el.getElementsByTagNameNS(A_NS, 'pt'))
+      const P = (q: Element | null) => (q ? { x: coord(q.getAttribute('x'), pW, pH), y: coord(q.getAttribute('y'), pW, pH) } : null)
+      if (ln === 'moveTo' || ln === 'lnTo') {
+        const p = P(pts[0] ?? null)
+        if (p) { d += (ln === 'moveTo' ? 'M' : 'L') + p.x + ' ' + p.y + ' '; cur = p }
+      } else if (ln === 'cubicBezTo') {
+        if (pts.length >= 3) { const a = P(pts[0]), b = P(pts[1]), c = P(pts[2]); d += 'C' + a!.x + ' ' + a!.y + ' ' + b!.x + ' ' + b!.y + ' ' + c!.x + ' ' + c!.y + ' '; cur = c! }
+      } else if (ln === 'quadBezTo') {
+        if (pts.length >= 2) { const a = P(pts[0]), c = P(pts[1]); d += 'Q' + a!.x + ' ' + a!.y + ' ' + c!.x + ' ' + c!.y + ' '; cur = c! }
+      } else if (ln === 'arcTo') {
+        const wR = coord(el.getAttribute('wR'), pW, pH)
+        const hR = coord(el.getAttribute('hR'), pW, pH)
+        const stAng = coord(el.getAttribute('stAng'), pW, pH)
+        const swAng = coord(el.getAttribute('swAng'), pW, pH)
+        d += arcToCmd(cur, wR, hR, stAng, swAng)
+      } else if (ln === 'close') {
+        d += 'Z '
+      }
+    }
+    if (!d.trim()) continue
+    const pfill = path.getAttribute('fill') || 'norm'
+    const pstroke = path.getAttribute('stroke') ?? 'true'
+    paths.push({ d: d.trim(), w: String(pW), h: String(pH), fill: pfill, stroke: pstroke })
+  }
+  if (!paths.length) return null
+  // 图标自身的位置与尺寸（xfrm off/ext，EMU→pt；组合内子形状以此相对 anchor 定位）
+  let xOff = 0, yOff = 0, iw = 0, ih = 0
+  const xfrm = spPr?.getElementsByTagNameNS(A_NS, 'xfrm')[0]
+  if (xfrm) {
+    const off = xfrm.getElementsByTagNameNS(A_NS, 'off')[0]
+    const ext = xfrm.getElementsByTagNameNS(A_NS, 'ext')[0]
+    if (off) { xOff = Number(off.getAttribute('x') || 0) / EMU_PT; yOff = Number(off.getAttribute('y') || 0) / EMU_PT }
+    if (ext) { iw = Number(ext.getAttribute('cx') || 0) / EMU_PT; ih = Number(ext.getAttribute('cy') || 0) / EMU_PT }
+  }
+  return { paths, fill, xOff, yOff, w: iw, h: ih }
 }
 
 /** 从 DrawingML 文档里抽取锚点列表（按文档顺序） */
@@ -176,6 +369,9 @@ function collectDrawingAnchors(xml: string): DrawingAnchor[] {
       line: ln?.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
         ? '#' + ln.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
         : undefined,
+      lnW: ln ? Number(ln.getAttribute('w') || 0) / EMU_PT : undefined,
+      // custGeom 自定义几何图标（wps 组合内子形状也能取到 spPr）
+      cust: sp ? custGeomToSvg(sp) : null,
       hasPic: pic
     })
   }
@@ -295,12 +491,42 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
     }
 
     if (!box) {
+      if (a.cust && a.cust.w > 0 && a.cust.h > 0) {
+        // custGeom 自定义几何图标：按 xfrm 的 off/ext 相对 anchor 定位，画 SVG 路径（OOXML 标准）
+        const svgBox = document.createElement('div')
+        svgBox.style.cssText = `position:absolute;left:${leftPt + a.cust.xOff}pt;top:${topPt + a.cust.yOff}pt;width:${a.cust.w}pt;height:${a.cust.h}pt;`
+        // 图标应绘制在正文之上、背后背景之上；behindDoc=1 的衬于文字下方 → 0
+        svgBox.style.zIndex = a.behind ? '0' : '2'
+        const svg = document.createElementNS(SVG_NS, 'svg')
+        svg.setAttribute('viewBox', `0 0 ${a.cust.paths[0].w} ${a.cust.paths[0].h}`)
+        svg.setAttribute('preserveAspectRatio', 'none')
+        svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:block;overflow:visible'
+        for (const p of a.cust.paths) {
+          const pathEl = document.createElementNS(SVG_NS, 'path')
+          pathEl.setAttribute('d', p.d)
+          pathEl.setAttribute('fill', p.fill === 'none' ? 'none' : a.cust.fill)
+          pathEl.setAttribute('fill-rule', 'nonzero')
+          pathEl.setAttribute('stroke', 'none')
+          svg.appendChild(pathEl)
+        }
+        svgBox.appendChild(svg)
+        section.appendChild(svgBox)
+        applied += 1
+        continue
+      }
       // docx-preview 未渲染的 wps 形状：按锚点自绘一个盒子
       box = document.createElement('div')
-      box.style.cssText = `position:absolute;left:${leftPt}pt;top:${topPt}pt;width:${a.w}pt;height:${a.h}pt;`
-      if (a.fill) box.style.background = a.fill
-      if (a.line) box.style.border = `1px solid ${a.line}`
-      if (a.geom) applyGeometryMask(box, a.geom, a.w, a.h)
+      // geom=line 的形状（直线/连接符）：高度取描边宽度 lnW，颜色取 ln 描边色（XML 数据，非猜测）
+      const isLine = a.geom === 'line'
+      const boxH = isLine && a.lnW ? a.lnW : a.h
+      box.style.cssText = `position:absolute;left:${leftPt}pt;top:${topPt}pt;width:${a.w}pt;height:${boxH}pt;`
+      if (isLine) { if (a.line) box.style.background = a.line }
+      else {
+        if (a.fill) box.style.background = a.fill
+        if (a.line) box.style.border = `1px solid ${a.line}`
+        if (a.geom) applyGeometryMask(box, a.geom, a.w, a.h)
+      }
+      // 普通自绘形状：behindDoc=1 的背景矩形垫底(z=0，正文文字在其上可见)；其余形状 z=2
       box.style.zIndex = a.behind ? '0' : '2'
       section.appendChild(box)
       applied += 1
