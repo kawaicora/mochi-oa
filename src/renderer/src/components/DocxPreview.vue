@@ -343,8 +343,14 @@ function collectDrawingAnchors(xml: string): DrawingAnchor[] {
     const posH = readPos('positionH')
     const posV = readPos('positionV')
     const pic = d.getElementsByTagNameNS(A_NS, 'blip').length > 0
-    // wps 形状（文本框/几何图形）：docx-preview 不渲染，需要自绘
-    const sp = d.getElementsByTagName('wps:wsp')[0] ?? null
+    // wps 形状（文本框/几何图形）：docx-preview 不渲染，需要自绘。
+    // custGeom 图标可能出现在组合(wps:wsp 嵌套)中的任意 wsp——遍历全部 wsp，取含 custGeom 的那个
+    // （与 docx-enhanced.mjs 一致；仅取 [0] 会漏掉"第一个 wsp 无 custGeom"的文档）
+    let sp: Element | null = null
+    for (const wsp of d.getElementsByTagName('wps:wsp')) {
+      if (wsp.getElementsByTagNameNS(A_NS, 'custGeom').length) { sp = wsp; break }
+    }
+    if (!sp) sp = d.getElementsByTagName('wps:wsp')[0] ?? null
     const solidFill = sp?.getElementsByTagNameNS(A_NS, 'solidFill')[0]
     const ln = sp?.getElementsByTagNameNS(A_NS, 'ln')[0]
     out.push({
