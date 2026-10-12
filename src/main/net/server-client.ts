@@ -1072,9 +1072,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'rtc:end', { roomId })
   }
 
-  async rtcDmCall(userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> {
+  async rtcDmCall(userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck<{ room: RtcRoom; kind: RtcKind }>(this.socket, 'rtc:dmCall', { userId, kind, password })
+    return emitWithAck<{ room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] }>(this.socket, 'rtc:dmCall', { userId, kind, password })
   }
 
   async rtcDmAnswer(roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> {

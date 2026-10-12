@@ -238,7 +238,11 @@ export const IpcChannels = {
   /** 读取品牌配置（软件名/图标，随安装包打包） */
   brandingGet: 'app:brandingGet',
   /** 在系统文件管理器中打开本地文件所在路径 */
-  appOpenFileLocation: 'app:openFileLocation'
+  appOpenFileLocation: 'app:openFileLocation',
+  // 远程控制输入注入（被控端 main）：start 设键鼠模式，event 分发控制指令，stop 复位+结束
+  remoteInputStart: 'remote:input:start',
+  remoteInputStop: 'remote:input:stop',
+  remoteInputEvent: 'remote:input:event'
 } as const
 
 /** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
