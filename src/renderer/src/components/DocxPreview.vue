@@ -1077,7 +1077,8 @@ onMounted(async () => {
     pages.value = host.querySelectorAll('section.docx').length
     loading.value = false
     await nextTick()
-    fitWidth()
+    // 初始保持 1:1 原始尺寸渲染（与验证页一致），避免自动 fitWidth 缩放页面造成边缘/页面间空白；
+    // 用户可随时点工具栏「适应宽度」手动缩放。
   } catch (e) {
     if (destroyed) return
     loading.value = false
