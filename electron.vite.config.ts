@@ -70,7 +70,8 @@ export default defineConfig({
           meeting: resolve(__dirname, 'src/renderer/meeting.html'),
           task: resolve(__dirname, 'src/renderer/task.html'),
           screenshot: resolve(__dirname, 'src/renderer/screenshot.html'),
-          toolbar: resolve(__dirname, 'src/renderer/toolbar.html')
+          toolbar: resolve(__dirname, 'src/renderer/toolbar.html'),
+          preview: resolve(__dirname, 'src/renderer/preview.html')
         }
       }
     }

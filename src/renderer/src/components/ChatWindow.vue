@@ -5,9 +5,6 @@ import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
 import ModelPreview from './ModelPreview.vue'
 import MediaPreview from './MediaPreview.vue'
-import PdfPreview from './PdfPreview.vue'
-import DocxPreview from './DocxPreview.vue'
-import SheetPreview from './SheetPreview.vue'
 import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
@@ -460,12 +457,6 @@ async function ensureLocalPath(m: { content: string; id: string }): Promise<stri
 
 /** 3D 预览弹窗 */
 const previewModel = ref<{ path: string; name: string } | null>(null)
-/** PDF 预览弹窗 */
-const previewPdf = ref<{ path: string; name: string } | null>(null)
-/** Word 预览弹窗 */
-const previewDocx = ref<{ path: string; name: string } | null>(null)
-/** Excel 预览弹窗 */
-const previewSheet = ref<{ path: string; name: string } | null>(null)
 /** 单独窗口预览：图片大图 / 视频全屏播放 */
 const previewMedia = ref<{ kind: 'image' | 'video'; m: ServerChatMessage } | null>(null)
 
@@ -478,7 +469,7 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
   previewModel.value = { path, name: fileNameOf(m.content) }
 }
 
-/** 打开聊天内 Office 文档预览（PDF / Word / Excel），按需下载到本地后交给对应预览组件 */
+/** 打开聊天内 Office 文档预览（PDF / Word / Excel）：按需下载到本地后交给独立预览窗口（复用同一套预览组件） */
 async function openOfficePreview(m: { content: string; id: string }): Promise<void> {
   const kind = officePreviewKind(m.content)
   if (!kind) return
@@ -488,10 +479,8 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
     flashToast(`${label} 文件下载失败`)
     return
   }
-  const payload = { path, name: fileNameOf(m.content) }
-  if (kind === 'pdf') previewPdf.value = payload
-  else if (kind === 'word') previewDocx.value = payload
-  else previewSheet.value = payload
+  const r = await window.pantry.openPreviewWindow({ kind, path, name: fileNameOf(m.content) })
+  if (!r.ok) flashToast(r.error || `${label} 预览窗口打开失败`)
 }
 </script>
 
@@ -674,15 +663,6 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 
     <!-- 3D 模型预览 -->
     <ModelPreview v-if="previewModel" :path="previewModel.path" :name="previewModel.name" @close="previewModel = null" />
-
-    <!-- PDF 预览 -->
-    <PdfPreview v-if="previewPdf" :path="previewPdf.path" :name="previewPdf.name" @close="previewPdf = null" />
-
-    <!-- Word 预览 -->
-    <DocxPreview v-if="previewDocx" :path="previewDocx.path" :name="previewDocx.name" @close="previewDocx = null" />
-
-    <!-- Excel 预览 -->
-    <SheetPreview v-if="previewSheet" :path="previewSheet.path" :name="previewSheet.name" @close="previewSheet = null" />
 
     <!-- 图片/视频单独预览 -->
     <MediaPreview v-if="previewMedia" :kind="previewMedia.kind" :m="previewMedia.m" @close="previewMedia = null" />

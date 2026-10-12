@@ -208,6 +208,8 @@ export const IpcChannels = {
   openMeetingWindow: 'win:openMeeting',
   /** 打开独立任务详情窗口 */
   openTaskWindow: 'win:openTask',
+  /** 打开独立 Office 预览窗口（PDF / Word / Excel），入参 { kind, path, name } */
+  openPreviewWindow: 'win:openPreview',
   /** 打开独立全屏截屏窗口（固定不可调整），入参 { dataUrl, width, height } */
   openScreenshotWindow: 'win:openScreenshot',
   /** 截屏窗口 ready 后取待处理截图数据 */

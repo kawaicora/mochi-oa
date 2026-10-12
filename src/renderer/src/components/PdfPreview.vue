@@ -10,7 +10,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
-const props = defineProps<{ path: string; name: string }>()
+const props = defineProps<{ path: string; name: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 /** 渲染任务最小接口（仅用于取消） */
@@ -396,7 +396,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pdf-mask" @click.self="emit('close')">
+  <div class="pdf-mask" :class="{ 'pdf-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="pdf-box">
       <div class="pdf-head">
         <span class="pdf-title"><i class="fas fa-file-pdf"></i>&nbsp;PDF 预览</span>
@@ -487,6 +487,20 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.pdf-mask--standalone {
+  background: #f0f2f5;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+.pdf-mask--standalone .pdf-box {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 .pdf-head {
   display: flex;

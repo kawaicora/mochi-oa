@@ -8,7 +8,7 @@
  */
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
-const props = defineProps<{ path: string; name: string }>()
+const props = defineProps<{ path: string; name: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const scrollEl = ref<HTMLElement | null>(null)
@@ -1098,7 +1098,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="docx-mask" @click.self="emit('close')">
+  <div class="docx-mask" :class="{ 'docx-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="docx-box">
       <div class="docx-head">
         <span class="docx-title"><i class="fas fa-file-word"></i>&nbsp;Word 预览</span>
@@ -1155,6 +1155,20 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.docx-mask--standalone {
+  background: #f0f2f5;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+.docx-mask--standalone .docx-box {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 .docx-head {
   display: flex;

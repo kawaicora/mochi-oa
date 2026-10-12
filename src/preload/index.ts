@@ -54,6 +54,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.openMeetingWindow, params),
   openTaskWindow: (taskId: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
+  openPreviewWindow: (params: { kind: 'pdf' | 'word' | 'excel'; path: string; name: string }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.openPreviewWindow, params),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openScreenshotWindow, payload),
   screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>

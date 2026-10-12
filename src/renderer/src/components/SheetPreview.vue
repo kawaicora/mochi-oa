@@ -16,7 +16,7 @@ import type { CellObject, Range, WorkBook, WorkSheet } from 'xlsx'
 import { readXlsxStyles, type CellStyle, type SheetStyleMap } from '../utils/xlsx-style'
 import { readXlsxDrawings, type DrawingItem } from '../utils/xlsx-drawing'
 
-const props = defineProps<{ path: string; name: string }>()
+const props = defineProps<{ path: string; name: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 /** 单元格显示模型 */
@@ -379,7 +379,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="sheet-mask" @click.self="emit('close')">
+  <div class="sheet-mask" :class="{ 'sheet-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="sheet-box">
       <div class="sheet-head">
         <span class="sheet-title"><i class="fas fa-file-excel"></i>&nbsp;Excel 预览</span>
@@ -509,6 +509,20 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.sheet-mask--standalone {
+  background: #f0f2f5;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+.sheet-mask--standalone .sheet-box {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 .sheet-head {
   display: flex;

@@ -829,6 +829,29 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
   })
 
+  // 打开独立 Office 预览窗口（PDF / Word / Excel）：复用 ChatWindow 内嵌预览组件的渲染逻辑，
+  // 仅改为独立 BrowserWindow 承载（组件以 standalone 模式隐藏弹窗外壳、全屏渲染）。
+  ipcMain.handle(IpcChannels.openPreviewWindow, (_e, params) => {
+    const p = (params ?? {}) as { kind?: unknown; path?: unknown; name?: unknown }
+    const kind = String(p.kind ?? '')
+    const path = String(p.path ?? '')
+    const name = String(p.name ?? '')
+    if (kind !== 'pdf' && kind !== 'word' && kind !== 'excel') return { ok: false, error: '未知预览类型: ' + kind }
+    if (!path) return { ok: false, error: '缺少本地文件路径' }
+    const win = new BrowserWindow({
+      width: 1100, height: 820, minWidth: 700, minHeight: 520,
+      resizable: true, autoHideMenuBar: true, backgroundColor: '#f0f2f5',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    const query: Record<string, string> = { kind, path, name }
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/preview.html?${new URLSearchParams(query).toString()}`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/preview.html'), { query })
+    }
+    return { ok: true }
+  })
+
   // 打开独立全屏截屏窗口（固定、不可调整）——先把截图数据暂存，截图窗口 ready 后再取
   // 同时打开独立工具栏窗口（框选时用）；全屏编辑时隐藏独立窗口、工具栏内嵌在编辑窗口内部
   let pendingScreenshot: { dataUrl: string; width: number; height: number } | null = null
