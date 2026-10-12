@@ -314,21 +314,35 @@ const remoteReqUserId = ref(0)
 async function startDmRemote(): Promise<void> {
   if (!selected.value?.dmUserId) return
   const id = selected.value.dmUserId
-  const r = await rtc.startDmCall(id, 'remote')
-  if (r.needPassword) {
-    remoteReqUserId.value = id
-    remotePw.value = ''
-    remotePwOpen.value = true
+  try {
+    const r = await rtc.startDmCall(id, 'remote')
+    if (r.needPassword) {
+      remoteReqUserId.value = id
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 发起远程控制失败', e)
+    flashToast(String(e))
   }
 }
 async function submitRemotePw(): Promise<void> {
   const id = remoteReqUserId.value
   const pw = remotePw.value
   remotePwOpen.value = false
-  const r = await rtc.startDmCall(id, 'remote', pw)
-  if (r.needPassword) {
-    remotePw.value = ''
-    remotePwOpen.value = true
+  try {
+    const r = await rtc.startDmCall(id, 'remote', pw)
+    if (r.needPassword) {
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 提交远程控制密码失败', e)
+    flashToast(String(e))
   }
 }
 function startGroupVoice(): void {

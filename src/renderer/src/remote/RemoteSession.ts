@@ -114,7 +114,9 @@ class RemoteSession {
         // 上报被控端屏幕尺寸 + 模式，控制端据此换算归一化坐标
         try {
           this.channel?.send(JSON.stringify({ t: 'meta', w: window.screen.width, h: window.screen.height, mode: this.mode }))
-        } catch { /* ignore */ }
+        } catch (e) {
+          console.warn('[remote] 上报屏幕尺寸失败', e)
+        }
       }
     }
     // 采集屏幕 + 系统声音（48kHz / 2ch / 高音质）
@@ -211,7 +213,9 @@ class RemoteSession {
       } else if (signal.candidate) {
         try {
           await this.pc.addIceCandidate(signal.candidate as RTCIceCandidateInit)
-        } catch { /* 忽略候选时序 */ }
+        } catch (e) {
+          console.warn('[remote] 添加 ICE 候选失败（可能时序竞态）', e)
+        }
       }
     } catch (e) {
       this.onError(`信令处理失败：${(e as Error)?.message ?? e}`)
@@ -232,7 +236,9 @@ class RemoteSession {
   // 控制端：发送控制指令（坐标已被控端屏幕像素换算好）
   sendControl(msg: ControlMsg): void {
     if (this.channel && this.channel.readyState === 'open' && this.role === 'master') {
-      try { this.channel.send(JSON.stringify(msg)) } catch { /* ignore */ }
+      try { this.channel.send(JSON.stringify(msg)) } catch (e) {
+        console.warn('[remote] 发送控制指令失败', msg.t, e)
+      }
     }
   }
 

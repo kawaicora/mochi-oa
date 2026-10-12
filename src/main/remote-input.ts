@@ -104,7 +104,7 @@ while ($true) {
       'hide' { [void][U32]::ShowCursor($false) }
       'show' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
     }
-  } catch { }
+  } catch { Write-Error "注入失败: $_" }
 }
 `
 
@@ -121,9 +121,10 @@ function ensureWinProc(): ChildProcessWithoutNullStreams | null {
     winProc.on('error', () => { winProc = null })
     winProc.on('exit', () => { winProc = null })
     winProc.stdout.on('data', () => {})
-    winProc.stderr.on('data', () => {})
+    winProc.stderr.on('data', (d) => { const s = String(d).trim(); if (s) console.warn('[remote-input] powershell:', s) })
     return winProc
-  } catch {
+  } catch (e) {
+    console.error('[remote-input] 启动 powershell 注入进程失败', e)
     winProc = null
     return null
   }
@@ -135,7 +136,8 @@ function winSend(cmd: RemoteInputCommand): boolean {
   try {
     p.stdin.write(JSON.stringify(cmd) + '\n')
     return true
-  } catch {
+  } catch (e) {
+    console.warn('[remote-input] 写入注入命令失败', cmd.t, e)
     return false
   }
 }
@@ -166,8 +168,8 @@ function xdotool(args: string[]): void {
     execFile('xdotool', args, { timeout: 1500 }, (err) => {
       if (err) console.warn('[remote-input] xdotool 失败', err.message)
     })
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.warn('[remote-input] xdotool 调用异常', e)
   }
 }
 

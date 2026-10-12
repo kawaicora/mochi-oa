@@ -191,13 +191,14 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       if (kind === 'remote') {
         // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制）
-        RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId })
+        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId })
         return {}
       }
       // 统一走通用通话窗口（与会议同一组件 RtcCallRoom）
       void window.pantry.openMeetingWindow({ mode: 'join', kind, meetingNo: ack.data.room.id })
       return {}
     } catch (e) {
+      console.error('[rtc] startDmCall 失败', kind, 'userId=', userId, e)
       error.value = String(e)
       return {}
     }
@@ -223,6 +224,7 @@ export const useRtcStore = defineStore('rtc', () => {
       // 统一走通用通话窗口
       void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -244,6 +246,7 @@ export const useRtcStore = defineStore('rtc', () => {
       // 统一走通用通话窗口
       void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -263,6 +266,7 @@ export const useRtcStore = defineStore('rtc', () => {
       // 统一走通用通话窗口
       void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -292,6 +296,7 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind)
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }

@@ -33,17 +33,23 @@ class RemoteUi {
     return [{ urls: 'stun:stun.l.google.com:19302' }]
   }
 
-  /** 控制端：发起/建立远程控制会话并打开独立远程窗口 */
-  openMaster(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; peerId: number; peerName?: string }): void {
+  /** 控制端：发起/建立远程控制会话并打开独立远程窗口（失败会抛出，由调用方记日志） */
+  async openMaster(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; peerId: number; peerName?: string }): Promise<void> {
     const server = useServerStore()
-    void window.pantry.openRemoteWindow({
-      room: opts.room,
-      iceServers: (opts.iceServers ?? this.iceFallback()) as unknown[],
-      mode: opts.mode,
-      peerId: opts.peerId,
-      peerName: opts.peerName ?? '',
-      meId: server.state.userId ?? 0
-    })
+    try {
+      const r = await window.pantry.openRemoteWindow({
+        room: opts.room,
+        iceServers: (opts.iceServers ?? this.iceFallback()) as unknown[],
+        mode: opts.mode,
+        peerId: opts.peerId,
+        peerName: opts.peerName ?? '',
+        meId: server.state.userId ?? 0
+      })
+      if (!r?.ok) throw new Error(r?.error || '远程窗口打开失败')
+    } catch (e) {
+      console.error('[remote] openMaster 打开远程窗口失败', e)
+      throw e
+    }
   }
 
   /** 被控端：同意后启动被控会话（采集屏幕+系统声音+键鼠注入） */
@@ -64,7 +70,10 @@ class RemoteUi {
         onError: () => { remoteSlaveState.controlling = false }
       }
     })
-    if (!ok) remoteSlaveState.controlling = false
+    if (!ok) {
+      console.error('[remote] 被控端启动会话失败')
+      remoteSlaveState.controlling = false
+    }
     return ok
   }
 

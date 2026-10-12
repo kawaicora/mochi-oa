@@ -71,7 +71,8 @@ export default defineConfig({
           task: resolve(__dirname, 'src/renderer/task.html'),
           screenshot: resolve(__dirname, 'src/renderer/screenshot.html'),
           toolbar: resolve(__dirname, 'src/renderer/toolbar.html'),
-          preview: resolve(__dirname, 'src/renderer/preview.html')
+          preview: resolve(__dirname, 'src/renderer/preview.html'),
+          remote: resolve(__dirname, 'src/renderer/remote.html')
         }
       }
     }
