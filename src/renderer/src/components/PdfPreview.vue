@@ -398,7 +398,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="pdf-mask" :class="{ 'pdf-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="pdf-box">
-      <div class="pdf-head">
+      <div v-if="!standalone" class="pdf-head">
         <span class="pdf-title"><i class="fas fa-file-pdf"></i>&nbsp;PDF 预览</span>
         <div class="pdf-name" :title="name">{{ name }}</div>
         <button class="pdf-x" title="关闭 (Esc)" @click="emit('close')"><i class="fas fa-times"></i></button>

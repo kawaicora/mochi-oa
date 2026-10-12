@@ -381,7 +381,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="sheet-mask" :class="{ 'sheet-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="sheet-box">
-      <div class="sheet-head">
+      <div v-if="!standalone" class="sheet-head">
         <span class="sheet-title"><i class="fas fa-file-excel"></i>&nbsp;Excel 预览</span>
         <div class="sheet-name" :title="name">{{ name }}</div>
         <button class="sheet-x" title="关闭 (Esc)" @click="emit('close')"><i class="fas fa-times"></i></button>

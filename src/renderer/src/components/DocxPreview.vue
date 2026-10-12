@@ -1107,7 +1107,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="docx-mask" :class="{ 'docx-mask--standalone': standalone }" @click.self="emit('close')">
     <div class="docx-box">
-      <div class="docx-head">
+      <div v-if="!standalone" class="docx-head">
         <span class="docx-title"><i class="fas fa-file-word"></i>&nbsp;Word 预览</span>
         <div class="docx-name" :title="name">{{ name }}</div>
         <button class="docx-x" title="关闭 (Esc)" @click="emit('close')"><i class="fas fa-times"></i></button>
