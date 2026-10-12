@@ -306,8 +306,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.rtcLeave, roomId),
   rtcEnd: (roomId: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcEnd, roomId),
-  rtcDmCall: (userId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> =>
-    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind),
+  rtcDmCall: (userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> =>
+    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind, password ?? undefined),
   rtcDmAnswer: (roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
     ipcRenderer.invoke(IpcChannels.rtcDmAnswer, roomId, accept),
   rtcGroupCall: (groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>

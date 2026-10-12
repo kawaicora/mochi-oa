@@ -483,7 +483,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.rtcSignal, (_e, roomId, signal) => serverClient.rtcSignal(String(roomId), signal as import('../shared/server-types').RtcSignalPayload))
   ipcMain.handle(IpcChannels.rtcLeave, (_e, roomId) => serverClient.rtcLeave(String(roomId)))
   ipcMain.handle(IpcChannels.rtcEnd, (_e, roomId) => serverClient.rtcEnd(String(roomId)))
-  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : 'video'))
+  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind, password) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : kind === 'remote' ? 'remote' : 'video', typeof password === 'string' ? password : undefined))
   ipcMain.handle(IpcChannels.rtcDmAnswer, (_e, roomId, accept) => serverClient.rtcDmAnswer(String(roomId), accept === true))
   ipcMain.handle(IpcChannels.rtcGroupCall, (_e, groupId, kind) => serverClient.rtcGroupCall(Number(groupId) || 0, kind === 'voice' ? 'voice' : 'video'))
   ipcMain.handle(IpcChannels.rtcChatSend, (_e, roomId, content) => serverClient.rtcChatMessage(String(roomId), String(content ?? '')))
