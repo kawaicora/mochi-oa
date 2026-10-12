@@ -274,9 +274,9 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
     let d = ''
     let cur = { x: 0, y: 0 }
     for (let ci = 0; ci < path.childNodes.length; ci++) {
-      const el = path.childNodes[ci]
+      const el = path.childNodes[ci] as Element
       if (el.nodeType !== 1) continue
-      const ln = (el as Element).localName
+      const ln = el.localName
       const pts = Array.from(el.getElementsByTagNameNS(A_NS, 'pt'))
       const P = (q: Element | null) => (q ? { x: coord(q.getAttribute('x'), pW, pH), y: coord(q.getAttribute('y'), pW, pH) } : null)
       if (ln === 'moveTo' || ln === 'lnTo') {
