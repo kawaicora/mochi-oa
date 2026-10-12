@@ -210,6 +210,10 @@ export const IpcChannels = {
   openTaskWindow: 'win:openTask',
   /** 打开独立 Office 预览窗口（PDF / Word / Excel），入参 { kind, path, name } */
   openPreviewWindow: 'win:openPreview',
+  /** 打开独立远程控制窗口（控制端），入参 { room, iceServers, mode, peerId, peerName } */
+  openRemoteWindow: 'win:openRemote',
+  /** 远程窗口 ready 后取待处理会话参数 */
+  remoteGetParams: 'remote:getParams',
   /** 打开独立全屏截屏窗口（固定不可调整），入参 { dataUrl, width, height } */
   openScreenshotWindow: 'win:openScreenshot',
   /** 截屏窗口 ready 后取待处理截图数据 */

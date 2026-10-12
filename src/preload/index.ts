@@ -56,6 +56,10 @@ const api = {
     ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
   openPreviewWindow: (params: { kind: 'pdf' | 'word' | 'excel'; path: string; name: string }): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.openPreviewWindow, params),
+  openRemoteWindow: (params: { room: string; iceServers: unknown[]; mode: 'remote' | 'local'; peerId: number; peerName?: string; meId: number }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.openRemoteWindow, params),
+  remoteGetParams: (): Promise<{ room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null> =>
+    ipcRenderer.invoke(IpcChannels.remoteGetParams),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openScreenshotWindow, payload),
   screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>

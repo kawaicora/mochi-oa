@@ -33,26 +33,17 @@ class RemoteUi {
     return [{ urls: 'stun:stun.l.google.com:19302' }]
   }
 
-  /** 控制端：发起/建立远程控制会话并打开查看面板 */
-  openMaster(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; peerName?: string }): void {
+  /** 控制端：发起/建立远程控制会话并打开独立远程窗口 */
+  openMaster(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; peerId: number; peerName?: string }): void {
     const server = useServerStore()
-    remoteViewer.peerName = opts.peerName ?? ''
-    const ok = RemoteSession.startMaster({
+    void window.pantry.openRemoteWindow({
       room: opts.room,
-      iceServers: opts.iceServers ?? this.iceFallback(),
+      iceServers: (opts.iceServers ?? this.iceFallback()) as unknown[],
       mode: opts.mode,
-      meId: server.state.userId ?? 0,
-      sendSignal: (s) => window.pantry.rtcSignal(opts.room, s as unknown as RtcSignalPayload),
-      callbacks: {
-        onRemoteStream: (s) => { remoteViewer.stream = s },
-        onMeta: (m) => { remoteViewer.meta = m },
-        onState: (st) => {
-          if (st.ended) this.end()
-        },
-        onError: () => { this.end() }
-      }
+      peerId: opts.peerId,
+      peerName: opts.peerName ?? '',
+      meId: server.state.userId ?? 0
     })
-    if (ok) remoteViewer.open = true
   }
 
   /** 被控端：同意后启动被控会话（采集屏幕+系统声音+键鼠注入） */

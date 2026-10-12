@@ -781,7 +781,6 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
   padding: 8px 16px;
   cursor: pointer;
 }
-</style>
 .chat-panel {
   flex: 1;
   display: flex;

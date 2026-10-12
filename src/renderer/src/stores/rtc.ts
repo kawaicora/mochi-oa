@@ -190,8 +190,8 @@ export const useRtcStore = defineStore('rtc', () => {
         return {}
       }
       if (kind === 'remote') {
-        // 远程控制：不进会议窗口，启动远程会话 + 打开控制端查看面板
-        RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote' })
+        // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制）
+        RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId })
         return {}
       }
       // 统一走通用通话窗口（与会议同一组件 RtcCallRoom）
