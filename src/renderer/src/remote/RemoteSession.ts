@@ -59,6 +59,8 @@ class RemoteSession {
   private room = ''
   private mode: RemoteMode = 'local'
   private meId = 0
+  /** 对端 userId（精确信令匹配：控制端=被控端、被控端=控制端；同一账号两端 userId 相同也不误滤） */
+  private peerId = 0
   private localStream: MediaStream | null = null
   private remoteStream: MediaStream | null = null
   private sendSignalFn: ((signal: RtcSignalMsg) => void) | null = null
@@ -80,6 +82,7 @@ class RemoteSession {
     iceServers: RTCIceServer[]
     mode: RemoteMode
     meId: number
+    peerId: number
     sendSignal: (s: RtcSignalMsg) => void
     callbacks?: RemoteSessionCallbacks
   }): Promise<boolean> {
@@ -88,6 +91,7 @@ class RemoteSession {
     this.role = 'slave'
     this.mode = opts.mode
     this.meId = opts.meId
+    this.peerId = opts.peerId
     this.sendSignalFn = opts.sendSignal
     this.callbacks = opts.callbacks ?? {}
     this.closed = false
@@ -149,6 +153,7 @@ class RemoteSession {
     iceServers: RTCIceServer[]
     mode: RemoteMode
     meId: number
+    peerId: number
     sendSignal: (s: RtcSignalMsg) => void
     callbacks?: RemoteSessionCallbacks
   }): boolean {
@@ -157,6 +162,7 @@ class RemoteSession {
     this.role = 'master'
     this.mode = opts.mode
     this.meId = opts.meId
+    this.peerId = opts.peerId
     this.sendSignalFn = opts.sendSignal
     this.callbacks = opts.callbacks ?? {}
     this.closed = false
@@ -186,11 +192,11 @@ class RemoteSession {
     return true
   }
 
-  // 订阅 rtc:signal，过滤本房间 + 非自己来源
+  // 订阅 rtc:signal，过滤本房间 + 精确匹配对端（不依赖"非自己"，同账号两端 userId 相同也不误滤）
   private subscribeSignals(): void {
     this.unsubSignal = window.pantry.onRtcSignal((d) => {
       if (!this.isActive || d.room !== this.room) return
-      if (d.from?.userId === this.meId) return
+      if (d.from?.userId !== this.peerId) return
       void this.handleSignal(d.signal as RtcSignalMsg)
     })
   }

@@ -219,6 +219,8 @@ export const useRtcStore = defineStore('rtc', () => {
     error.value = ''
     const roomId = incomingDm.value.room
     const kind = incomingDm.value.kind
+    // 远程控制：对端（控制端/发起者）userId，用于信令精确匹配
+    const peerId = incomingDm.value.from?.userId ?? 0
     try {
       const ack = await rtcPantry.rtcDmAnswer(roomId, true)
       if (!ack.ok || !ack.data?.room) {
@@ -228,7 +230,7 @@ export const useRtcStore = defineStore('rtc', () => {
       incomingDm.value = null
       if (kind === 'remote') {
         // 被控端：同意后启动被控会话（采集屏幕 + 系统声音 + 键鼠注入）
-        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote' })
+        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId })
         return
       }
       // 统一走通用通话窗口

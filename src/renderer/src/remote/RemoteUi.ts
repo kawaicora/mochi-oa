@@ -52,8 +52,8 @@ class RemoteUi {
     }
   }
 
-  /** 被控端：同意后启动被控会话（采集屏幕+系统声音+键鼠注入） */
-  async openSlave(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; byName?: string }): Promise<boolean> {
+  /** 被控端：同意后启动被控会话（采集屏幕+系统声音+键鼠注入）；peerId=控制端（发起者）userId */
+  async openSlave(opts: { room: string; kind: RtcKind; iceServers?: RtcIceServer[]; mode: RemoteMode; peerId: number; byName?: string }): Promise<boolean> {
     const server = useServerStore()
     remoteSlaveState.byName = opts.byName ?? ''
     remoteSlaveState.controlling = true
@@ -62,6 +62,7 @@ class RemoteUi {
       iceServers: opts.iceServers ?? this.iceFallback(),
       mode: opts.mode,
       meId: server.state.userId ?? 0,
+      peerId: opts.peerId,
       sendSignal: (s) => window.pantry.rtcSignal(opts.room, s as unknown as RtcSignalPayload),
       callbacks: {
         onState: (st) => {

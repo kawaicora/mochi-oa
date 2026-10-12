@@ -74,6 +74,7 @@ onMounted(() => {
     iceServers: props.iceServers,
     mode: props.mode,
     meId: props.meId,
+    peerId: props.peerId,
     sendSignal: (s) => window.pantry.rtcSignal(props.room, s as never),
     callbacks: {
       onRemoteStream: (s) => { stream.value = s },
