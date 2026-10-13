@@ -96,12 +96,12 @@ function emitWithAck<T = unknown>(
 ): Promise<Ack & { data?: T }> {
   return new Promise((resolve) => {
     const t0 = Date.now()
-    console.log(`[io:send] ${event} ${safeLog(payload)}`)
+    // console.log(`[io:send] ${event} ${safeLog(payload)}`)
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
-      console.log(`[io:ack] ${event} TIMEOUT after ${timeoutMs}ms`)
+      // console.log(`[io:ack] ${event} TIMEOUT after ${timeoutMs}ms`)
       resolve({ ok: false, error: '请求超时' })
     }, timeoutMs)
     socket.emit(event, payload, (raw: unknown) => {
@@ -109,7 +109,7 @@ function emitWithAck<T = unknown>(
       settled = true
       clearTimeout(timer)
       const ack = normalizeAck<T>(raw)
-      console.log(`[io:ack] ${event} ok=${ack.ok} err=${ack.error ?? ''} ${Date.now() - t0}ms`)
+      // console.log(`[io:ack] ${event} ok=${ack.ok} err=${ack.error ?? ''} ${Date.now() - t0}ms`)
       resolve(ack)
     })
   })

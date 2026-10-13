@@ -115,7 +115,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           // 服务端 ack 为 { ok, status }，normalizeAck 会把 status 归入 data，故从 ack.data.status 读取
           const status = (ack as { data?: { status?: string } }).data?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
-          void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
+          // void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
             const info = (p.info ?? {}) as Record<string, unknown>
             const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []

@@ -7,6 +7,10 @@
  *  - Esc 关闭、打开文件所在路径
  */
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import PRESETS from './docx/presets.json'
+import { renderPreset, srcRectCss, outerShdwCss, maskPolygonPts, wrapInsetAtMid } from './docx/geom.mjs'
+import { applyAutoPagination, applyFontFallback } from './docx/pagination.mjs'
+import { collectInk, inkToSvgPaths } from './docx/ink.mjs'
 
 const props = defineProps<{ path: string; name: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -72,10 +76,31 @@ function errText(e: unknown): string {
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const VML_NS = 'urn:schemas-microsoft-com:vml'
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+const WP14_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing'
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const EMU_PT = 12700
+
+/**
+ * Office 默认主题色（无 theme1.xml 时的兜底）。
+ * 每个 docx 的主题色由 word/theme/theme1.xml 的 a:clrScheme 定义（12 槽位），
+ * 硬编码表只是兜底——自定义主题文档（如模板）必须用真实主题，否则
+ * schemeClr 填充/描边会渲染成错误颜色（例：测试2.docx accent2=#ED377A 粉，
+ * 默认表 accent2=#ED7D31 橙）。见 05 篇 §3 主题解析与 §7 浏览器等价。
+ */
+const DEFAULT_SCHEME: Record<string, string> = {
+  bg1: '#FFFFFF', bg2: '#F2F2F2', dk1: '#000000', lt1: '#FFFFFF', dk2: '#000000', lt2: '#000000',
+  tx1: '#000000', tx2: '#000000', accent1: '#4472C4', accent2: '#ED7D31', accent3: '#A5A5A5',
+  accent4: '#FFC000', accent5: '#5B9BD5', accent6: '#70AD47', hlink: '#0563C1', folHlink: '#954F72'
+}
+/** 当前文档的真实主题色（prepareDocxBlob 从 theme1.xml 载入）；null = 未载入 → 用默认表 */
+let THEME_COLORS: Record<string, string> | null = null
+/** 取主题色：真实主题优先，缺槽位回退默认表 */
+function schemeColor(name: string | null | undefined): string {
+  const n = name ?? ''
+  return (THEME_COLORS && THEME_COLORS[n]) || DEFAULT_SCHEME[n] || '#000000'
+}
 
 /** 页眉/页脚里的锚定图片（Word 里常见的「整页背景图」实现方式） */
 interface HeaderImage {
@@ -88,6 +113,8 @@ interface HeaderImage {
   part: string
   /** 页眉类型：default=除首页外的各页，first=仅首页，even=偶数页 */
   type: 'default' | 'first' | 'even'
+  /** wp14:sizeRelH/V 相对尺寸（千分比，100000=100% 页面宽/高）；有则覆盖 wp:extent */
+  sizeRel?: { pctW: number; pctH: number }
 }
 
 /** JSZip 实例类型（jszip 的类型是 export = JSZip，没有 default） */
@@ -113,12 +140,33 @@ interface DrawingAnchor {
   h: number
   behind: boolean
   wrap: string
+  /** wrapSquare 的 wrapText：bothSides/left/right/largest（文字绕到哪一侧） */
+  wrapText: string
+  /** 文字与对象左右边缘的最小间距（EMU→pt），环绕时用 */
+  distL: number
+  distR: number
   geom: string
+  /** prstGeom 用户覆盖的调整值 {adjN:number}（缺省用预设默认） */
+  geomAv?: Record<string, number>
+  /** wps:txbx 内 WordprocessingML 文字转成的简化 HTML（docx-preview 不渲染 wps，需自绘文字层） */
+  txbxHtml?: string
+  /** bodyPr 垂直对齐：t=顶 / ctr=居中 / b=底 */
+  bodyAnchor?: 't' | 'ctr' | 'b'
+  /** bodyPr 文本内框（pt）：l/t/r/b，缺省 91440/45720 EMU */
+  bodyInsets?: { l: number; t: number; r: number; b: number }
+  /** a:srcRect 源图裁剪（0..100000 每边），无则 undefined */
+  srcRect?: { l: number; t: number; r: number; b: number }
   /** 自绘形状的填充/描边 */
   fill?: string
   line?: string
   /** 描边宽度（EMU→pt），line 形状高度用它 */
   lnW?: number
+  /** a:effectLst/a:outerShdw 外阴影（EMU；alpha 0..100000），无则 undefined */
+  shadow?: { blurRad: number; dist: number; dir: number; algn: string; color: string; alpha: number }
+  /** wp:effectExtent 阴影/发光外延（EMU→pt），绕排边距需纳入 */
+  fxExtent?: { l: number; t: number; r: number; b: number }
+  /** wp:wrapPolygon 顶点（21600 逻辑网格），tight/through 多边形绕排用 */
+  wrapPts?: [number, number][]
   /** custGeom 自定义几何图标（docx-preview 不渲染 → 按 OOXML 转 SVG path） */
   cust?: {
     paths: { d: string; w: string; h: string; fill: string; stroke: string }[]
@@ -193,6 +241,7 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
       default: return undefined
     }
   }
+  const RAD = Math.PI / 10800000 // 60000 分之一度 → 弧度（与 geom.mjs 一致）
   const evalFmla = (fmla: string, W: number, H: number, stack: Set<string>): number => {
     const t = String(fmla || '0').trim().split(/\s+/)
     const op = t[0]
@@ -206,16 +255,23 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
       case '*': return (p[0] || 0) * (p[1] || 0)
       case '/': return (p[1] || 0) ? (p[0] || 0) / p[1] : 0
       case 'abs': return Math.abs(p[0] || 0)
-      case 'at2': return Math.atan2(p[0] || 0, p[1] || 0)
-      case 'cos': return (p[0] || 0) + (p[1] || 0) * Math.cos(((p[2] || 0) * Math.PI) / 180)
-      case 'sin': return (p[0] || 0) + (p[1] || 0) * Math.sin(((p[2] || 0) * Math.PI) / 180)
-      case 'tan': return (p[0] || 0) + (p[1] || 0) * Math.tan(((p[2] || 0) * Math.PI) / 180)
+      // at2(x,y) → 60000 分之一度（不是弧度）
+      case 'at2': return 10800000 * Math.atan2(p[1] || 0, p[0] || 0) / Math.PI
+      // cos/sin/tan(scale, angle)：angle 为 60000 分之一度，乘 RAD 转弧度（不是 ×π/180）
+      case 'cos': return (p[0] || 0) * Math.cos((p[1] || 0) * RAD)
+      case 'sin': return (p[0] || 0) * Math.sin((p[1] || 0) * RAD)
+      case 'tan': return (p[0] || 0) * Math.tan((p[1] || 0) * RAD)
       case 'max': return Math.max(p[0] || 0, p[1] || 0)
       case 'min': return Math.min(p[0] || 0, p[1] || 0)
-      case 'mod': return (p[0] || 0) % (p[1] || 1)
-      case 'pin': return Math.max(p[0] || 0, Math.min(p[1] || 0, p[2] || 0))
+      // mod(a,b,c) = 向量模长 √(a²+b²+c²)，不是取模
+      case 'mod': return Math.sqrt((p[0] || 0) ** 2 + (p[1] || 0) ** 2 + (p[2] || 0) ** 2)
+      // pin(min, v, max) = 把 v 夹到 [min,max]
+      case 'pin': return Math.min(Math.max(p[1] || 0, p[0] || 0), p[2] || 0)
       case 'sqrt': return Math.sqrt(Math.abs(p[0] || 0))
-      case 'cat2': return Math.atan2((p[2] || 0) - (p[0] || 0), (p[3] || 0) - (p[1] || 0))
+      // cat2(r,x,y)=r·cos(atan2(y,x))；sat2(r,x,y)=r·sin(atan2(y,x))
+      case 'cat2': { const r = p[0] || 0, x = p[1] || 0, y = p[2] || 0; return r * Math.cos(Math.atan2(y, x)) }
+      case 'sat2': { const r = p[0] || 0, x = p[1] || 0, y = p[2] || 0; return r * Math.sin(Math.atan2(y, x)) }
+      case 'if': case '?:': return (p[0] || 0) > 0 ? (p[1] || 0) : (p[2] || 0)
       default: return 0
     }
   }
@@ -239,23 +295,25 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
     if (/^-?[0-9]+(\.[0-9]+)?$/.test(String(v).trim())) return parseFloat(v)
     return resolve(v, W, H, new Set<string>())
   }
-  // arcTo：椭圆弧。OOXML stAng/swAng = 60000 分之一度，逆时针，0 指向 +x（y 轴向下）。
-  // 圆心 = 当前点沿主轴 +x 偏移 wR、+y 偏移 hR；弧从 stAng 起扫 swAng（ECMA-376 §20.1.9.8）
+  // arcTo：椭圆弧。OOXML stAng/swAng = 60000 分之一度。
+  // 圆心 = 当前点 + (-wR·cos(st), -hR·sin(st))；弧端点 = 当前点 + wR·(cos(er)-cos(sr))、hR·(sin(er)-sin(sr))。
+  // swAng 需钳制到 [-360,360] 度（与 geom.mjs arcToToSvg 一致）。
   const arcToCmd = (cur: { x: number; y: number }, wR: number, hR: number, stAng: number, swAng: number): string => {
-    const st = (stAng / 60000) * Math.PI / 180
-    const sw = (swAng / 60000) * Math.PI / 180
-    const end = st + sw
-    const cx = cur.x, cy = cur.y + hR
-    const x2 = cx + wR * Math.cos(end)
-    const y2 = cy + hR * Math.sin(end)
-    const large = Math.abs(sw) > Math.PI ? 1 : 0
-    const sweep = sw > 0 ? 1 : 0
-    return `A ${wR} ${hR} 0 ${large} ${sweep} ${x2} ${y2} `
+    let swDeg = swAng / 60000
+    swDeg = Math.max(-360, Math.min(360, swDeg))
+    const sr = (stAng / 60000) * Math.PI / 180
+    const er = (stAng / 60000 + swDeg) * Math.PI / 180
+    const ex = cur.x + wR * (Math.cos(er) - Math.cos(sr))
+    const ey = cur.y + hR * (Math.sin(er) - Math.sin(sr))
+    const large = Math.abs(swDeg) > 180 ? 1 : 0
+    const sweep = swDeg >= 0 ? 1 : 0
+    return `A ${wR} ${hR} 0 ${large} ${sweep} ${ex} ${ey} `
   }
   const WPS_NS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape'
   const findSpPr = (el: Element) =>
     el.getElementsByTagNameNS(A_NS, 'spPr')[0] || el.getElementsByTagNameNS(WPS_NS, 'spPr')[0] || null
-  const SCHEME: Record<string, string> = { bg1: '#FFFFFF', bg2: '#F2F2F2', dk1: '#000000', lt1: '#FFFFFF', dk2: '#000000', lt2: '#000000', tx1: '#000000', tx2: '#000000', accent1: '#4472C4', accent2: '#ED7D31', accent3: '#A5A5A5', accent4: '#FFC000', accent5: '#5B9BD5', accent6: '#70AD47', hlink: '#0563C1', folHlink: '#954F72' }
+  // 主题色：真实主题（THEME_COLORS）优先，未载入时回退 Office 默认表
+  const SCHEME: Record<string, string> = (THEME_COLORS ?? DEFAULT_SCHEME)
   let fill = '#000000'
   const spPr = findSpPr(sp)
   if (spPr) {
@@ -264,7 +322,7 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
       const sc = sf.getElementsByTagNameNS(A_NS, 'srgbClr')[0]
       const sch = sf.getElementsByTagNameNS(A_NS, 'schemeClr')[0]
       if (sc) fill = '#' + sc.getAttribute('val')
-      else if (sch) fill = SCHEME[sch.getAttribute('val') ?? ''] || '#000000'
+      else if (sch) fill = schemeColor(sch.getAttribute('val'))
     }
   }
   const paths: { d: string; w: string; h: string; fill: string; stroke: string }[] = []
@@ -314,6 +372,101 @@ function custGeomToSvg(sp: Element): DrawingAnchor['cust'] {
   return { paths, fill, xOff, yOff, w: iw, h: ih }
 }
 
+/** 从 wps:wsp 里抽出形状内文字（wps:txbx/w:txbxContent）与 bodyPr 排版参数。
+ *  docx-preview 完全不渲染 wps 形状，所以文字要自己转成简化 HTML 画上去。 */
+function extractShapeText(sp: Element | null): Pick<DrawingAnchor, 'txbxHtml' | 'bodyAnchor' | 'bodyInsets'> {
+  const out: Pick<DrawingAnchor, 'txbxHtml' | 'bodyAnchor' | 'bodyInsets'> = {}
+  if (!sp) return out
+  const esc = (s: string): string =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const bodyPr = sp.getElementsByTagNameNS(A_NS, 'bodyPr')[0]
+  if (bodyPr) {
+    const anc = (bodyPr.getAttribute('anchor') || 't').toLowerCase()
+    out.bodyAnchor = anc === 'ctr' ? 'ctr' : anc === 'b' ? 'b' : 't'
+    const emu = (v: string | null, d: number): number => (v ? Number(v) / EMU_PT : d)
+    // 默认内框：左右 91440 EMU(=7.2pt)、上下 45720 EMU(=3.6pt)
+    out.bodyInsets = {
+      l: emu(bodyPr.getAttribute('lIns'), 7.2),
+      t: emu(bodyPr.getAttribute('tIns'), 3.6),
+      r: emu(bodyPr.getAttribute('rIns'), 7.2),
+      b: emu(bodyPr.getAttribute('bIns'), 3.6)
+    }
+  }
+  const txbx = sp.getElementsByTagNameNS(WORD_NS, 'txbxContent')[0]
+  if (!txbx) return out
+  let html = ''
+  for (const p of Array.from(txbx.getElementsByTagNameNS(WORD_NS, 'p'))) {
+    const pPr = p.getElementsByTagNameNS(WORD_NS, 'pPr')[0]
+    let align = ''
+    if (pPr) {
+      const jc = pPr.getElementsByTagNameNS(WORD_NS, 'jc')[0]
+      const v = jc?.getAttributeNS(WORD_NS, 'val') ?? jc?.getAttribute('w:val') ?? ''
+      if (v === 'center') align = 'text-align:center;'
+      else if (v === 'right') align = 'text-align:right;'
+      else if (v === 'both') align = 'text-align:justify;'
+    }
+    let runs = ''
+    for (const r of Array.from(p.children)) {
+      if (r.localName !== 'r') continue
+      const rPr = r.getElementsByTagNameNS(WORD_NS, 'rPr')[0]
+      let style = ''
+      let bold = false
+      let italic = false
+      if (rPr) {
+        if (rPr.getElementsByTagNameNS(WORD_NS, 'b').length > 0) bold = true
+        if (rPr.getElementsByTagNameNS(WORD_NS, 'i').length > 0) italic = true
+        const sz = rPr.getElementsByTagNameNS(WORD_NS, 'sz')[0]
+        if (sz) {
+          const v = parseFloat(sz?.getAttributeNS(WORD_NS, 'val') ?? sz?.getAttribute('w:val') ?? '0')
+          if (v > 0) style += `font-size:${v / 2}pt;`
+        }
+        const color = rPr.getElementsByTagNameNS(WORD_NS, 'color')[0]
+        if (color) {
+          const v = color?.getAttributeNS(WORD_NS, 'val') ?? color?.getAttribute('w:val') ?? ''
+          if (v && v !== 'auto') style += `color:#${v.replace('#', '')};`
+        }
+      }
+      const text = Array.from(r.getElementsByTagNameNS(WORD_NS, 't')).map((t) => t.textContent || '').join('')
+      if (!text) continue
+      runs += `<span style="${style}">${italic ? '<i>' : ''}${bold ? '<b>' : ''}${esc(text)}${bold ? '</b>' : ''}${italic ? '</i>' : ''}</span>`
+    }
+    html += `<p style="margin:0;${align}line-height:1.3;">${runs || '&nbsp;'}</p>`
+  }
+  out.txbxHtml = html
+  return out
+}
+
+/** 把形状内文字层叠加到自绘形状盒上（flex 垂直对齐 + bodyPr 内边距） */
+function appendShapeText(container: HTMLElement, a: DrawingAnchor): void {
+  if (!a.txbxHtml) return
+  const ins = a.bodyInsets ?? { l: 7.2, t: 3.6, r: 7.2, b: 3.6 }
+  const va = a.bodyAnchor === 'b' ? 'flex-end' : a.bodyAnchor === 'ctr' ? 'center' : 'flex-start'
+  const layer = document.createElement('div')
+  layer.style.cssText = `position:absolute;inset:0;display:flex;flex-direction:column;justify-content:${va};padding:${ins.t}pt ${ins.r}pt ${ins.b}pt ${ins.l}pt;box-sizing:border-box;overflow:hidden;font:14pt Calibri,sans-serif;`
+  layer.innerHTML = a.txbxHtml
+  container.appendChild(layer)
+}
+
+/**
+ * 文本去重：docx-preview 已把 mc:Fallback（VML）里的 v:textbox 渲成 <foreignObject>，
+ * repairVmlShapes 又把它从空 <image> 里提升出来（已可见）。若 section 内已有 foreignObject
+ * 与本自绘形状盒位置重叠，说明 docx-preview 已渲染了这段文本，我们就不要再 appendShapeText
+ * 自绘一遍——否则同一段文本叠两份（叠字/双影）。
+ * 测量不到盒子尺寸时返回 false（保守：仍自绘兜底）。
+ */
+function vmlTextboxCovers(section: HTMLElement, box: HTMLElement): boolean {
+  const br = box.getBoundingClientRect()
+  if (!br.width || !br.height) return false
+  for (const fo of Array.from(section.querySelectorAll('foreignObject'))) {
+    const r = fo.getBoundingClientRect()
+    if (!r.width || !r.height) continue
+    // 矩形相交测试（两矩形不相交才返回 false）
+    if (r.right < br.left || r.left > br.right || r.bottom < br.top || r.top > br.bottom) continue
+    return true
+  }
+  return false
+}
+
 /** 从 DrawingML 文档里抽取锚点列表（按文档顺序） */
 function collectDrawingAnchors(xml: string): DrawingAnchor[] {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
@@ -343,6 +496,18 @@ function collectDrawingAnchors(xml: string): DrawingAnchor[] {
     const posH = readPos('positionH')
     const posV = readPos('positionV')
     const pic = d.getElementsByTagNameNS(A_NS, 'blip').length > 0
+    // a:srcRect（0-100000，从源图 l/t/r/b 各裁掉多少比例）—— 见 06 篇 §4.5。
+    // pic:blipFill 下与 a:blip 平级；docx-preview 会忽略它，这里自己算裁剪盒。
+    const srcRectEl = d.getElementsByTagNameNS(A_NS, 'srcRect')[0]
+    const num100k = (v: string | null): number => (v ? Number(v) : 0)
+    const srcRect = srcRectEl
+      ? {
+          l: Math.max(0, num100k(srcRectEl.getAttribute('l'))),
+          t: Math.max(0, num100k(srcRectEl.getAttribute('t'))),
+          r: Math.max(0, num100k(srcRectEl.getAttribute('r'))),
+          b: Math.max(0, num100k(srcRectEl.getAttribute('b')))
+        }
+      : undefined
     // wps 形状（文本框/几何图形）：docx-preview 不渲染，需要自绘。
     // custGeom 图标可能出现在组合(wps:wsp 嵌套)中的任意 wsp——遍历全部 wsp，取含 custGeom 的那个
     // （与 docx-enhanced.mjs 一致；仅取 [0] 会漏掉"第一个 wsp 无 custGeom"的文档）
@@ -351,8 +516,51 @@ function collectDrawingAnchors(xml: string): DrawingAnchor[] {
       if (wsp.getElementsByTagNameNS(A_NS, 'custGeom').length) { sp = wsp; break }
     }
     if (!sp) sp = d.getElementsByTagName('wps:wsp')[0] ?? null
-    const solidFill = sp?.getElementsByTagNameNS(A_NS, 'solidFill')[0]
-    const ln = sp?.getElementsByTagNameNS(A_NS, 'ln')[0]
+    // 形状属性 spPr：wps 形状在 wps:wsp/wps:spPr，图片在 pic:pic/pic:spPr。
+    // 用文档顺序第一个 a:spPr 统一取（图片没有 wps:wsp，必须拓宽才能取到 pic 的 ln/effectLst）。
+    const effSpPr = d.getElementsByTagNameNS(A_NS, 'spPr')[0] ?? sp
+    const solidFill = effSpPr?.getElementsByTagNameNS(A_NS, 'solidFill')[0]
+    const ln = effSpPr?.getElementsByTagNameNS(A_NS, 'ln')[0]
+    // A 组：a:effectLst/a:outerShdw 外阴影（blurRad/dist/dir/颜色/alpha）
+    const outerShdw = effSpPr?.getElementsByTagNameNS(A_NS, 'effectLst')[0]
+      ?.getElementsByTagNameNS(A_NS, 'outerShdw')[0]
+    let shadow: DrawingAnchor['shadow']
+    if (outerShdw) {
+      const clr = outerShdw.getElementsByTagNameNS(A_NS, 'srgbClr')[0]
+      const alphaEl = clr?.getElementsByTagNameNS(A_NS, 'alpha')[0]
+      shadow = {
+        blurRad: Number(outerShdw.getAttribute('blurRad') || 0),
+        dist: Number(outerShdw.getAttribute('dist') || 0),
+        dir: Number(outerShdw.getAttribute('dir') || 0),
+        algn: outerShdw.getAttribute('algn') || '',
+        color: clr?.getAttribute('val') || '000000',
+        alpha: Number(alphaEl?.getAttribute('val') ?? 100000)
+      }
+    }
+    // D 组：wp:effectExtent（阴影/发光外延 EMU→pt）——绕排时需纳入边距
+    const fxEl = node.getElementsByTagNameNS(WP_NS, 'effectExtent')[0]
+    const fxExtent = fxEl
+      ? {
+          l: Number(fxEl.getAttribute('l') || 0) / EMU_PT,
+          t: Number(fxEl.getAttribute('t') || 0) / EMU_PT,
+          r: Number(fxEl.getAttribute('r') || 0) / EMU_PT,
+          b: Number(fxEl.getAttribute('b') || 0) / EMU_PT
+        }
+      : undefined
+    // D 组：wp:wrapPolygon 顶点（21600 逻辑网格）——tight/through 多边形绕排
+    const wrapContainer = anchor?.getElementsByTagNameNS(WP_NS, 'wrapThrough')[0]
+      ?? anchor?.getElementsByTagNameNS(WP_NS, 'wrapTight')[0]
+    const polyEl = wrapContainer?.getElementsByTagNameNS(WP_NS, 'wrapPolygon')[0]
+    let wrapPts: [number, number][] | undefined
+    if (polyEl) {
+      const pts: [number, number][] = []
+      const start = polyEl.getElementsByTagNameNS(WP_NS, 'start')[0]
+      if (start) pts.push([Number(start.getAttribute('x') || 0), Number(start.getAttribute('y') || 0)])
+      for (const lt of Array.from(polyEl.getElementsByTagNameNS(WP_NS, 'lineTo'))) {
+        pts.push([Number(lt.getAttribute('x') || 0), Number(lt.getAttribute('y') || 0)])
+      }
+      if (pts.length) wrapPts = pts
+    }
     out.push({
       kind: anchor ? 'anchor' : inline ? 'inline' : 'shape',
       hRef: posH.ref,
@@ -368,16 +576,51 @@ function collectDrawingAnchors(xml: string): DrawingAnchor[] {
         (anchor?.getElementsByTagNameNS(WP_NS, 'wrapSquare').length ? 'square' : '') ||
         (anchor?.getElementsByTagNameNS(WP_NS, 'wrapTopAndBottom').length ? 'topAndBottom' : '') ||
         (anchor?.getElementsByTagNameNS(WP_NS, 'wrapNone').length ? 'none' : ''),
+      wrapText: anchor?.getElementsByTagNameNS(WP_NS, 'wrapSquare')[0]?.getAttribute('wrapText') ?? 'bothSides',
+      // distL/R 默认 114300 EMU(0.125in=9pt)；绕排时文字与对象的最小间距（02 篇 §4.3）
+      distL: Number(anchor?.getAttribute('distL') || 114300) / EMU_PT,
+      distR: Number(anchor?.getAttribute('distR') || 114300) / EMU_PT,
       geom: d.getElementsByTagNameNS(A_NS, 'prstGeom')[0]?.getAttribute('prst') ?? '',
-      fill: solidFill?.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
-        ? '#' + solidFill.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+      // prstGeom 用户覆盖的调整值（preset 默认由 geom.mjs 内 av 提供，这里只取文档里显式写的）
+      geomAv: (() => {
+        const prst = d.getElementsByTagNameNS(A_NS, 'prstGeom')[0]
+        if (!prst) return undefined
+        const avLst = prst.getElementsByTagNameNS(A_NS, 'avLst')[0]
+        if (!avLst) return undefined
+        const out: Record<string, number> = {}
+        for (const g of Array.from(avLst.getElementsByTagNameNS(A_NS, 'gd'))) {
+          const f = (g.getAttribute('fmla') || '').trim()
+          const m = /^val\s+(-?[\d.]+)/.exec(f)
+          if (g.getAttribute('name')) out[g.getAttribute('name') as string] = m ? parseFloat(m[1]) : 0
+        }
+        return out
+      })(),
+      // 填充/描边：srgbClr 直接取，schemeClr 走主题色（真实主题优先、默认表兜底）。
+      // 只读 srgbClr 会让自定义主题文档（模板）里 schemeClr 填充的形状无色/错色
+      // （例：测试2.docx 的椭圆 = accent2，真实主题 #ED377A 粉，默认表 #ED7D31 橙）。
+      fill: solidFill
+        ? (solidFill.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
+          ? '#' + solidFill.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+          : solidFill.getElementsByTagNameNS(A_NS, 'schemeClr')[0]
+            ? schemeColor(solidFill.getElementsByTagNameNS(A_NS, 'schemeClr')[0].getAttribute('val'))
+            : undefined)
         : undefined,
-      line: ln?.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
-        ? '#' + ln.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+      line: ln
+        ? (ln.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
+          ? '#' + ln.getElementsByTagNameNS(A_NS, 'srgbClr')[0].getAttribute('val')
+          : ln.getElementsByTagNameNS(A_NS, 'schemeClr')[0]
+            ? schemeColor(ln.getElementsByTagNameNS(A_NS, 'schemeClr')[0].getAttribute('val'))
+            : undefined)
         : undefined,
       lnW: ln ? Number(ln.getAttribute('w') || 0) / EMU_PT : undefined,
+      shadow,
+      fxExtent,
+      wrapPts,
       // custGeom 自定义几何图标（wps 组合内子形状也能取到 spPr）
       cust: sp ? custGeomToSvg(sp) : null,
+      // 形状内文字 + bodyPr 对齐/内框（docx-preview 不渲染 wps）
+      ...(sp ? extractShapeText(sp) : {}),
+      srcRect,
       hasPic: pic
     })
   }
@@ -437,6 +680,118 @@ function applyGeometryMask(el: HTMLElement, geom: string, w: number, h: number):
 }
 
 /**
+ * DrawingML 浮动对象的层级（z-index），按知识库铁律三档：
+ *  - behindDoc=1（衬于文字下方/打底）→ 0；
+ *  - 浮于文字上方（wrapNone）→ 3；
+ *  - 普通浮动（square/tight/through/topAndBottom）→ 2。
+ * 打底(behindDoc=1) → z-index:-1：CSS 绘制顺序中负 z-index 绘制在自身背景之上、正常流
+ * （段落文字）之下，才是真正的"垫底"；z-index:0 的定位元素绘制在文字之后（之上），会盖住正文。
+ */
+function zIndexFor(a: DrawingAnchor): string {
+  if (a.behind) return '-1'
+  if (a.wrap === 'none') return '3'
+  return '2'
+}
+
+/**
+ * a:srcRect 源图裁剪（0-100000，从源图 l/t/r/b 各裁掉多少比例；见 06 篇 §4.5）。
+ * 实现：外层 box 固定为「可见区」a.w×a.h 且 overflow:hidden；内层 <img> 按 srcRectCss
+ * 放大到 1/visW、1/visH 并负偏移，使落在 box 内的恰是源图未被裁掉的那块。
+ * docx-preview 不处理 srcRect，这里自己补；裁剪方向是「裁掉」，不是保留。
+ */
+/**
+ * 浮动图片的文字绕排（wrapSquare/topAndBottom 的近似实现，02 篇 §7.3）。
+ * docx-preview 已把图片移出文档流（position:absolute），文字不会自动绕开。这里在
+ * 锚定段落里插一个「占位 float 块」，尺寸=图片盒，使后续文字沿该块边缘排列；
+ * 可见图片本体已绝对定位在上方。
+ *  - wrapNone：不插占位（文字直接压图，对象浮在文字上层）—— 不处理。
+ *  - wrapThrough：LO 实测为「穿透」——文字行完整排版、图片浮在文字上层遮挡（测试.pdf
+ *    第 2 页 40 行 A TEXT 连续 + 中央插画覆盖），故同样不插占位；插占位会把文字推到图下方，
+ *    造成与 LO 不一致的排版（曾为此被打回）。
+ *  - vRef=page/margin：锚定段落与图片视觉位置可能不一致，占位会错位，跳过（标注为降级）。
+ *  - tight：按 square 近似（02 篇 §4.8 的多边形绕排未实现，标注降级）。
+ */
+/** wrap 占位的最小面积（pt²，≈1″见方=72×72=5184）：小于此判定为装饰小图标，不插占位块。
+ *  原 2500（≈0.7″）偏小，会让较多小图也插 float 占位、凭空撑出空白打乱段落布局（模板/简历常见）。 */
+const MIN_WRAP_AREA_PT2 = 5184
+
+function applyWrapSpacer(box: HTMLElement, a: DrawingAnchor, leftPt: number, pageWpt: number): void {
+  if (a.wrap === 'none' || a.wrap === 'through' || !a.hasPic) return
+  if (a.vRef === 'page' || a.vRef === 'margin' || a.vRef === '') return
+  // 小尺寸浮动对象（图标/装饰）不插占位：Word 里它们浮于文字上方、不占文档流，
+  // 插 float 占位会凭空撑出空白、打乱段落布局（模板/简历文档常见场景）。
+  if (a.w * a.h < MIN_WRAP_AREA_PT2) return
+  const para = box.closest('p') as HTMLElement | null
+  if (!para) return
+  // 图片在文本区左半 → 占位左浮，文字排右侧；右半 → 右浮，文字排左侧
+  const onLeft = leftPt + a.w / 2 <= pageWpt / 2
+  const spacer = document.createElement('div')
+  // D 组：wp:effectExtent（阴影/发光外延）纳入占位——文字需避开对象视觉外扩区（LO 语义：
+  // effectExtent 计入环绕距离）。onLeft 时阴影朝右(fx.r)向文字侧外扩，故加在右侧；反之加 fx.l。
+  const fx = a.fxExtent ?? { l: 0, t: 0, r: 0, b: 0 }
+  // D 组：wrapPolygon 中线左/右内缩——切角处文字可贴更近（只收窄不放宽；snip2DiagRect 中线满宽→0）
+  const inset = a.wrapPts ? wrapInsetAtMid(a.wrapPts, a.w, a.h) : { insetL: 0, insetR: 0 }
+  const width = onLeft
+    ? a.w + a.distR + fx.r - inset.insetR
+    : a.w + a.distL + fx.l - inset.insetL
+  const height = a.h + fx.t + fx.b
+  spacer.style.cssText = `float:${onLeft ? 'left' : 'right'};width:${width}pt;height:${height}pt;`
+  spacer.dataset.wrapSpacer = '1'
+  // topAndBottom：占位横跨整行宽，文字只在图片上下排
+  if (a.wrap === 'topAndBottom') spacer.style.width = '100%'
+  // 插入到锚定段落最前（图片的 0×0 占位 run 旁边）
+  para.insertBefore(spacer, para.firstChild)
+}
+
+function applySrcRectCrop(box: HTMLElement, target: HTMLElement, a: DrawingAnchor): void {
+  if (!a.srcRect) return
+  const c = srcRectCss(a.srcRect.l, a.srcRect.t, a.srcRect.r, a.srcRect.b, a.w, a.h)
+  if (box.style.position !== 'absolute') box.style.position = 'relative'
+  box.style.overflow = 'hidden'
+  box.style.width = `${a.w}pt`
+  box.style.height = `${a.h}pt`
+  target.style.position = 'absolute'
+  target.style.left = `${c.imgLeft}pt`
+  target.style.top = `${c.imgTop}pt`
+  target.style.width = `${c.imgW}pt`
+  target.style.height = `${c.imgH}pt`
+  target.style.margin = '0'
+}
+
+/**
+ * A 组：外阴影 outerShdw —— CSS filter:drop-shadow 挂在图片容器(box)上。
+ * 渲染顺序是 filter→clip-path，所以 filter 不能挂在已 clip-path 的 img 上（阴影会被裁掉），
+ * 必须挂在父容器 box：box 的绘制输出=已遮罩的图片，drop-shadow 沿该 alpha 轮廓投影。
+ *
+ * B 组：图片 a:ln 边框 —— clip-path 下 border/outline 会被裁掉不可见，改用 SVG path
+ * 沿遮罩轮廓(maskPolygonPts)描边，stroke 颜色/宽度取 spPr 的 a:ln。
+ */
+function applyPicEffects(box: HTMLElement, a: DrawingAnchor): void {
+  if (a.shadow) {
+    const css = outerShdwCss(a.shadow)
+    if (css) box.style.filter = css
+  }
+  if (a.line && a.lnW && a.geom) {
+    const pts = maskPolygonPts(a.geom, a.w, a.h)
+    if (pts && pts.length >= 3) {
+      const svg = document.createElementNS(SVG_NS, 'svg')
+      svg.setAttribute('viewBox', `0 0 ${a.w} ${a.h}`)
+      svg.setAttribute('preserveAspectRatio', 'none')
+      svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible'
+      const d = 'M ' + pts.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(' L ') + ' Z'
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', d)
+      path.setAttribute('fill', 'none')
+      path.setAttribute('stroke', a.line)
+      path.setAttribute('stroke-width', String(a.lnW))
+      path.setAttribute('stroke-linejoin', 'miter')
+      svg.appendChild(path)
+      box.appendChild(svg)
+    }
+  }
+}
+
+/**
  * 渲染后把 DrawingML 浮动对象改成真正的绝对定位：
  *  - 参照系：H 的 margin/column → 页左边距 + 偏移；page → 偏移；align → 按页宽算
  *  - V 的 paragraph → 「段落顶部 + 偏移」，段落顶部由 DOM 实测（Word 的 paragraph 参照系语义）
@@ -456,6 +811,13 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
   const pageWpt = section.clientWidth / PT2PX
 
   const imgs = Array.from(host.querySelectorAll('img')) as HTMLImageElement[]
+  const hasPicCount = anchors.filter((a) => a.hasPic).length
+  // 仅当 anchor 图片数与 DOM <img> 数一致时才按序配对定位；不一致说明存在 VML<image>/内联图混合，
+  // 配对会错位——此时图片退回 docx-preview 内联位置（安全），但**不影响** custGeom/prstGeom 自绘形状。
+  const pairImgs = hasPicCount === imgs.length
+  if (!pairImgs) {
+    console.warn(`[DocxPreview] anchor 图片(${hasPicCount}) 与 DOM <img>(${imgs.length}) 数量不一致：图片保持内联，仅自绘形状`)
+  }
   let applied = 0
   let imgIdx = 0
 
@@ -464,6 +826,7 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
     let box: HTMLElement | null = null
     let target: HTMLElement | null = null
     if (a.hasPic) {
+      if (!pairImgs) continue // 数量不匹配：跳过该图定位，保持 docx-preview 内联渲染
       const img = imgs[imgIdx]
       imgIdx += 1
       if (!img) continue
@@ -471,28 +834,42 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
       box = (img.parentElement as HTMLElement | null) ?? img
     }
 
+    // C 组（多 section 适配）：定位基准 = 锚定段落所在 section.docx；无段落（自绘形状/page 对齐）→ 首个 section。
+    // 单 section 时 baseSec === section，测量与改动前完全一致（回归红线：单 section 行为零变化）。
+    const anchorPara = box?.closest('p') as HTMLElement | null
+    const baseSec = (anchorPara?.closest('section.docx') as HTMLElement | null) ?? section
+    const bRect = baseSec.getBoundingClientRect()
+    const bCs = getComputedStyle(baseSec)
+    const bPadL = (parseFloat(bCs.paddingLeft) || 0) / PT2PX
+    const bPadT = (parseFloat(bCs.paddingTop) || 0) / PT2PX
+    const bPadR = (parseFloat(bCs.paddingRight) || 0) / PT2PX
+    const bPageW = baseSec.clientWidth / PT2PX
+
     // 位置换算（pt）
     let leftPt: number
-    if (a.hAlign === 'center') leftPt = (pageWpt - a.w) / 2
-    else if (a.hAlign === 'right') leftPt = pageWpt - padR - a.w
-    else leftPt = (a.hRef === 'page' ? 0 : padL) + a.hOff
+    if (a.hAlign === 'center') leftPt = (bPageW - a.w) / 2
+    else if (a.hAlign === 'right') leftPt = bPageW - bPadR - a.w
+    else leftPt = (a.hRef === 'page' ? 0 : bPadL) + a.hOff
 
     let topPt: number | null = null
     if (a.vAlign === 'center' || a.vAlign === 'bottom') {
-      const pageHpt = section.clientHeight / PT2PX
-      topPt = a.vAlign === 'center' ? (pageHpt - a.h) / 2 : pageHpt - (parseFloat(cs.paddingBottom) || 0) / PT2PX - a.h
+      const pageHpt = baseSec.clientHeight / PT2PX
+      topPt = a.vAlign === 'center' ? (pageHpt - a.h) / 2 : pageHpt - (parseFloat(bCs.paddingBottom) || 0) / PT2PX - a.h
     } else if (a.vRef === 'paragraph' || a.vRef === 'line') {
       // 段落顶部由 DOM 实测，再把偏移加上
       const para = box?.closest('p') as HTMLElement | null
-      const paraTopPt = para ? (para.getBoundingClientRect().top - secRect.top) / PT2PX : 0
+      const paraTopPt = para ? (para.getBoundingClientRect().top - bRect.top) / PT2PX : 0
       topPt = paraTopPt + a.vOff
     } else {
-      topPt = (a.vRef === 'page' ? 0 : padT) + a.vOff
+      topPt = (a.vRef === 'page' ? 0 : bPadT) + a.vOff
     }
 
     if (a.kind === 'inline') {
-      // 随文图片本来就在流里，只处理遮罩
+      // 随文图片本来就在流里；处理 srcRect 源图裁剪与形状遮罩
+      if (target && box && a.srcRect) applySrcRectCrop(box, target, a)
       if (target && a.geom) applyGeometryMask(target, a.geom, a.w, a.h)
+      // A/B 组：随文遮罩图同样带外阴影 + a:ln 边框（如 para#5 的 inline snip2DiagRect）
+      if (target && box) applyPicEffects(box, a)
       continue
     }
 
@@ -502,7 +879,7 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
         const svgBox = document.createElement('div')
         svgBox.style.cssText = `position:absolute;left:${leftPt + a.cust.xOff}pt;top:${topPt + a.cust.yOff}pt;width:${a.cust.w}pt;height:${a.cust.h}pt;`
         // 图标应绘制在正文之上、背后背景之上；behindDoc=1 的衬于文字下方 → 0
-        svgBox.style.zIndex = a.behind ? '0' : '2'
+        svgBox.style.zIndex = zIndexFor(a)
         const svg = document.createElementNS(SVG_NS, 'svg')
         svg.setAttribute('viewBox', `0 0 ${a.cust.paths[0].w} ${a.cust.paths[0].h}`)
         svg.setAttribute('preserveAspectRatio', 'none')
@@ -511,12 +888,47 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
           const pathEl = document.createElementNS(SVG_NS, 'path')
           pathEl.setAttribute('d', p.d)
           pathEl.setAttribute('fill', p.fill === 'none' ? 'none' : a.cust.fill)
-          pathEl.setAttribute('fill-rule', 'nonzero')
+          // evenodd：与 LibreOffice 实测一致（EnhancedCustomShape2d → B2DPolyPolygon 交替挖空）。
+          // Freeform 多子路径图标（用户头像=外圆+头+肩等）靠 evenodd 把内部子路径镂空为
+          // 背景色可见剪影；nonzero 会让同向子路径白上白不可见（"只有头没有身体"）。
+          pathEl.setAttribute('fill-rule', 'evenodd')
           pathEl.setAttribute('stroke', 'none')
           svg.appendChild(pathEl)
         }
         svgBox.appendChild(svg)
-        section.appendChild(svgBox)
+        // 标记：自绘 Choice 图形（正确矢量），用于移除重叠的 VML 近似色块
+        svgBox.setAttribute('data-self-shape', '1')
+        baseSec.appendChild(svgBox)
+        applied += 1
+        continue
+      }
+      // prstGeom 预设形状（rect/snip2DiagRect/roundRect/ellipse/star/…）：
+      // 查预设几何表 → 求值出 SVG 轮廓，按形状框拉伸绘制（替代原来的纯色矩形 + CSS 近似遮罩）。
+      const presetData = (PRESETS as Record<string, { av: unknown; gd: unknown; rect: unknown; paths: unknown }>)[a.geom]
+      if (presetData && a.geom !== 'line') {
+        const r = renderPreset(presetData, a.geomAv)
+        const shapeBox = document.createElement('div')
+        shapeBox.style.cssText = `position:absolute;left:${leftPt}pt;top:${topPt}pt;width:${a.w}pt;height:${a.h}pt;`
+        shapeBox.style.zIndex = zIndexFor(a)
+        const svg = document.createElementNS(SVG_NS, 'svg')
+        svg.setAttribute('viewBox', `0 0 ${r.viewBox[0]} ${r.viewBox[1]}`)
+        svg.setAttribute('preserveAspectRatio', 'none')
+        svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:block;overflow:visible'
+        for (const p of r.paths) {
+          const pathEl = document.createElementNS(SVG_NS, 'path')
+          pathEl.setAttribute('d', p.d)
+          pathEl.setAttribute('fill', p.fill === 'none' ? 'none' : a.fill || 'none')
+          pathEl.setAttribute('fill-rule', 'nonzero')
+          pathEl.setAttribute('stroke', a.line || 'none')
+          pathEl.setAttribute('stroke-width', a.line ? '1' : '0')
+          svg.appendChild(pathEl)
+        }
+        shapeBox.appendChild(svg)
+        shapeBox.setAttribute('data-self-shape', '1')
+        baseSec.appendChild(shapeBox)
+        // 文本去重：VML fallback 已渲染 foreignObject 文本时不自绘，避免叠字；
+        // 测量不到 / 无重叠时仍自绘兜底（纯 wps 形状、docx-preview 未渲文本框的场景）。
+        if (a.txbxHtml && !vmlTextboxCovers(baseSec, shapeBox)) appendShapeText(shapeBox, a)
         applied += 1
         continue
       }
@@ -532,9 +944,10 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
         if (a.line) box.style.border = `1px solid ${a.line}`
         if (a.geom) applyGeometryMask(box, a.geom, a.w, a.h)
       }
-      // 普通自绘形状：behindDoc=1 的背景矩形垫底(z=0，正文文字在其上可见)；其余形状 z=2
-      box.style.zIndex = a.behind ? '0' : '2'
-      section.appendChild(box)
+      // 普通自绘形状：behindDoc=1 的背景矩形垫底(z=-1，正文文字在其上可见)；其余形状 z=2
+      box.style.zIndex = zIndexFor(a)
+      box.setAttribute('data-self-shape', '1')
+      baseSec.appendChild(box)
       applied += 1
       continue
     }
@@ -548,17 +961,26 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
     box.style.margin = '0'
     box.style.float = 'none'
     // z-index:-1 → 绘制在正文之下、页面底色之上
-    box.style.zIndex = a.behind ? '0' : '2'
+    box.style.zIndex = zIndexFor(a)
+    // 文字绕排（square/topAndBottom 近似；none 不处理）
+    applyWrapSpacer(box, a, leftPt, bPageW)
     if (target) {
-      target.style.position = 'static'
-      target.style.left = '0'
-      target.style.top = '0'
-      target.style.width = '100%'
-      target.style.height = '100%'
-      // docx-preview 会把 behind 图渲染成 z-index:-1（落到页面白底背景之后不可见），
-      // 这里把图片本体也提升到纸面之上
-      target.style.zIndex = a.behind ? '0' : '2'
+      if (a.srcRect) {
+        // srcRect 源图裁剪：box=可见区 overflow:hidden，内层 img 放大+负偏移
+        applySrcRectCrop(box, target, a)
+      } else {
+        target.style.position = 'static'
+        target.style.left = '0'
+        target.style.top = '0'
+        target.style.width = '100%'
+        target.style.height = '100%'
+      }
+      // docx-preview 对 behind 图不设层级；这里统一按 zIndexFor 设层级。
+      // 负 z-index 绘制在正文之下、section 背景之上（CSS 绘制顺序第 2 层），垫底且可见。
+      target.style.zIndex = zIndexFor(a)
       if (a.geom) applyGeometryMask(target, a.geom, a.w, a.h)
+      // A/B 组：外阴影(filter 挂 box，沿遮罩轮廓) + 沿遮罩轮廓的 a:ln 白边框
+      applyPicEffects(box, a)
     }
     applied += 1
   }
@@ -647,15 +1069,23 @@ async function collectHeaderImages(zip: JSZipType, docXml: string): Promise<Head
       if (!mediaEntry) continue
       const ext2 = (mediaPath.split('.').pop() ?? '').toLowerCase()
       const bytes = await mediaEntry.async('uint8array')
+      // C 组：wp14:sizeRelH/V 相对尺寸（千分比 100000=100%），存在则覆盖 wp:extent
+      const sizeRelH = node.getElementsByTagNameNS(WP14_NS, 'sizeRelH')[0]
+      const sizeRelV = node.getElementsByTagNameNS(WP14_NS, 'sizeRelV')[0]
+      const pctW = sizeRelH?.getElementsByTagNameNS(WP14_NS, 'pctWidth')[0]?.textContent
+      const pctH = sizeRelV?.getElementsByTagNameNS(WP14_NS, 'pctHeight')[0]?.textContent
+      const sizeRel = (pctW && pctH) ? { pctW: Number(pctW), pctH: Number(pctH) } : undefined
       out.push({
         src: URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: MIME[ext2] ?? 'application/octet-stream' })),
         hAlign: align('positionH'),
         vAlign: align('positionV'),
         w,
         h,
-        behind: node.getElementsByTagNameNS(WP_NS, 'anchor')[0]?.getAttribute('behindDoc') === '1',
+        // behindDoc：node 本身就是 anchor/inline；原代码错误地查 node 的后代 anchor（恒 null）
+        behind: node.localName === 'anchor' ? node.getAttribute('behindDoc') === '1' : false,
         part,
-        type: typeByPart.get(part) ?? 'default'
+        type: typeByPart.get(part) ?? 'default',
+        sizeRel
       })
     }
   }
@@ -684,17 +1114,22 @@ function applyHeaderImages(host: HTMLElement, images: HeaderImage[]): number {
       const PT2PX = 96 / 72
       const pageW = section.clientWidth / PT2PX
       const pageH = section.clientHeight / PT2PX
+      // C 组：wp14:sizeRelH/V 相对尺寸覆盖 wp:extent（relativeFrom=page → 页面宽/高 × pct/100000）
+      const effW = im.sizeRel ? (pageW * im.sizeRel.pctW) / 100000 : im.w
+      const effH = im.sizeRel ? (pageH * im.sizeRel.pctH) / 100000 : im.h
       const el = document.createElement('img')
       el.src = im.src
       el.alt = ''
       el.style.position = 'absolute'
-      el.style.width = `${im.w}pt`
-      el.style.height = `${im.h}pt`
+      el.style.width = `${effW}pt`
+      el.style.height = `${effH}pt`
       el.style.left =
-        (im.hAlign === 'center' ? (pageW - im.w) / 2 : im.hAlign === 'right' ? pageW - im.w : 0) + 'pt'
+        (im.hAlign === 'center' ? (pageW - effW) / 2 : im.hAlign === 'right' ? pageW - effW : 0) + 'pt'
       el.style.top =
-        (im.vAlign === 'center' ? (pageH - im.h) / 2 : im.vAlign === 'bottom' ? pageH - im.h : 0) + 'pt'
-      // 页眉图不设负 z-index：-1 会被页面 section 的白底背景盖住（与验证页 applyHeaderImages 保持一致，保持默认层级可见）
+        (im.vAlign === 'center' ? (pageH - effH) / 2 : im.vAlign === 'bottom' ? pageH - effH : 0) + 'pt'
+      // 整页背景图（behind=1）：垫底 → z-index:-1。section.docx 已 `isolation:isolate`，
+      // 负 z-index 画在白底之后、正文之前，既可见又不盖字。非背景的页眉图保持默认层级浮于文字上。
+      el.style.zIndex = im.behind ? '-1' : 'auto'
       el.style.pointerEvents = 'none'
       el.dataset.headerType = im.type
       section.appendChild(el)
@@ -1024,6 +1459,85 @@ function normalizeVmlPositioning(xml: string, pathMap?: Map<string, string>): st
   return new XMLSerializer().serializeToString(doc)
 }
 
+/**
+ * 移除"纯 wps 形状"的 mc:AlternateContent 的 VML Fallback 分支。
+ *
+ * 背景：docx-preview 的 supportedNamespaceURIs 为空数组，遇到 mc:AlternateContent 时
+ * **总是选择 mc:Fallback（VML）分支**（dist/docx-preview.mjs:2049-2060）。而 Word/WPS
+ * 保存的每个 wps 图标（custGeom/prstGeom + txbx）的 Fallback 是 `<v:shape>` +
+ * 空 `<v:imagedata o:title=""/>` + `o:gfxdata` 内嵌缩略图——docx-preview 把这种
+ * shape 渲成**无 href 的空 `<image>`**，repairVmlShapes 再补成纯色矩形（VML fillcolor，
+ * 常为白/主题色）；同时自绘层 applyDrawingAnchors 又按 mc:Choice 的 wps 数据画一次
+ * SVG → **同一图标被画两次（色块矩形 + 矢量 SVG 叠画/错位）**，即用户看到的
+ * "图标显示问题"。
+ *
+ * 修复：把纯 wps 形状（Choice 含 wps:wsp 且无 a:blip 真图）的 Fallback 整体移除，
+ * 使 docx-preview 对这类 AC 零输出（checkAlternateContent 找不到 Fallback 返回
+ * undefined，节点跳过），图标只由自绘层按 Choice 的 custGeom/prstGeom 渲染一次。
+ * 含 a:blip 的 AC（真图片）与 AC 之外的 wp:anchor（如图片）不受影响。
+ */
+function stripWpsFallbacks(xml: string): string {
+  if (!xml.includes('AlternateContent')) return xml
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const A_NS_D = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+  const WPS_NS_D = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape'
+  const acs = Array.from(doc.getElementsByTagName('*')).filter((el) => el.localName === 'AlternateContent')
+  let changed = 0
+  for (const ac of acs) {
+    const choice = Array.from(ac.children).find((c) => c.localName === 'Choice')
+    if (!choice) continue
+    const hasWsp = choice.getElementsByTagNameNS(WPS_NS_D, 'wsp').length > 0
+    const hasBlip = choice.getElementsByTagNameNS(A_NS_D, 'blip').length > 0
+    if (!hasWsp || hasBlip) continue
+    const fb = Array.from(ac.children).find((c) => c.localName === 'Fallback')
+    if (fb) {
+      ac.removeChild(fb)
+      changed += 1
+    }
+  }
+  if (changed === 0) return xml
+  return new XMLSerializer().serializeToString(doc)
+}
+
+/**
+ * 移除页眉/页脚里「整页背景图」的 VML Fallback 分支。
+ *
+ * 背景：Word 模板的整页背景图 = wp:anchor（Choice: wps:wsp + blipFill + wp14:sizeRelH/V
+ * pct=100000 → 页面 100% 铺满）+ mc:Fallback（VML v:rect，style 里 mso-width-percent:1000
+ * 同样表示 100%）。docx-preview 0.4.1 恒选 Fallback → 把 v:rect 渲成固定 ext 尺寸的
+ * <image>（测试2 header1 是 645×366pt，不铺满）；applyHeaderImages 又按 Choice 的 sizeRel
+ * 渲染一张铺满版 → 同一背景图双画且 VML 固定尺寸版盖在上面（用户看到的"第二页图片没铺满"）。
+ *
+ * 这里只移除「Choice 含 wp14:sizeRelH/V（整页相对尺寸特征）」的 AC 的 Fallback——
+ * 文本框/图标/普通图片（无 sizeRel）不受影响；背景图改由 applyHeaderImages 按 sizeRel 铺满。
+ */
+function stripHeaderBgVmlFallback(xml: string): string {
+  if (!xml.includes('AlternateContent')) return xml
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const WPS_NS_D = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape'
+  const WP14_NS_D = 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing'
+  const acs = Array.from(doc.getElementsByTagName('*')).filter((el) => el.localName === 'AlternateContent')
+  let changed = 0
+  for (const ac of acs) {
+    const choice = Array.from(ac.children).find((c) => c.localName === 'Choice')
+    if (!choice) continue
+    // 整页相对尺寸特征：wp14:sizeRelH 或 sizeRelV 存在（pctWidth/pctHeight → 页面百分比铺满）
+    const hasSizeRel =
+      choice.getElementsByTagNameNS(WP14_NS_D, 'sizeRelH').length > 0 ||
+      choice.getElementsByTagNameNS(WP14_NS_D, 'sizeRelV').length > 0
+    if (!hasSizeRel) continue
+    const fb = Array.from(ac.children).find((c) => c.localName === 'Fallback')
+    // Fallback 须含 VML 形状（v:shape/v:rect/…），确认是 VML 版本背景图
+    const hasVml = fb ? Array.from(fb.getElementsByTagName('*')).some((el) => el.namespaceURI?.startsWith('urn:schemas-microsoft-com:vml')) : false
+    if (fb && hasVml) {
+      ac.removeChild(fb)
+      changed += 1
+    }
+  }
+  if (changed === 0) return xml
+  return new XMLSerializer().serializeToString(doc)
+}
+
 /** o:gfxdata 的归一化键：原始 XML 里含 &#10; 实体，getAttribute 返回的是解码后的值，两侧要统一 */
 function gfxKey(s: string): string {
   return s.replace(/&#10;/g, '').replace(/\s/g, '')
@@ -1059,6 +1573,44 @@ async function buildGfxPathMap(xml: string): Promise<Map<string, string>> {
  * 修复方式：把 `<foreignObject>` 提升为 `<svg>` 的直接子节点，并把丢失的填充色补成真正的 `<rect>`。
  * 只处理没有 href 的 `<image>`，真正的图片不受影响。
  */
+/**
+ * 移除与"自绘 Choice 图形"位置重叠的 VML 补绘色块。
+ *
+ * 背景：docx-preview 恒渲染 mc:Fallback（VML），把图标 v:shape 渲成空 <image>，
+ * repairVmlShapes 再按 VML fillcolor 补成矩形/椭圆色块（近似、常为白/主题色）；
+ * 同时 applyDrawingAnchors 又按 mc:Choice 的 wps custGeom/prstGeom 画正确矢量。
+ * 同一图标被画两次 → 叠画/双影/错位（"图标显示问题"）。
+ *
+ * 这里在自绘图形画完后，把与之重叠（相交面积 > 50%）的 VML 补绘色块移除：
+ * - 图标：自绘矢量保留，VML 近似矩形移除 → 单份正确图形；
+ * - 文本框：背景由自绘 shapeBox（Choice fill）提供，文字由 docx-preview foreignObject
+ *   保留（不打 data-vml-fill 标记）→ 正文不受影响；
+ * - 纯 VML（无 Choice）的复杂图标：没有自绘图形与之重叠 → 色块保留（不消失）。
+ */
+function removeOverlaidVmlShapes(host: HTMLElement): number {
+  const selfShapes = Array.from(host.querySelectorAll('[data-self-shape]'))
+  if (selfShapes.length === 0) return 0
+  const vmlFills = Array.from(host.querySelectorAll('[data-vml-fill]'))
+  let removed = 0
+  for (const v of vmlFills) {
+    const vr = v.getBoundingClientRect()
+    if (vr.width <= 0 || vr.height <= 0) continue
+    const covered = selfShapes.some((s) => {
+      const sr = s.getBoundingClientRect()
+      const ix = Math.max(0, Math.min(sr.right, vr.right) - Math.max(sr.left, vr.left))
+      const iy = Math.max(0, Math.min(sr.bottom, vr.bottom) - Math.max(sr.top, vr.top))
+      if (ix <= 0 || iy <= 0) return false
+      const inter = ix * iy
+      return inter / Math.max(1, vr.width * vr.height) > 0.5
+    })
+    if (covered) {
+      v.remove()
+      removed += 1
+    }
+  }
+  return removed
+}
+
 function repairVmlShapes(host: HTMLElement): number {
   let fixed = 0
   const made = { rect: 0, ellipse: 0, path: 0, line: 0 }
@@ -1100,6 +1652,8 @@ function repairVmlShapes(host: HTMLElement): number {
         }
         line.setAttribute('stroke', strokeRaw || '#000000')
         line.setAttribute('stroke-width', '1')
+        // 标记：该元素是 VML 补绘（近似）产物，若与自绘 Choice 图形重叠会被移除
+        line.setAttribute('data-vml-fill', '1')
         svg.insertBefore(line, img)
         made.line = (made.line ?? 0) + 1
         img.remove()
@@ -1148,6 +1702,8 @@ function repairVmlShapes(host: HTMLElement): number {
           }
         }
         fillShape.setAttribute('fill', fill as string)
+        // 标记：VML 补绘（近似）产物，与自绘 Choice 图形重叠时会被 removeOverlaidVmlShapes 移除
+        fillShape.setAttribute('data-vml-fill', '1')
         svg.insertBefore(fillShape, img)
         if (fillShape.tagName.toLowerCase() === 'path') made.path += 1
         else if (fillShape.tagName.toLowerCase() === 'ellipse') made.ellipse += 1
@@ -1173,6 +1729,88 @@ function repairVmlShapes(host: HTMLElement): number {
   if (fixed) console.log(`[docx] 修复 VML 形状 ${fixed} 个（path=${made.path} ellipse=${made.ellipse} rect=${made.rect} line=${made.line}）`)
   return fixed
 }
+
+/** 一条墨迹覆盖层：解析好的笔画 + 它所属的 w:p 在文档流里的序号（用于渲染后定位） */
+interface InkOverlay {
+  parse: { strokes: { pts: [number, number][]; color: string; width: number }[]; bbox: { minX: number; minY: number; maxX: number; maxY: number } }
+  /** 所属 w:p 在全文 p 序列中的下标；-1 = 未定位到段落 */
+  pIdx: number
+}
+
+/**
+ * 从 document.xml 抽出所有 InkML 墨迹（2006/2014 ink 命名空间，按 localName 匹配）。
+ * LO 对 InkML 零支持（07 篇 §5.1），docx-preview 也不渲染，这里自己收集并记录段落锚点。
+ */
+function collectInkOverlays(docXml: string): InkOverlay[] {
+  if (!docXml || !docXml.includes('ink')) return []
+  let doc: Document
+  try {
+    doc = new DOMParser().parseFromString(docXml, 'application/xml')
+  } catch {
+    return []
+  }
+  const wps = Array.from(doc.getElementsByTagNameNS(WORD_NS, 'p'))
+  const out: InkOverlay[] = []
+  for (const { parse, host } of collectInk(doc)) {
+    let p: ParentNode | null = host.parentElement
+    let pIdx = -1
+    while (p) {
+      if (p instanceof Element && p.localName === 'p' && p.namespaceURI === WORD_NS) {
+        pIdx = wps.indexOf(p)
+        break
+      }
+      p = p.parentNode
+    }
+    out.push({ parse, pIdx })
+  }
+  return out
+}
+
+/** 渲染后把墨迹画成 SVG 覆盖层：定位到墨迹所在段落的左上，盒=页文本宽×固定高。 */
+function applyInkOverlays(host: HTMLElement, overlays: InkOverlay[]): number {
+  if (overlays.length === 0) return 0
+  const allP = Array.from(host.querySelectorAll('p')) as HTMLElement[]
+  const PT2PX = 96 / 72
+  let applied = 0
+  for (const ov of overlays) {
+    const para = ov.pIdx >= 0 ? allP[ov.pIdx] : undefined
+    if (!para) continue
+    const section = para.closest('section.docx') as HTMLElement | null
+    if (!section) continue
+    const secRect = section.getBoundingClientRect()
+    const paraRect = para.getBoundingClientRect()
+    const leftPt = (paraRect.left - secRect.left) / PT2PX
+    const topPt = (paraRect.top - secRect.top) / PT2PX
+    const bb = ov.parse.bbox
+    const vbW = Math.max(bb.maxX - bb.minX, 1)
+    const vbH = Math.max(bb.maxY - bb.minY, 1)
+    const textWpt = section.clientWidth / PT2PX
+    const boxHpt = Math.min(textWpt * (vbH / vbW), 400) // 等比高度，上限 400pt 防超大
+    const box = document.createElement('div')
+    box.style.cssText = `position:absolute;left:${leftPt}pt;top:${topPt}pt;width:${textWpt}pt;height:${boxHpt}pt;z-index:3;pointer-events:none;`
+    const svg = document.createElementNS(SVG_NS, 'svg')
+    svg.setAttribute('viewBox', `${bb.minX} ${bb.minY} ${vbW} ${vbH}`)
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+    svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible'
+    for (const s of inkToSvgPaths(ov.parse, vbW, vbH)) {
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', s.d)
+      path.setAttribute('fill', 'none')
+      path.setAttribute('stroke', s.color)
+      path.setAttribute('stroke-width', String(s.width))
+      path.setAttribute('stroke-linecap', 'round')
+      path.setAttribute('stroke-linejoin', 'round')
+      svg.appendChild(path)
+    }
+    box.appendChild(svg)
+    section.appendChild(box)
+    applied += 1
+  }
+  return applied
+}
+
+/** A/B 组：字体 fallback + 自动分页（DOM 操作，抽在 docx/pagination.mjs 便于 jsdom 测试）。 */
+// 见 docx/pagination.mjs：applyFontFallback / applyAutoPagination。
 
 function onWheel(e: WheelEvent): void {
   if (!e.ctrlKey && !e.metaKey) return
@@ -1201,6 +1839,35 @@ async function openLocation(): Promise<void> {
 }
 
 /**
+ * 解析 word/theme/theme1.xml 的 a:clrScheme（12 槽位 dk1/lt1/dk2/lt2/accent1-6/hlink/folHlink）
+ * → { 槽位名: '#RRGGBB' }。槽位可含 srgbClr 或 sysClr(lastClr)；解析失败返回空表（调用方回退默认）。
+ * 标准出处：ECMA-376 Part 1 §20.1.6.2 CT_ColorScheme。
+ */
+async function parseThemeColors(zip: JSZipType): Promise<Record<string, string>> {
+  const entry = zip.file('word/theme/theme1.xml')
+  if (!entry) return {}
+  try {
+    const xml = await entry.async('string')
+    const doc = new DOMParser().parseFromString(xml, 'application/xml')
+    const scheme = doc.getElementsByTagNameNS(A_NS, 'clrScheme')[0]
+    if (!scheme) return {}
+    const out: Record<string, string> = {}
+    const slots = ['dk1', 'lt1', 'dk2', 'lt2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink']
+    for (const slot of slots) {
+      const el = scheme.getElementsByTagNameNS(A_NS, slot)[0]
+      if (!el) continue
+      const srgb = el.getElementsByTagNameNS(A_NS, 'srgbClr')[0]?.getAttribute('val')
+      if (srgb) { out[slot] = '#' + srgb.toUpperCase(); continue }
+      const sys = el.getElementsByTagNameNS(A_NS, 'sysClr')[0]?.getAttribute('lastClr')
+      if (sys) { out[slot] = '#' + sys.toUpperCase(); continue }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/**
  * 预处理 .docx：
  *  1) 摊平 VML 组合（v:group）并把 VML 形状归一化为绝对定位；
  *  2) 收集 DrawingML 浮动对象的锚点信息（渲染后据此做绝对定位/遮罩/z 序）；
@@ -1210,19 +1877,26 @@ async function openLocation(): Promise<void> {
 async function prepareDocxBlob(
   data: ArrayBuffer,
   mime: string
-): Promise<{ blob: Blob; anchors: DrawingAnchor[]; headerImages: HeaderImage[] }> {
+): Promise<{ blob: Blob; anchors: DrawingAnchor[]; headerImages: HeaderImage[]; inkOverlays: InkOverlay[] }> {
   const fallback = {
     blob: new Blob([data], { type: mime }),
     anchors: [] as DrawingAnchor[],
-    headerImages: [] as HeaderImage[]
+    headerImages: [] as HeaderImage[],
+    inkOverlays: [] as InkOverlay[]
   }
   try {
     const JSZip = (await import('jszip')).default
     const zip = await JSZip.loadAsync(data)
+    // 真实主题色：word/theme/theme1.xml 的 a:clrScheme（12 槽位）→ THEME_COLORS。
+    // 自定义主题文档（Word 模板）的 schemeClr 填充/描边必须用真实主题色，
+    // 默认 Office 主题表只是无主题时的兜底。见 05 篇 §3/§7。
+    THEME_COLORS = await parseThemeColors(zip)
     const docEntry = zip.file('word/document.xml')
     const docXml = docEntry ? await docEntry.async('string') : ''
     // 页眉/页脚里的锚定图（整页背景图）单独收集，并按 w:type 区分首页/默认
     const headerImages = await collectHeaderImages(zip, docXml)
+    // InkML 墨迹（LO/docx-preview 均不渲染，自己收集笔画）
+    const inkOverlays = collectInkOverlays(docXml)
     const targets = Object.keys(zip.files).filter((n) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(n))
     const anchors: DrawingAnchor[] = []
     let changed = false
@@ -1232,6 +1906,14 @@ async function prepareDocxBlob(
       let xml = await entry.async('string')
       const before = xml
       xml = preferSvgBlips(xml)
+      // 停用：移除 wps AC 的 VML Fallback 会让 docx-preview 对文本框零渲染，导致正文消失。
+      // 图标去重改为渲染后 DOM 层处理（repairVmlShapes + applyDrawingAnchors 之间）。
+      // xml = stripWpsFallbacks(xml)
+      // 页眉/页脚里的「整页背景图」：Choice(wps+wp14:sizeRel) 与 Fallback(VML v:rect 固定 ext) 并存，
+      // docx-preview 恒选 Fallback → 背景图渲染成固定尺寸（645pt）不铺满，且与 applyHeaderImages 的
+      // Choice 铺满版双画。移除 Fallback（仅当 Choice 含 wp14:sizeRelH/V = 整页相对尺寸特征）——
+      // 不影响文本框/图标（无 sizeRel 的不动），背景图改由 applyHeaderImages 按 sizeRel 铺满渲染。
+      if (/header\d*\.xml$|footer\d*\.xml$/.test(name)) xml = stripHeaderBgVmlFallback(xml)
       const pathMap = await buildGfxPathMap(xml)
       xml = normalizeVmlPositioning(xml, pathMap)
       if (name === 'word/document.xml') anchors.push(...collectDrawingAnchors(xml))
@@ -1240,8 +1922,8 @@ async function prepareDocxBlob(
         changed = true
       }
     }
-    if (!changed) return { blob: fallback.blob, anchors, headerImages }
-    return { blob: await zip.generateAsync({ type: 'blob', mimeType: mime }), anchors, headerImages }
+    if (!changed) return { blob: fallback.blob, anchors, headerImages, inkOverlays }
+    return { blob: await zip.generateAsync({ type: 'blob', mimeType: mime }), anchors, headerImages, inkOverlays }
   } catch (e) {
     console.warn('[docx] 预处理失败，按原始文件渲染', e)
     return fallback
@@ -1275,7 +1957,7 @@ onMounted(async () => {
     if (destroyed) return
     const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     // 预处理：摊平/归一化 VML，收集 DrawingML 锚点，接上 SVG 图标
-    const { blob, anchors, headerImages } = await prepareDocxBlob(r.data, mime)
+    const { blob, anchors, headerImages, inkOverlays } = await prepareDocxBlob(r.data, mime)
     if (destroyed) return
     await renderAsync(blob, host, undefined, {
       className: 'docx',
@@ -1304,17 +1986,30 @@ onMounted(async () => {
     if (destroyed) return
     // 修复 VML 形状/文本框（见 repairVmlShapes 注释），否则浮动文本框里的文字与色块会丢失
     repairVmlShapes(host)
+    // B 组：自动分页——在自绘层/页眉/墨迹之前，使后续锚定与自绘按分页后的 section 归属定位。
+    // 内容不超页时零 DOM 变更（红线）。
+    const pagesAdded = applyAutoPagination(host)
+    if (pagesAdded) console.log(`[docx] 自动分页：新增 ${pagesAdded} 页`)
+    // A 组：字体 fallback——首字体缺失时追加中文字体链（只追加不改首字体）。
+    const fontsFixed = applyFontFallback(host)
+    if (fontsFixed) console.log(`[docx] 字体 fallback：修正 ${fontsFixed} 个元素`)
     // DrawingML 浮动对象：按锚点改为绝对定位 + 遮罩 + z 序（behindDoc）
     const anchored = applyDrawingAnchors(host, anchors)
     if (anchored) console.log(`[docx] 已按锚点定位 ${anchored} 个浮动对象`)
+    // 图标去重：移除与自绘 Choice 图形重叠的 VML 近似色块（避免同图标双画）
+    const deoverlap = removeOverlaidVmlShapes(host)
+    if (deoverlap) console.log(`[docx] 已移除 ${deoverlap} 个重叠 VML 补绘色块`)
     // 页眉/页脚里的整页背景图
     const heads = applyHeaderImages(host, headerImages)
     if (heads) console.log(`[docx] 已渲染 ${heads} 张页眉/页脚图片`)
-    // 兜底：docx-preview 给 behind 背景图设的内联 z-index:-1 会被页面白底背景盖住（视觉不可见），
-    // 统一提升到纸面之上（内联样式检测，避免 getComputedStyle 时序差异）
-    for (const img of host.querySelectorAll('img')) {
-      if ((img.style.zIndex || '') === '-1') img.style.zIndex = '0'
-    }
+    // InkML 墨迹（自解析，定位到所属段落）
+    const inks = applyInkOverlays(host, inkOverlays)
+    if (inks) console.log(`[docx] 已渲染 ${inks} 条墨迹`)
+    void inks
+    // 注意：不要再把 z-index:-1 的打底图抬到 0。
+    // section.docx 已通过 `isolation:isolate` 建立层叠上下文（见样式块），负 z-index 子元素
+    // 会画在「section 自身白底之后、正文文字之前」——这正是 behindDoc=1 的正确语义（垫底且可见、不盖字）。
+    // 若抬到 0：定位元素画在正常流文字之后（之上），不透明打底图会盖住正文文字（盖字）。
     pages.value = host.querySelectorAll('section.docx').length
     loading.value = false
     await nextTick()
