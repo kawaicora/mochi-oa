@@ -36,7 +36,7 @@ export interface ServerSettings {
   callSound?: boolean
   /** 自定义消息提示音（绝对路径；空=用 resources/message.wav；文件丢失自动回退默认） */
   messageSoundFile?: string
-  /** 自定义来电铃声（绝对路径；空=用 resources/calling.wav；文件丢失自动回退默认） */
+  /** 自定义来电铃声（绝对路径；空=用 resources/calling.mp3；文件丢失自动回退默认） */
   callSoundFile?: string
   /** 全局免打扰：静音消息类通知（来电照响；默认关） */
   dnd?: boolean

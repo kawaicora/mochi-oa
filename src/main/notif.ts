@@ -80,16 +80,33 @@ export function notify(o: { kind?: NotifKind; title: string; body: string; targe
 }
 
 /**
+ * 默认提示音候选（按优先级）。换文件、换格式、改名只要放进 resources 就能生效：
+ * 来电/会议铃声当前是 calling.mp3，消息提示音是 message.wav。
+ */
+const DEFAULT_SOUNDS: Record<'call' | 'message', string[]> = {
+  call: ['calling.mp3', 'calling.wav', 'call.mp3', 'call.wav', 'ring.mp3', 'ring.wav'],
+  message: ['message.mp3', 'message.wav', 'notify.mp3', 'notify.wav', 'msg.mp3', 'msg.wav']
+}
+
+/** resources 下第一个存在的默认提示音；一个都没有返回 null */
+function defaultSoundPath(isCall: boolean): string | null {
+  for (const name of isCall ? DEFAULT_SOUNDS.call : DEFAULT_SOUNDS.message) {
+    const p = resourceFilePath(name)
+    if (p) return p
+  }
+  return null
+}
+
+/**
  * 解析实际要播放的提示音文件（渲染层来问，主进程负责查文件在不在）。
  *
- * 规则：自定义路径存在就用它；不存在/为空就回退默认（resources/message.wav 或 calling.wav）；
+ * 规则：自定义路径存在就用它；不存在/为空就回退默认（resources/calling.mp3 或 message.wav）；
  * 默认也没有才返回失败。这样「设置的音频丢了自动恢复默认」是主进程判定的，
  * 渲染层不用自己去猜路径。
  */
 export function resolveSoundFile(kind: NotifKind, customPath?: string): { ok: boolean; path?: string; source?: 'custom' | 'fallback' | 'default'; missing?: string; error?: string } {
   const isCall = kind === 'call' || kind === 'meeting'
-  const defName = isCall ? 'calling.wav' : 'message.wav'
-  const defPath = resourceFilePath(defName)
+  const defPath = defaultSoundPath(isCall)
   const custom = typeof customPath === 'string' ? customPath.trim() : ''
   if (custom) {
     try {
@@ -99,8 +116,8 @@ export function resolveSoundFile(kind: NotifKind, customPath?: string): { ok: bo
     }
     // 自定义文件丢失 → 自动回退默认，并把丢失的路径回传，界面可提示用户
     if (defPath) return { ok: true, path: defPath, source: 'fallback', missing: custom }
-    return { ok: false, error: `自定义音频丢失，且默认音频 ${defName} 不存在` }
+    return { ok: false, error: '自定义音频丢失，且 resources 下没有可用的默认音频' }
   }
   if (defPath) return { ok: true, path: defPath, source: 'default' }
-  return { ok: false, error: `默认音频 ${defName} 不存在` }
+  return { ok: false, error: `resources 下没有可用的默认音频（${(isCall ? DEFAULT_SOUNDS.call : DEFAULT_SOUNDS.message).join(' / ')}）` }
 }

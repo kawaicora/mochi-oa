@@ -329,7 +329,7 @@ async function onSaveMainMail(): Promise<void> {
             <label class="ps-label">来电铃声文件</label>
             <div class="file-row">
               <span class="file-name" :title="app.notifyCfg.callSoundFile">
-                {{ app.notifyCfg.callSoundFile ? shortName(app.notifyCfg.callSoundFile) : '默认（resources/calling.wav）' }}
+                {{ app.notifyCfg.callSoundFile ? shortName(app.notifyCfg.callSoundFile) : '默认（resources/calling.mp3）' }}
               </span>
               <button class="dt-btn" @click="pickSound('call')">选择</button>
               <button v-if="app.notifyCfg.callSoundFile" class="dt-btn" @click="app.saveNotifyCfg({ callSoundFile: '' })">恢复默认</button>

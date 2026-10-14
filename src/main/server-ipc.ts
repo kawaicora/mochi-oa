@@ -805,7 +805,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     return Promise.resolve()
   })
   // 解析通知提示音文件：自定义路径存在就用它；丢失/为空自动回退 resources 里的默认
-  // （message.wav / calling.wav）。判定放主进程，渲染层不用猜路径。
+  // （message.wav / calling.mp3）。判定放主进程，渲染层不用猜路径。
   ipcMain.handle(IpcChannels.appResolveNotifySound, (_e, opts) => {
     const o = (opts ?? {}) as { kind?: unknown; customPath?: unknown }
     const kind = (typeof o.kind === 'string' ? o.kind : 'message') as NotifKind

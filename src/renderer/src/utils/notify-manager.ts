@@ -9,12 +9,12 @@
  *   │ 类型      │ 免打扰是否静音 │ 提示音                     │ 何时打扰                    │
  *   │ message   │ 是（全局/会话）│ message.wav（可自定义）      │ 非「正在看这个会话」时      │
  *   │ task      │ 是（全局）      │ message.wav                │ 同上                        │
- *   │ call      │ 否（来电优先）  │ calling.wav（可自定义）      │ 非「正在看这个会话」时      │
- *   │ meeting   │ 否（来电优先）  │ calling.wav（可自定义）      │ 同上                        │
+ *   │ call      │ 否（来电优先）  │ calling.mp3（可自定义）      │ 非「正在看这个会话」时      │
+ *   │ meeting   │ 否（来电优先）  │ calling.mp3（可自定义）      │ 同上                        │
  *   │ alarm     │ —              │ 闹钟自带播放，不走这里        │ —                           │
  *
  * 音频文件丢失自动回退默认：由主进程 resolveNotifySound 判定（自定义不存在 →
- * resources/message.wav 或 calling.wav），渲染层不用猜路径。
+ * resources/message.wav 或 calling.mp3），渲染层不用猜路径。
  * 播放失败（文件损坏/被删/格式不支持）会清缓存重解析一次，再失败就静默放弃——
  * 绝不能因为提示音出问题影响消息收发本身。
  */
@@ -32,7 +32,7 @@ export interface NotifyPolicy {
   dndConvs: string[]
   /** 自定义消息提示音（绝对路径，空=用 resources/message.wav） */
   messageSoundFile: string
-  /** 自定义来电铃声（绝对路径，空=用 resources/calling.wav） */
+  /** 自定义来电铃声（绝对路径，空=用 resources/calling.mp3） */
   callSoundFile: string
   /** 每个会话的自定义铃声：key=会话 key，value=绝对路径 */
   convRings: Record<string, string>
@@ -127,6 +127,24 @@ async function resolvePath(kind: NotifKind, customPath: string): Promise<string 
   }
 }
 
+/** 兜底 blob 播放时按扩展名给 MIME，否则 Chromium 可能按 wav 解 mp3 导致无声 */
+function mimeFor(path: string): string {
+  const ext = (path.split('.').pop() || '').toLowerCase()
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    m4a: 'audio/mp4',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+    ogg: 'audio/ogg',
+    oga: 'audio/ogg',
+    opus: 'audio/ogg',
+    weba: 'audio/webm',
+    wma: 'audio/x-ms-wma'
+  }
+  return map[ext] || 'audio/mpeg'
+}
+
 /** 加载音频元素（优先 app-file 流式播放；失败再退回读字节 + blob） */
 async function loadSound(kind: NotifKind, customPath: string): Promise<LoadedSound | null> {
   const path = await resolvePath(kind, customPath)
@@ -134,7 +152,7 @@ async function loadSound(kind: NotifKind, customPath: string): Promise<LoadedSou
   const hit = loaded.get(path)
   if (hit) return hit
 
-  // 首选：直接用 app-file:// 交给 Chromium 流式播放（大文件关键：calling.wav 可能上百 MB，
+  // 首选：直接用 app-file:// 交给 Chromium 流式播放（大文件关键：铃声可能有几十上百 MB，
   // 读成 ArrayBuffer 再转 blob 会一次吃掉等量内存）
   const streamUrl = toAppFileUrl(path)
   const el = new Audio()
@@ -163,7 +181,7 @@ async function loadSound(kind: NotifKind, customPath: string): Promise<LoadedSou
   try {
     const r = await window.pantry.readAudioFile(path)
     if (!r.ok || !r.data) return null
-    const url = URL.createObjectURL(new Blob([r.data]))
+    const url = URL.createObjectURL(new Blob([r.data], { type: mimeFor(path) }))
     const a = new Audio(url)
     const s: LoadedSound = { path, audio: a, url, blob: true }
     loaded.set(path, s)
