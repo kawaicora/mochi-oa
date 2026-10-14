@@ -1,8 +1,9 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell, webContents } from 'electron'
 import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
+import { remoteInputSetMode, remoteInputDispatch, remoteInputStop } from './remote-input'
 import { IpcChannels, type NotifTarget } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
@@ -10,22 +11,90 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 
-// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log，避免报错闪现丢失 ----
+// ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
+// 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
+function safeStr(v: unknown): string {
+  if (typeof v === 'string') return v
+  try { const s = JSON.stringify(v); return s == null ? String(v) : s } catch { return String(v) }
+}
+function patchMainConsoleToFile(): void {
+  const file = () => {
+    const dir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    return join(dir, 'renderer-console.log')
+  }
+  const wrap = (fn: (...a: unknown[]) => void, tag: string) => {
+    const orig = fn.bind(console)
+    return (...args: unknown[]): void => {
+      orig(...args)
+      const line = `[${new Date().toISOString()}] [${tag}] ${args.map(safeStr).join(' ')}`
+      try { appendFileSync(file(), line + '\n', 'utf8') } catch { /* 忽略 */ }
+      // 转发到所有窗口渲染层控制台（Ctrl+Shift+I 可见），保证主进程日志也输出到控制台
+      try {
+        for (const wc of webContents.getAllWebContents()) {
+          if (!wc.isDestroyed()) wc.send('__main_console', line)
+        }
+      } catch { /* 忽略 */ }
+    }
+  }
+  console.log = wrap(console.log, 'main')
+  console.info = wrap(console.info, 'main-info')
+  console.warn = wrap(console.warn, 'main-warn')
+  console.error = wrap(console.error, 'main-error')
+  console.debug = wrap(console.debug, 'main-verbose') // verbose 也落盘 + 保留控制台输出
+}
+patchMainConsoleToFile()
+
+// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log 且同时 console.error（统一到渲染层控制台），避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {
+  const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}`
+  console.error(line) // 走 patchMainConsoleToFile：终端 + renderer-console.log + 渲染层控制台
   try {
     const dir = join(app.getPath('userData'), 'logs')
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}\n`
-    appendFileSync(join(dir, 'main-error.log'), line, 'utf8')
+    appendFileSync(join(dir, 'main-error.log'), line + '\n', 'utf8')
   } catch {
     /* 日志写入失败静默，避免二次抛错 */
   }
 }
 process.on('uncaughtException', (e) => { logMainError('uncaughtException', e) })
 process.on('unhandledRejection', (r) => { logMainError('unhandledRejection', r) })
-// 渲染进程报错：经 IPC 转发写日志（renderer 侧 window.onerror / unhandledrejection 触发）
-ipcMain.on(IpcChannels.logError, (_e, msg: unknown) => {
-  logMainError('renderer', msg)
+// 渲染进程日志统一走 console → 下方 web-contents-created 的 console-message 捕获落盘，无需 logError IPC。
+
+// ---- 渲染层全量 console 落盘：userData/logs/renderer-console.log ----
+// 覆盖所有窗口（主窗口 / meeting / task / 通知等）的 console.log/warn/error。
+// 这样 WebRTC、socket 等渲染层日志无需开 DevTools 也能查看，排查直连/中转、ICE、协商过程。
+// 仅允许 console 输出（不改各渲染层代码），这里统一捕获转发到文件。
+function logRendererConsole(contents: Electron.WebContents): void {
+  const file = join(app.getPath('userData'), 'logs', 'renderer-console.log')
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  } catch { console.warn('[logRendererConsole] create log directory failed'); return }
+  // Electron 版本差异：新版事件为 (event: Event<{...params}>)；旧版为 (event, level, message, line, sourceId)。两者兼容。
+  contents.on('console-message', (event: unknown, ...rest: unknown[]) => {
+    try {
+      let level = 'info', message = '', line = '', source = ''
+      const ev = event as { params?: { level?: number; message?: string; lineNumber?: number; sourceId?: string }; level?: number; message?: string; lineNumber?: number; sourceId?: string }
+      if (ev && typeof ev === 'object' && 'params' in ev && ev.params) {
+        const p = ev.params
+        level = ['verbose', 'info', 'warning', 'error'][p.level ?? 1] ?? 'info'
+        message = p.message ?? ''
+        line = String(p.lineNumber ?? '')
+        source = p.sourceId ?? ''
+      } else {
+        const lvl = typeof ev.level === 'number' ? ev.level : Number(rest[0] ?? 1)
+        level = ['verbose', 'info', 'warning', 'error'][lvl] ?? 'info'
+        message = String(typeof ev.message === 'string' && ev.message ? ev.message : rest[1] ?? '')
+        line = String(ev.lineNumber ?? rest[3] ?? '')
+        source = String(ev.sourceId ?? rest[4] ?? '')
+      }
+      appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${message} (${source}:${line})\n`, 'utf8')
+    } catch { console.warn('[logRendererConsole] write log failed') }
+  })
+}
+app.on('web-contents-created', (_e, contents) => {
+  logRendererConsole(contents)
 })
 
 /** 应用图标：优先打包目录(resourcesPath)，其次开发目录(项目根 resources/)。任务栏/窗口用。 */
@@ -50,6 +119,8 @@ let trayEnabled = false
 let isQuitting = false
 
 // 单实例锁：避免重复启动（用户数据隔离靠 PANTRY_USER_DATA 环境变量）
+// Windows 通知中心需 AppUserModelID 才能显示系统通知（远程控制/来电/闹钟等），必须在创建窗口前设置
+app.setAppUserModelId('com.kawaicora.mochi-oa')
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
@@ -145,7 +216,7 @@ app.whenReady().then(() => {
           sources.find((s) => s.display_id === primaryId && s.name.toLowerCase().includes('screen')) ||
           sources.find((s) => s.display_id === primaryId) ||
           sources[0]
-        if (match) callback({ video: match })
+        if (match) callback({ video: match, audio: 'loopback' })
         else callback({})
       } catch {
         callback({})
@@ -179,6 +250,12 @@ app.whenReady().then(() => {
   })
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
+  // 开机自启：查询/设置登录项
+  ipcMain.handle(IpcChannels.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin)
+  ipcMain.handle(IpcChannels.setAutoLaunch, (_e, openAtLogin: unknown) => {
+    app.setLoginItemSettings({ openAtLogin: !!openAtLogin })
+    return { ok: true, openAtLogin: app.getLoginItemSettings().openAtLogin }
+  })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)
     return {
@@ -194,6 +271,20 @@ app.whenReady().then(() => {
       w.show()
       w.focus()
     }
+    return { ok: true }
+  })
+
+  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
+  ipcMain.handle(IpcChannels.remoteInputStart, (_e, mode: unknown) => {
+    remoteInputSetMode(mode === 'local' ? 'local' : 'remote')
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteInputEvent, (_e, evt: unknown) => {
+    remoteInputDispatch((evt ?? {}) as Record<string, unknown>)
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteInputStop, () => {
+    remoteInputStop()
     return { ok: true }
   })
 
@@ -213,6 +304,7 @@ app.whenReady().then(() => {
   // 启动即连接已保存的服务器地址（带 token 则自动恢复会话）
   const cfg = loadServerConfig()
   if (cfg.serverUrl) {
+    console.log(`serverClient.connect url=${cfg.serverUrl} token=${cfg.token ? '有' : '无'}`)
     serverClient.connect({ serverUrl: cfg.serverUrl, token: cfg.token })
   }
 

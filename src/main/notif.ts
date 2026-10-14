@@ -48,6 +48,12 @@ export function openTarget(t: NotifTarget): void {
 /** 通知管理器统一入口：托盘闪动 + 系统通知，点击 → 打开目标窗口 */
 export function notify(o: { title: string; body: string; target: NotifTarget; tray?: boolean }): void {
   if (o.tray) flashTray()
-  const n = new Notification({ title: o.title, body: o.body, silent: true })
-  n.on('click', () => openTarget(o.target))
+  if (!Notification.isSupported()) return
+  try {
+    const n = new Notification({ title: o.title, body: o.body, silent: true })
+    n.on('click', () => openTarget(o.target))
+    n.show()
+  } catch (e) {
+    console.error('[notif] 系统通知显示失败', o.title, e)
+  }
 }

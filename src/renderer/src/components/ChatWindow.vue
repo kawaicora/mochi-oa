@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
@@ -157,6 +157,130 @@ onMounted(() => {
   })
 })
 
+// ─── 拖放上传 ───
+/** 是否正处于拖放悬停状态（用于显示投放遮罩） */
+const dragActive = ref(false)
+/** dragenter/dragleave 会在子元素间反复触发，用计数器避免遮罩闪烁 */
+let dragDepth = 0
+
+interface DropItem {
+  path: string
+  isDir: boolean
+  name: string
+}
+
+/** 拖拽内容里是否含文件（拖动选中文字时 types 不含 Files） */
+function dragHasFiles(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types
+  if (!types) return false
+  return Array.prototype.indexOf.call(types, 'Files') >= 0
+}
+
+function onDragEnter(e: DragEvent): void {
+  if (!selected.value || !dragHasFiles(e)) return
+  e.preventDefault()
+  dragDepth += 1
+  dragActive.value = true
+}
+
+function onDragOver(e: DragEvent): void {
+  if (!selected.value || !dragHasFiles(e)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  if (!dragActive.value) dragActive.value = true
+}
+
+function onDragLeave(e: DragEvent): void {
+  if (!dragActive.value) return
+  e.preventDefault()
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragActive.value = false
+}
+
+/** 从拖放事件收集待发送项：文件取绝对路径，文件夹标记出来交给 sendFolder */
+function collectDropItems(e: DragEvent): DropItem[] {
+  const dt = e.dataTransfer
+  if (!dt) return []
+  const files = Array.from(dt.files ?? [])
+  if (files.length === 0) return []
+  // File 对象拿不到 isDirectory，用 webkitGetAsEntry 判断（与 files 顺序一一对应）
+  const dirFlags: boolean[] = []
+  const items = dt.items ? Array.from(dt.items) : []
+  for (let i = 0; i < files.length; i++) {
+    let isDir = false
+    const it = items[i]
+    if (it && it.kind === 'file' && typeof it.webkitGetAsEntry === 'function') {
+      try {
+        isDir = it.webkitGetAsEntry()?.isDirectory === true
+      } catch {
+        isDir = false
+      }
+    }
+    dirFlags.push(isDir)
+  }
+  const out: DropItem[] = []
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]
+    // pathForFile 应返回字符串；类型不符时回退到旧版 File.path，避免把对象当成路径
+    let path = ''
+    try {
+      const r = window.pantry.pathForFile(f)
+      if (typeof r === 'string') path = r
+    } catch {
+      path = ''
+    }
+    if (!path) {
+      const legacy = (f as File & { path?: string }).path
+      if (typeof legacy === 'string') path = legacy
+    }
+    if (!path) continue
+    out.push({ path, isDir: dirFlags[i] === true, name: f.name })
+  }
+  return out
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  if (dragActive.value) e.preventDefault()
+  dragDepth = 0
+  dragActive.value = false
+  if (!selected.value || sending.value) return
+  e.preventDefault()
+  const items = collectDropItems(e)
+  if (items.length === 0) {
+    flashToast('未识别到可发送的文件')
+    return
+  }
+  sending.value = true
+  try {
+    for (const it of items) {
+      // 文件夹走 sendFolder（整目录打包上传），文件走 sendFile
+      if (it.isDir) await app.sendFolder(it.path)
+      else await app.sendFile(it.path)
+    }
+  } finally {
+    sending.value = false
+  }
+}
+
+/** 拖到聊天区以外时阻止 Electron 默认「打开该文件」的导航行为 */
+function preventWindowDrop(e: DragEvent): void {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  if (e.type === 'drop') {
+    dragDepth = 0
+    dragActive.value = false
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', preventWindowDrop)
+  window.addEventListener('drop', preventWindowDrop)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', preventWindowDrop)
+  window.removeEventListener('drop', preventWindowDrop)
+})
+
 const emojiList = [
   '😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😜', '🤔', '😭', '😅', '😇', '🙃', '😎', '🤩', '🥳', '😴', '🤯', '🥺', '😤',
   '👍', '👎', '👏', '🙏', '💪', '🤝', '✌️', '🤞', '👀', '❤️', '💔', '🎉', '🎊', '🔥', '✨', '⭐', '🌈', '🍺', '☕', '🍰',
@@ -182,6 +306,44 @@ async function onPin(): Promise<void> {
 
 function startDmVideo(): void {
   if (selected.value?.dmUserId) void rtc.startDmCall(selected.value.dmUserId, 'video')
+}
+// 远程控制：主叫发起；对方设了密码 → 弹密码输入框重试
+const remotePwOpen = ref(false)
+const remotePw = ref('')
+const remoteReqUserId = ref(0)
+async function startDmRemote(): Promise<void> {
+  if (!selected.value?.dmUserId) return
+  const id = selected.value.dmUserId
+  try {
+    const r = await rtc.startDmCall(id, 'remote')
+    if (r.needPassword) {
+      remoteReqUserId.value = id
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 发起远程控制失败', e)
+    flashToast(String(e))
+  }
+}
+async function submitRemotePw(): Promise<void> {
+  const id = remoteReqUserId.value
+  const pw = remotePw.value
+  remotePwOpen.value = false
+  try {
+    const r = await rtc.startDmCall(id, 'remote', pw)
+    if (r.needPassword) {
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 提交远程控制密码失败', e)
+    flashToast(String(e))
+  }
 }
 function startGroupVoice(): void {
   if (selected.value?.groupId) void rtc.startGroupCall(selected.value.groupId, 'voice')
@@ -311,26 +473,72 @@ function is3dModelUrl(url: string): boolean {
   return /\.(fbx|obj|stl|glb|gltf|dae)(\?|$)/i.test(url)
 }
 
+/** 聊天内可预览的 Office 文档类型 */
+type OfficePreviewKind = 'pdf' | 'word' | 'excel'
+
+/** 按扩展名判断可预览类型：PDF / Word(.docx) / Excel(.xlsx/.xls/.csv)；旧版二进制 .doc 不支持 */
+function officePreviewKind(url: string): OfficePreviewKind | null {
+  if (/\.pdf(\?|$)/i.test(url)) return 'pdf'
+  if (/\.docx(\?|$)/i.test(url)) return 'word'
+  if (/\.(xlsx|xls|csv)(\?|$)/i.test(url)) return 'excel'
+  return null
+}
+
+/** 取消息对应的本地绝对路径：优先自动下载缓存，其次按需下载（失败返回 null） */
+async function ensureLocalPath(m: { content: string; id: string }): Promise<string | null> {
+  const cached = app.localCache[m.id]?.path
+  if (cached) return cached
+  // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
+  const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
+  return r.ok && r.path ? r.path : null
+}
+
 /** 3D 预览弹窗 */
 const previewModel = ref<{ path: string; name: string } | null>(null)
 /** 单独窗口预览：图片大图 / 视频全屏播放 */
 const previewMedia = ref<{ kind: 'image' | 'video'; m: ServerChatMessage } | null>(null)
+
 async function openModelPreview(m: { content: string; id: string }): Promise<void> {
-  let path = app.localCache[m.id]?.path
+  const path = await ensureLocalPath(m)
   if (!path) {
-    const r = await window.pantry.serverDownloadFile(m.content)
-    if (!r.ok || !r.path) {
-      flashToast('模型文件下载失败')
-      return
-    }
-    path = r.path
+    flashToast('模型文件下载失败')
+    return
   }
   previewModel.value = { path, name: fileNameOf(m.content) }
+}
+
+/** 打开聊天内 Office 文档预览（PDF / Word / Excel）：按需下载到本地后交给独立预览窗口（复用同一套预览组件） */
+async function openOfficePreview(m: { content: string; id: string }): Promise<void> {
+  const kind = officePreviewKind(m.content)
+  if (!kind) return
+  const label = kind === 'pdf' ? 'PDF' : kind === 'word' ? 'Word' : 'Excel'
+  const path = await ensureLocalPath(m)
+  if (!path) {
+    flashToast(`${label} 文件下载失败`)
+    return
+  }
+  const r = await window.pantry.openPreviewWindow({ kind, path, name: fileNameOf(m.content) })
+  if (!r.ok) flashToast(r.error || `${label} 预览窗口打开失败`)
 }
 </script>
 
 <template>
-  <section class="chat-panel">
+  <section
+    class="chat-panel"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <!-- 拖放投放遮罩 -->
+    <div v-if="dragActive" class="drop-mask">
+      <div class="drop-box">
+        <i class="fas fa-cloud-upload-alt"></i>
+        <p>松手即可发送到「{{ selected?.name }}」</p>
+        <span>支持文件与文件夹，可一次拖入多个</span>
+      </div>
+    </div>
+
     <!-- 空态 -->
     <template v-if="!selected">
       <div class="chat-empty">
@@ -349,6 +557,9 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
           </button>
           <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="通话" @click="startDmVideo">
             <i class="fas fa-video"></i>
+          </button>
+          <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="远程控制" @click="startDmRemote">
+            <i class="fas fa-desktop"></i>
           </button>
           <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="通话" @click="startGroupVideo">
             <i class="fas fa-video"></i>
@@ -386,13 +597,20 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
               <img v-else-if="m.kind === 'image' && isImageUrl(m.content)" :src="app.localPreviewUrl(m)" class="msg-img" @error="app.fallbackPreview(m)" @click="previewMedia = { kind: 'image', m }" />
               <!-- 音频：内联播放控件 -->
               <MsgAudio v-else-if="m.kind === 'audio'" :m="m" />
-              <!-- 文件：3D 模型显示预览按钮，否则普通文件 -->
+              <!-- 文件：3D 模型 / Office 文档（PDF、Word、Excel）显示预览按钮，否则普通文件链接 -->
               <template v-else-if="m.kind === 'file' || m.kind === 'image'">
                 <div v-if="m.kind === 'file' && is3dModelUrl(m.content)" class="msg-model">
                   <i class="fas fa-cube msg-model-icon"></i>
                   <span class="msg-model-name" :title="fileNameOf(m.content)">{{ fileNameOf(m.content) }}</span>
                   <button class="msg-folder-dl" @click="openModelPreview(m)">
                     <i class="fas fa-cube"></i>&nbsp;3D 预览
+                  </button>
+                </div>
+                <div v-else-if="m.kind === 'file' && officePreviewKind(m.content)" class="msg-model">
+                  <i :class="[fileIcon(m.content), 'msg-model-icon', 'msg-office-' + officePreviewKind(m.content)]"></i>
+                  <span class="msg-model-name" :title="fileNameOf(m.content)">{{ fileNameOf(m.content) }}</span>
+                  <button class="msg-folder-dl" @click="openOfficePreview(m)">
+                    <i class="far fa-eye"></i>&nbsp;预览
                   </button>
                 </div>
                 <a v-else :href="app.localPreviewUrl(m)" target="_blank" class="msg-file">
@@ -484,6 +702,21 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
     <!-- 下载结果提示 -->
     <div v-if="dlToast" class="dl-toast">{{ dlToast }}</div>
 
+    <!-- 远程控制密码输入（对方设置了远程控制密码） -->
+    <Teleport to="body">
+      <div v-if="remotePwOpen" class="remote-pw-overlay" @click.self="remotePwOpen = false">
+        <div class="remote-pw-box">
+          <div class="remote-pw-title"><i class="fas fa-desktop"></i> 远程控制</div>
+          <div class="remote-pw-desc">对方设置了远程控制密码，请输入后继续：</div>
+          <input v-model="remotePw" class="remote-pw-input" type="password" placeholder="远程控制密码" @keydown.enter="submitRemotePw" autofocus />
+          <div class="remote-pw-actions">
+            <button class="remote-pw-cancel" @click="remotePwOpen = false">取消</button>
+            <button class="remote-pw-ok" @click="submitRemotePw">确认连接</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 3D 模型预览 -->
     <ModelPreview v-if="previewModel" :path="previewModel.path" :name="previewModel.name" @close="previewModel = null" />
 
@@ -496,6 +729,72 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
 </template>
 
 <style scoped>
+.remote-pw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.remote-pw-box {
+  background: #161b22;
+  border-radius: 14px;
+  padding: 24px 28px;
+  width: 340px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.remote-pw-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6edf3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.remote-pw-desc {
+  font-size: 13px;
+  color: #8b949e;
+  margin-bottom: 14px;
+}
+.remote-pw-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.remote-pw-input:focus {
+  outline: none;
+  border-color: #6b7bff;
+}
+.remote-pw-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.remote-pw-cancel {
+  background: #30363d;
+  color: #e6edf3;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.remote-pw-ok {
+  background: #6b7bff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
 .chat-panel {
   flex: 1;
   display: flex;
@@ -503,6 +802,41 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
   min-width: 0;
   background: #fff;
   position: relative;
+}
+/* 拖放投放遮罩 */
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 137, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.drop-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 38px;
+  border: 2px dashed var(--dt-primary);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.drop-box > .fas {
+  font-size: 34px;
+  color: var(--dt-primary);
+}
+.drop-box p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dt-text);
+}
+.drop-box span {
+  font-size: 12px;
+  color: var(--dt-text-4);
 }
 .chat-empty {
   flex: 1;
@@ -663,6 +997,15 @@ async function openModelPreview(m: { content: string; id: string }): Promise<voi
   font-size: 22px;
   color: #7b6bf0;
   flex-shrink: 0;
+}
+.msg-office-pdf {
+  color: #e2574c;
+}
+.msg-office-word {
+  color: #2b579a;
+}
+.msg-office-excel {
+  color: #217346;
 }
 .msg-model-name {
   flex: 1;

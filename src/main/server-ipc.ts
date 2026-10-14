@@ -6,17 +6,91 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron'
 import { join, basename } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
+import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
+import * as iconv from 'iconv-lite'
 import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
+import { startSysReport, stopSysReport } from './sys-report'
+import { decodeUrlName } from './url-name'
 
+/** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
   win.webContents.send(channel, payload)
+}
+
+/**
+ * 在被控端（本机）执行远程命令。Windows：按 shell 选 cmd.exe / powershell.exe；
+ * Linux/macOS：直接默认 /bin/sh。结果经 serverClient.devExecResult 回传服务端转发给控制端。
+ */
+function execRemote(deviceId: string, shell: string, cmd: string, timeout = 15000): void {
+  const win = process.platform === 'win32'
+  const isCmd = win && shell === 'cmd'
+  const exe = win ? (isCmd ? 'cmd.exe' : 'powershell.exe') : '/bin/sh'
+  const args = win
+    ? (isCmd ? ['/d', '/s', '/c', cmd] : ['-NoProfile', '-NonInteractive', '-Command', cmd])
+    : ['-c', cmd]
+  console.log(`[dev-exec] deviceId=${deviceId} shell=${shell} cmd=${cmd}（平台=${process.platform} exe=${exe}）`)
+  const child = spawn(exe, args, { windowsHide: true })
+  const dec = win ? (b: Buffer) => iconv.decode(b, 'gbk') : (b: Buffer) => b.toString('utf8')
+  let stdout = ''
+  let stderr = ''
+  const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 超时终止 */ } }, timeout)
+  child.stdout?.on('data', (b: Buffer) => { stdout += dec(b) })
+  child.stderr?.on('data', (b: Buffer) => { stderr += dec(b) })
+  child.on('error', (e) => {
+    clearTimeout(timer)
+    void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout, stderr: (stderr || '') + (e.message || '') })
+  })
+  child.on('close', (code) => {
+    clearTimeout(timer)
+    console.log(`[dev-exec] deviceId=${deviceId} exit=${code ?? 0} stdout=${stdout.length}B stderr=${stderr.length}B`)
+    void serverClient.devExecResult(deviceId, { ok: true, exitCode: code ?? 0, stdout, stderr })
+  })
+}
+
+/** 持久交互终端会话：deviceId → 常驻 shell 子进程（保持 cwd/环境/变量，stdin 写入 / stdout,stderr 实时回传） */
+const termSessions = new Map<string, ReturnType<typeof spawn>>()
+function termDecode(win: boolean): (b: Buffer) => string {
+  return win ? (b) => iconv.decode(b, 'gbk') : (b) => b.toString('utf8')
+}
+function termOpen(deviceId: string, shell: string): void {
+  if (termSessions.has(deviceId)) return
+  const win = process.platform === 'win32'
+  const isCmd = win && shell === 'cmd'
+  const exe = win ? (isCmd ? 'cmd.exe' : 'powershell.exe') : '/bin/sh'
+  const args = win ? (isCmd ? ['/Q'] : ['-NoLogo', '-NoProfile', '-NonInteractive']) : ['-i']
+  const dec = termDecode(win)
+  console.log(`[dev-term] 打开会话 deviceId=${deviceId} shell=${shell} exe=${exe}`)
+  const child = spawn(exe, args, { windowsHide: true })
+  termSessions.set(deviceId, child)
+  const push = (stream: NodeJS.ReadableStream | null, isErr: boolean): void => {
+    stream?.on('data', (b: Buffer) => {
+      try { void serverClient.devTermOut(deviceId, dec(b), isErr) } catch { /* 忽略 */ }
+    })
+  }
+  push(child.stdout, false)
+  push(child.stderr, true)
+  child.on('close', (code) => {
+    termSessions.delete(deviceId)
+    void serverClient.devTermClose(deviceId, code ?? 0)
+  })
+  child.on('error', (e) => { void serverClient.devTermOut(deviceId, '\r\n[终端错误] ' + (e.message || ''), true) })
+}
+function termIn(deviceId: string, data: string): void {
+  const child = termSessions.get(deviceId)
+  if (!child) { void serverClient.devTermOut(deviceId, '\r\n[会话未建立] 请重新打开终端\r\n', true); return }
+  try { child.stdin?.write(data) } catch { /* 忽略 */ }
+}
+function termClose(deviceId: string): void {
+  const child = termSessions.get(deviceId)
+  termSessions.delete(deviceId)
+  if (child) { try { child.kill('SIGKILL') } catch { /* 忽略 */ } }
 }
 
 function broadcastToAllWindows(channel: string, payload: unknown): void {
@@ -27,7 +101,44 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
   // 推送 → renderer
-  serverClient.on('state', (s) => sendToMainWindow(getMainWindow(), IpcEvents.serverState, s))
+  serverClient.on('state', (s) => {
+    sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
+    void console.log(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
+    // 登录连接后启动本机系统信息上报（被控端）；断开即停
+    // 协议：动态包(dev:sys) → 服务端返回 updated（设备完整）/ lost（缺失或基础信息不全）；
+    //       lost → 立即重发全量 dev:register → 服务端返回 added → 之后只发动态。
+    if (s.connected) {
+      void console.log('startSysReport 启动（被控端系统上报）')
+      startSysReport(async (p, onAck) => {
+        try {
+          const ack = await serverClient.devSys(p)
+          // 服务端 ack 为 { ok, status }，normalizeAck 会把 status 归入 data，故从 ack.data.status 读取
+          const status = (ack as { data?: { status?: string } }).data?.status ?? (ack?.ok ? 'updated' : 'lost')
+          onAck?.(status)
+          // void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
+          if (!ack?.ok || status === 'lost') {
+            const info = (p.info ?? {}) as Record<string, unknown>
+            const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
+            const pub = ips.find((x) => !x.internal)?.address ?? ips[0]?.address ?? ''
+            const st = serverClient.state
+            const regAck = await serverClient.devRegister({
+              deviceId: p.deviceId,
+              name: String(info.hostname ?? '电脑').slice(0, 64),
+              os: `${info.type ?? ''} ${info.release ?? ''}`.trim().slice(0, 128),
+              ip: pub,
+              username: st.nick || st.username || ''
+            })
+            void console.log(`服务端返回 ${status}，已重发全量注册 regAck=${(regAck as { data?: { status?: string } }).data?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
+          }
+        } catch (e) {
+          void console.log(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })
+    } else {
+      void console.log('stopSysReport（未连接）')
+      stopSysReport()
+    }
+  })
   serverClient.on('message', (m) => sendToMainWindow(getMainWindow(), IpcEvents.serverMessage, m))
   serverClient.on('presence', (p) => sendToMainWindow(getMainWindow(), IpcEvents.serverPresence, p))
   serverClient.on('userProfileUpdated', (d) => sendToMainWindow(getMainWindow(), IpcEvents.userProfileUpdated, d))
@@ -82,6 +193,24 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('plansUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.plansUpdated, d ?? {}))
   serverClient.on('docsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.docsUpdated, d ?? {}))
   serverClient.on('wikiUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.wikiUpdated, d ?? {}))
+  // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl）
+  serverClient.on('devView', (d) => broadcastToAllWindows(IpcEvents.devView, d ?? {}))
+  serverClient.on('devEnumerate', (d) => broadcastToAllWindows(IpcEvents.devEnumerate, d ?? {}))
+  serverClient.on('devStart', (d) => broadcastToAllWindows(IpcEvents.devStart, d ?? {}))
+  serverClient.on('devStop', (d) => broadcastToAllWindows(IpcEvents.devStop, d ?? {}))
+  serverClient.on('devSignal', (d) => broadcastToAllWindows(IpcEvents.devSignal, d ?? {}))
+  // 控制端请求在被控端执行命令：主进程用所选 shell 执行（Windows: cmd/powershell；Linux: 默认 sh），结果回传
+  serverClient.on('devExec', (d) => {
+    const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown; cmd?: unknown }
+    const deviceId = String(p.deviceId ?? '')
+    const cmd = typeof p.cmd === 'string' ? p.cmd.trim() : ''
+    if (!deviceId || !cmd) { void serverClient.devExecResult(deviceId, { ok: false, exitCode: -1, stdout: '', stderr: '空命令' }); return }
+    execRemote(deviceId, String(p.shell ?? 'auto'), cmd)
+  })
+  // 交互终端：控制端请求在被控端开/读写常驻 shell 会话
+  serverClient.on('devTermOpen', (d) => { const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown }; termOpen(String(p.deviceId ?? ''), String(p.shell ?? 'auto')) })
+  serverClient.on('devTermIn', (d) => { const p = (d ?? {}) as { deviceId?: unknown; data?: unknown }; termIn(String(p.deviceId ?? ''), String(p.data ?? '')) })
+  serverClient.on('devTermClose', (d) => { const p = (d ?? {}) as { deviceId?: unknown }; termClose(String(p.deviceId ?? '')) })
 
   // 连接 / 状态 / 设置
   ipcMain.handle(IpcChannels.serverConnect, (_e, serverUrl: unknown, token: unknown) => {
@@ -354,10 +483,56 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.rtcSignal, (_e, roomId, signal) => serverClient.rtcSignal(String(roomId), signal as import('../shared/server-types').RtcSignalPayload))
   ipcMain.handle(IpcChannels.rtcLeave, (_e, roomId) => serverClient.rtcLeave(String(roomId)))
   ipcMain.handle(IpcChannels.rtcEnd, (_e, roomId) => serverClient.rtcEnd(String(roomId)))
-  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : 'video'))
+  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind, password) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : kind === 'remote' ? 'remote' : 'video', typeof password === 'string' ? password : undefined))
   ipcMain.handle(IpcChannels.rtcDmAnswer, (_e, roomId, accept) => serverClient.rtcDmAnswer(String(roomId), accept === true))
   ipcMain.handle(IpcChannels.rtcGroupCall, (_e, groupId, kind) => serverClient.rtcGroupCall(Number(groupId) || 0, kind === 'voice' ? 'voice' : 'video'))
   ipcMain.handle(IpcChannels.rtcChatSend, (_e, roomId, content) => serverClient.rtcChatMessage(String(roomId), String(content ?? '')))
+
+  // 远程设备控制（被控端）：渲染 → main → serverClient socket
+  ipcMain.handle(IpcChannels.devRegister, (_e, payload) => serverClient.devRegister(payload as { deviceId: string; name: string; os: string; ip: string; username: string }))
+  ipcMain.handle(IpcChannels.devHeartbeat, (_e, info) => {
+    // 心跳携带完整设备信息，服务端按 deviceId upsert（没有就添加，有就更新）
+    const p = (info ?? {}) as { deviceId?: unknown; name?: unknown; os?: unknown; ip?: unknown; username?: unknown }
+    serverClient.devHeartbeat({
+      deviceId: String(p.deviceId ?? ''),
+      name: String(p.name ?? ''),
+      os: String(p.os ?? ''),
+      ip: String(p.ip ?? ''),
+      username: String(p.username ?? '')
+    })
+    return Promise.resolve()
+  })
+  ipcMain.handle(IpcChannels.devDevices, (_e, deviceId, cams, mics) => serverClient.devDevices(String(deviceId ?? ''), cams as Array<{ id: string; label: string }>, mics as Array<{ id: string; label: string }>))
+  ipcMain.handle(IpcChannels.devSignal, (_e, deviceId, signal) => serverClient.devSignal(String(deviceId ?? ''), signal))
+  // 本机信息（deviceId/hostname/os/ip），供被控端注册用
+  ipcMain.handle(IpcChannels.devGetInfo, () => {
+    const os = require('node:os') as typeof import('node:os')
+    const fs = require('node:fs') as typeof import('node:fs')
+    const path = require('node:path') as typeof import('node:path')
+    const idFile = path.join(app.getPath('userData'), 'device-id.json')
+    let deviceId = ''
+    try {
+      if (fs.existsSync(idFile)) deviceId = (JSON.parse(fs.readFileSync(idFile, 'utf8')) as { id?: string }).id ?? ''
+      if (!deviceId) {
+        deviceId = 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+        fs.writeFileSync(idFile, JSON.stringify({ id: deviceId }), 'utf8')
+      }
+    } catch { deviceId = deviceId || 'dev-' + Math.random().toString(36).slice(2, 10) }
+    const nets = os.networkInterfaces()
+    let ip = ''
+    for (const name of Object.keys(nets)) {
+      for (const n of nets[name] || []) {
+        if (n && n.family === 'IPv4' && !n.internal) { ip = n.address; break }
+      }
+      if (ip) break
+    }
+    return {
+      deviceId,
+      hostname: os.hostname(),
+      os: os.type() + ' ' + os.release(),
+      ip: ip || '127.0.0.1'
+    }
+  })
 
   // 个人信息
   ipcMain.handle(IpcChannels.userUpdateProfile, (_e, patch) =>
@@ -379,7 +554,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     try {
       const rawUrl = String(url)
       const safeUrl = (u: string): string => String(u).replace(/token=[^&]+/g, 'token=***')
-      const name = basename(rawUrl.split('?')[0] ?? '').trim() || 'download.bin'
+      // URL 里的文件名可能是百分号编码（如 %E7%8E%84...xlsx），落盘前必须还原成中文，
+      // 否则保存下来的文件名会是一串 %XX，且同名去重会叠成 "xxx (6) (6).xlsx" 这种乱名。
+      const name = decodeUrlName(basename(rawUrl.split('?')[0] ?? '').trim()) || 'download.bin'
       // 统一下载到设置里的存储路径（downloadDir），与手动下载一致
       const dir = loadServerConfig().downloadDir
       await mkdir(dir, { recursive: true })
@@ -651,6 +828,58 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       void win.loadFile(join(__dirname, '../renderer/task.html'), { query })
     }
   })
+
+  // 打开独立 Office 预览窗口（PDF / Word / Excel）：复用 ChatWindow 内嵌预览组件的渲染逻辑，
+  // 仅改为独立 BrowserWindow 承载（组件以 standalone 模式隐藏弹窗外壳、全屏渲染）。
+  ipcMain.handle(IpcChannels.openPreviewWindow, (_e, params) => {
+    const p = (params ?? {}) as { kind?: unknown; path?: unknown; name?: unknown }
+    const kind = String(p.kind ?? '')
+    const path = String(p.path ?? '')
+    const name = String(p.name ?? '')
+    if (kind !== 'pdf' && kind !== 'word' && kind !== 'excel') return { ok: false, error: '未知预览类型: ' + kind }
+    if (!path) return { ok: false, error: '缺少本地文件路径' }
+    const win = new BrowserWindow({
+      width: 1100, height: 820, minWidth: 700, minHeight: 520,
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#f0f2f5',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    const query: Record<string, string> = { kind, path, name }
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/preview.html?${new URLSearchParams(query).toString()}`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/preview.html'), { query })
+    }
+    return { ok: true }
+  })
+
+  // 打开独立远程控制窗口（控制端）：无边框 + 主窗口样式 + 可缩放。
+  // 会话参数先暂存，远程窗口 ready 后经 remoteGetParams 取回，再由远程窗口内建 WebRTC 会话。
+  let pendingRemote: { room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null = null
+  ipcMain.handle(IpcChannels.openRemoteWindow, (_e, params) => {
+    const p = (params ?? {}) as { room?: unknown; iceServers?: unknown; mode?: unknown; peerId?: unknown; peerName?: unknown; meId?: unknown }
+    const room = String(p.room ?? '')
+    if (!room) return { ok: false, error: '缺少会话标识' }
+    pendingRemote = {
+      room,
+      iceServers: Array.isArray(p.iceServers) ? p.iceServers : [],
+      mode: p.mode === 'local' ? 'local' : 'remote',
+      peerId: Number(p.peerId) || 0,
+      peerName: String(p.peerName ?? ''),
+      meId: Number(p.meId) || 0
+    }
+    const win = new BrowserWindow({
+      width: 1240, height: 820, minWidth: 800, minHeight: 560,
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#0e0f12',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/remote.html`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/remote.html'))
+    }
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteGetParams, () => pendingRemote)
 
   // 打开独立全屏截屏窗口（固定、不可调整）——先把截图数据暂存，截图窗口 ready 后再取
   // 同时打开独立工具栏窗口（框选时用）；全屏编辑时隐藏独立窗口、工具栏内嵌在编辑窗口内部

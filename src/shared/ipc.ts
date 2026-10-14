@@ -12,8 +12,15 @@ export const IpcChannels = {
   serverGetSettings: 'server:settings:get',
   serverSaveSettings: 'server:settings:save',
   serverSetActiveCompany: 'server:setActiveCompany',
-  // 渲染进程错误日志（写 userData/logs/renderer-error.log）
-  logError: 'log:error',
+  // 开机自启
+  setAutoLaunch: 'app:setAutoLaunch',
+  getAutoLaunch: 'app:getAutoLaunch',
+  // 远程设备控制（被控端 → 服务端）
+  devRegister: 'dev:register',
+  devHeartbeat: 'dev:heartbeat',
+  devDevices: 'dev:devices',
+  devSignal: 'dev:signal',
+  devGetInfo: 'dev:info',
 
   // 账号
   serverRegister: 'server:register',
@@ -201,6 +208,12 @@ export const IpcChannels = {
   openMeetingWindow: 'win:openMeeting',
   /** 打开独立任务详情窗口 */
   openTaskWindow: 'win:openTask',
+  /** 打开独立 Office 预览窗口（PDF / Word / Excel），入参 { kind, path, name } */
+  openPreviewWindow: 'win:openPreview',
+  /** 打开独立远程控制窗口（控制端），入参 { room, iceServers, mode, peerId, peerName } */
+  openRemoteWindow: 'win:openRemote',
+  /** 远程窗口 ready 后取待处理会话参数 */
+  remoteGetParams: 'remote:getParams',
   /** 打开独立全屏截屏窗口（固定不可调整），入参 { dataUrl, width, height } */
   openScreenshotWindow: 'win:openScreenshot',
   /** 截屏窗口 ready 后取待处理截图数据 */
@@ -229,7 +242,11 @@ export const IpcChannels = {
   /** 读取品牌配置（软件名/图标，随安装包打包） */
   brandingGet: 'app:brandingGet',
   /** 在系统文件管理器中打开本地文件所在路径 */
-  appOpenFileLocation: 'app:openFileLocation'
+  appOpenFileLocation: 'app:openFileLocation',
+  // 远程控制输入注入（被控端 main）：start 设键鼠模式，event 分发控制指令，stop 复位+结束
+  remoteInputStart: 'remote:input:start',
+  remoteInputStop: 'remote:input:stop',
+  remoteInputEvent: 'remote:input:event'
 } as const
 
 /** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
@@ -290,7 +307,13 @@ export const IpcEvents = {
   /** 独立工具栏窗口 → 截图窗口：编辑命令 { action, value? } */
   screenshotToolbarCommand: 'shot:event:toolbarCommand',
   /** 截图窗口 → 工具栏窗口：已进入编辑，切换完整工具栏 */
-  screenshotToolbarEdit: 'shot:event:toolbarEdit'
+  screenshotToolbarEdit: 'shot:event:toolbarEdit',
+  /** 远程设备控制：服务端 → 被控端（客户端 app）事件 */
+  devView: 'dev:event:view',
+  devEnumerate: 'dev:event:enumerate',
+  devStart: 'dev:event:start',
+  devStop: 'dev:event:stop',
+  devSignal: 'dev:event:signal'
 } as const
 
 /** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */

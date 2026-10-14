@@ -10,6 +10,7 @@ import os from 'node:os'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { getClientLocation } from './location'
+import { decodeUrlPath } from '../url-name'
 import { constants, publicEncrypt, randomUUID } from 'node:crypto'
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { join, basename, normalize, sep } from 'node:path'
@@ -67,7 +68,6 @@ function safeLog(payload: unknown): string {
   try {
     let s = JSON.stringify(payload ?? {})
     s = s.replace(/"enc":"[^"]{8,}"/g, '"enc":"***"').replace(/token[=:][^"&,}]{6,}/gi, 'token=***')
-    if (s.length > 300) return s.slice(0, 300) + `…(len=${s.length})`
     return s
   } catch {
     return String(payload)
@@ -96,12 +96,12 @@ function emitWithAck<T = unknown>(
 ): Promise<Ack & { data?: T }> {
   return new Promise((resolve) => {
     const t0 = Date.now()
-    console.log(`[io:send] ${event} ${safeLog(payload)}`)
+    // console.log(`[io:send] ${event} ${safeLog(payload)}`)
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
-      console.log(`[io:ack] ${event} TIMEOUT after ${timeoutMs}ms`)
+      // console.log(`[io:ack] ${event} TIMEOUT after ${timeoutMs}ms`)
       resolve({ ok: false, error: '请求超时' })
     }, timeoutMs)
     socket.emit(event, payload, (raw: unknown) => {
@@ -109,7 +109,7 @@ function emitWithAck<T = unknown>(
       settled = true
       clearTimeout(timer)
       const ack = normalizeAck<T>(raw)
-      console.log(`[io:ack] ${event} ok=${ack.ok} err=${ack.error ?? ''} ${Date.now() - t0}ms`)
+      // console.log(`[io:ack] ${event} ok=${ack.ok} err=${ack.error ?? ''} ${Date.now() - t0}ms`)
       resolve(ack)
     })
   })
@@ -228,6 +228,51 @@ export class ServerClient extends EventEmitter {
   private token = ''
   /** 当前连接的 RSA 登录加密公钥（每次连接从服务端获取，连接销毁即失效） */
   private pubKey: string | null = null
+  /** token 过期巡检定时器（1 分钟一次；过期自动退出到登录页） */
+  private tokenWatcher: ReturnType<typeof setInterval> | null = null
+
+  /** 解析 JWT 的 exp（毫秒）。token 非 JWT 或解析失败返回 null（不触发过期巡检） */
+  private parseJwtExp(token: string): number | null {
+    try {
+      const part = token.split('.')[1]
+      if (!part) return null
+      const b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+      const json = decodeURIComponent(Array.prototype.map.call(atob(b64), (c: string) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join(''))
+      const payload = JSON.parse(json) as { exp?: unknown }
+      return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+    } catch { return null }
+  }
+
+  /** token 过期/丢失：清会话 → 渲染层回登录页（复用 sessionRevoked 事件链路） */
+  private onAuthExpired(reason: string): void {
+    if (!this.token && this._state.userId == null) return // 已登出
+    console.error(`[auth] 会话失效，自动退出到登录页：${reason}`)
+    this.token = ''
+    this.stopTokenWatcher()
+    this.setState({ token: undefined, userId: undefined, username: undefined, nick: undefined, error: reason })
+    this.emit('sessionRevoked', { sessionId: 0, reason: 'expired', at: new Date().toISOString() })
+  }
+
+  /** 1 分钟巡检：登录 token 过期 → 自动退出 */
+  private startTokenWatcher(): void {
+    if (this.tokenWatcher) return
+    this.tokenWatcher = setInterval(() => {
+      const t = this.token
+      if (!t) return
+      const exp = this.parseJwtExp(t)
+      if (exp != null && Date.now() > exp) this.onAuthExpired('登录 token 已过期')
+    }, 60_000)
+  }
+
+  private stopTokenWatcher(): void {
+    if (this.tokenWatcher) { clearInterval(this.tokenWatcher); this.tokenWatcher = null }
+  }
+
+  /** 无 token（上传/下载等受保护操作）→ 记录日志并触发自动退出 */
+  private logNoToken(what: string): void {
+    console.error(`[auth] ${what} 失败：无会话 token（会话已失效），触发自动退出`)
+    this.onAuthExpired(`${what} 无 token，会话已失效`)
+  }
 
   get state(): ServerClientState {
     return { ...this._state }
@@ -282,13 +327,17 @@ export class ServerClient extends EventEmitter {
       if (this.token) {
         void this.authMe().then((ack) => {
           if (!ack.ok) {
-            this.setState({ state: 'connected', connected: true, userId: undefined, error: ack.error || '会话已失效' })
+            console.error(`[auth] 重连后 auth:me 校验失败：${ack.error || '会话已失效'}，自动退出`)
+            this.onAuthExpired(ack.error || '会话已失效')
+          } else {
+            this.startTokenWatcher()
           }
         })
       }
     })
     socket.on('disconnect', (reason) => {
       console.log(`[io:lifecycle] disconnect reason=${reason}`)
+      this.stopTokenWatcher()
       this.setState({
         state: 'disconnected',
         connected: false,
@@ -347,6 +396,18 @@ export class ServerClient extends EventEmitter {
     socket.on('plan:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('plansUpdated', d))
     socket.on('doc:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('docsUpdated', d))
     socket.on('wiki:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('wikiUpdated', d))
+    // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl 消费）
+    socket.on('dev:view', (d: { deviceId?: string }) => this.emit('devView', d))
+    socket.on('dev:enumerate', (d: { deviceId?: string }) => this.emit('devEnumerate', d))
+    socket.on('dev:start', (d: { deviceId?: string; kind?: string; device?: unknown }) => this.emit('devStart', d))
+    socket.on('dev:stop', (d: { deviceId?: string }) => this.emit('devStop', d))
+    socket.on('dev:signal', (d: { deviceId?: string; signal?: unknown }) => this.emit('devSignal', d))
+    // 控制端请求在被控端执行命令 → 主进程执行后经 devExecResult 回传
+    socket.on('dev:exec', (d: { deviceId?: string; shell?: string; cmd?: string }) => this.emit('devExec', d))
+    // 交互终端：控制端输入 → 主进程写入常驻 shell stdin；输出经 devTermOut 回传
+    socket.on('dev:termOpen', (d: { deviceId?: string; shell?: string }) => this.emit('devTermOpen', d))
+    socket.on('dev:termIn', (d: { deviceId?: string; data?: string }) => this.emit('devTermIn', d))
+    socket.on('dev:termClose', (d: { deviceId?: string }) => this.emit('devTermClose', d))
   }
 
   disconnect(): void {
@@ -468,6 +529,7 @@ export class ServerClient extends EventEmitter {
 
   async logout(): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
+    this.stopTokenWatcher()
     const ack = await emitWithAck(this.socket, 'auth:logout', {})
     this.token = ''
     this.setState({ token: undefined, userId: undefined, username: undefined, nick: undefined, avatar: undefined, connected: false, state: 'connected' })
@@ -836,7 +898,7 @@ export class ServerClient extends EventEmitter {
   // ─── 文件上传（HTTP 中继） ──────────────────────────────
 
   async uploadFile(filePath: string, companyId = 0): Promise<Ack & { data?: { url?: string; uuid?: string; fileName?: string; size?: number } }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('uploadFile'); return { ok: false, error: '未登录（无会话 token）' } }
     const t0 = Date.now()
     try {
       const buf = await readFile(filePath)
@@ -871,7 +933,7 @@ export class ServerClient extends EventEmitter {
     companyId = 0,
     relativePath = ''
   ): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> {
-    if (!this.token) return { ok: false, error: '未登录（无会话 token，请重新登录）' }
+    if (!this.token) { this.logNoToken('uploadFileChunked'); return { ok: false, error: '未登录（无会话 token，请重新登录）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
     if (!base) return { ok: false, error: '未配置服务器地址' }
     const authQ = `token=${encodeURIComponent(this.token)}&company=${companyId}`
@@ -926,7 +988,7 @@ export class ServerClient extends EventEmitter {
 
   // ─── 文件夹下载（HTTP：清单 → 逐文件落盘到配置目录） ──────
   async downloadFile(url: string): Promise<{ ok: boolean; error?: string; buf?: Buffer }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('downloadFile'); return { ok: false, error: '未登录（无会话 token）' } }
     try {
       const fr = await httpGet(String(url))
       if (fr.status >= 200 && fr.status < 300) return { ok: true, buf: fr.buf }
@@ -937,7 +999,7 @@ export class ServerClient extends EventEmitter {
   }
 
   async downloadFolder(relPath: string, destDir: string): Promise<{ ok: boolean; error?: string; destDir?: string; count?: number }> {
-    if (!this.token) return { ok: false, error: '未登录' }
+    if (!this.token) { this.logNoToken('downloadFolder'); return { ok: false, error: '未登录（无会话 token）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
     if (!base) return { ok: false, error: '未配置服务器地址' }
     try {
@@ -952,7 +1014,8 @@ export class ServerClient extends EventEmitter {
       let count = 0
       for (const f of files) {
         if (!f.url || !f.relPath) continue
-        const localRel = stripCompany(f.relPath)
+        // 服务端返回的相对路径可能是百分号编码的，落盘前逐段还原中文
+        const localRel = decodeUrlPath(stripCompany(f.relPath))
         if (!localRel) continue
         const target = normalize(join(destDir, localRel))
         const baseNorm = normalize(destDir)
@@ -1009,9 +1072,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'rtc:end', { roomId })
   }
 
-  async rtcDmCall(userId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> {
+  async rtcDmCall(userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck<{ room: RtcRoom; kind: RtcKind }>(this.socket, 'rtc:dmCall', { userId, kind })
+    return emitWithAck<{ room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] }>(this.socket, 'rtc:dmCall', { userId, kind, password })
   }
 
   async rtcDmAnswer(roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> {
@@ -1027,6 +1090,44 @@ export class ServerClient extends EventEmitter {
   async rtcChatMessage(roomId: string, content: string): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'rtc:chatMessage', { roomId, content })
+  }
+
+  // ─── 远程设备控制（被控端上报/信令） ───────────────────────
+  async devRegister(payload: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack & { status?: string }> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:register', payload)
+  }
+  async devHeartbeat(deviceId: string | { deviceId?: unknown; name?: unknown; os?: unknown; ip?: unknown; username?: unknown }): Promise<void> {
+    if (!this.socket) return
+    if (typeof deviceId === 'string') this.socket.emit('dev:heartbeat', { deviceId })
+    else this.socket.emit('dev:heartbeat', deviceId) // 携带完整设备信息，服务端按 deviceId upsert
+  }
+  async devDevices(deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:devices', { deviceId, cams, mics })
+  }
+  async devSignal(deviceId: string, signal: unknown): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:signal', { deviceId, signal })
+  }
+  async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack & { status?: string }> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(this.socket, 'dev:sys', payload)
+  }
+  /** 被控端把远程命令执行结果回传（经服务端转发给控制端） */
+  async devExecResult(deviceId: string, result: { ok: boolean; exitCode: number; stdout: string; stderr: string }): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:execResult', { deviceId, ...result })
+  }
+  /** 被控端实时回传终端输出（stdout/stderr 分路） */
+  async devTermOut(deviceId: string, data: string, isErr: boolean): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:termOut', { deviceId, data, isErr })
+  }
+  /** 被控端终端会话结束通知 */
+  async devTermClose(deviceId: string, code: number): Promise<void> {
+    if (!this.socket) return
+    this.socket.emit('dev:termClose', { deviceId, code })
   }
 
   // ─── 个人信息 ───────────────────────────────────────────

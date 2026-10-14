@@ -278,7 +278,7 @@ export interface SessionRevokedEvent {
 
 // ─── WebRTC 信令 ─────────────────────────────────────────
 
-export type RtcKind = 'video' | 'voice'
+export type RtcKind = 'video' | 'voice' | 'remote'
 export type RtcType = 'dm' | 'conf' | 'group'
 
 export interface RtcRoom {

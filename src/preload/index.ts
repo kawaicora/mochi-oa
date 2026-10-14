@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
 import type {
   Ack,
@@ -41,10 +41,10 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api = {
   // 应用 / 窗口
   getAppInfo: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke(IpcChannels.appInfo),
+  // 主进程日志转发到渲染层控制台：主进程 console 广播 '__main_console'，渲染层 console.log 显示
+  onMainConsole: (cb: (line: string) => void): (() => void) => subscribe('__main_console', cb),
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   getBranding: (): Promise<{ name: string; iconPath: string | null }> => ipcRenderer.invoke(IpcChannels.brandingGet),
-  // 渲染进程错误日志（写 userData/logs/renderer-error.log）
-  logError: (msg: string): void => { ipcRenderer.send(IpcChannels.logError, msg) },
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),
   toggleMaximize: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winToggleMaximize),
   closeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winClose),
@@ -54,6 +54,12 @@ const api = {
     ipcRenderer.invoke(IpcChannels.openMeetingWindow, params),
   openTaskWindow: (taskId: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
+  openPreviewWindow: (params: { kind: 'pdf' | 'word' | 'excel'; path: string; name: string }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.openPreviewWindow, params),
+  openRemoteWindow: (params: { room: string; iceServers: unknown[]; mode: 'remote' | 'local'; peerId: number; peerName?: string; meId: number }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.openRemoteWindow, params),
+  remoteGetParams: (): Promise<{ room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null> =>
+    ipcRenderer.invoke(IpcChannels.remoteGetParams),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openScreenshotWindow, payload),
   screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
@@ -84,6 +90,9 @@ const api = {
   getWindowState: (): Promise<{ focused: boolean; visible: boolean; minimized: boolean }> =>
     ipcRenderer.invoke(IpcChannels.getWindowState),
   focusWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IpcChannels.focusWindow),
+  getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke(IpcChannels.getAutoLaunch),
+  setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.setAutoLaunch, openAtLogin),
 
   // 连接 / 状态 / 设置
   serverConnect: (serverUrl: string, token?: string): Promise<void> =>
@@ -271,6 +280,15 @@ const api = {
   pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePick, filter ?? null),
   pickFiles: (filter?: 'image' | 'video' | 'audio'): Promise<string[]> => ipcRenderer.invoke(IpcChannels.filePickMulti, filter ?? null),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.filePickFolder),
+  // 拖放上传：从 File 对象取磁盘绝对路径（Electron 30+ 用 webUtils；旧版回退 File.path）
+  pathForFile: (file: File): string => {
+    try {
+      if (typeof webUtils?.getPathForFile === 'function') return webUtils.getPathForFile(file)
+    } catch {
+      /* 回退到旧版 File.path */
+    }
+    return (file as unknown as { path?: string }).path ?? ''
+  },
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     ipcRenderer.invoke(IpcChannels.serverListFolderFiles, folderPath),
   serverDownloadFolder: (relPath: string): Promise<Ack & { data?: { destDir?: string; count?: number } }> =>
@@ -292,14 +310,31 @@ const api = {
     ipcRenderer.invoke(IpcChannels.rtcLeave, roomId),
   rtcEnd: (roomId: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcEnd, roomId),
-  rtcDmCall: (userId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> =>
-    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind),
+  rtcDmCall: (userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> =>
+    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind, password ?? undefined),
   rtcDmAnswer: (roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
     ipcRenderer.invoke(IpcChannels.rtcDmAnswer, roomId, accept),
   rtcGroupCall: (groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
     ipcRenderer.invoke(IpcChannels.rtcGroupCall, groupId, kind),
   rtcChatMessage: (roomId: string, content: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcChatSend, roomId, content),
+  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
+  remoteInputStart: (mode: 'remote' | 'local'): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputStart, mode),
+  remoteInputStop: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputStop),
+  remoteInputEvent: (evt: Record<string, unknown>): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputEvent, evt),
+  // 远程设备控制（被控端）
+  devGetInfo: (): Promise<{ deviceId: string; hostname: string; os: string; ip: string }> =>
+    ipcRenderer.invoke(IpcChannels.devGetInfo),
+  devRegister: (p: { deviceId: string; name: string; os: string; ip: string; username: string }): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devRegister, p),
+  devHeartbeat: (info: { deviceId: string; name?: string; os?: string; ip?: string; username?: string }): Promise<void> => ipcRenderer.invoke(IpcChannels.devHeartbeat, info),
+  devDevices: (deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devDevices, deviceId, cams, mics),
+  devSignal: (deviceId: string, signal: unknown): Promise<Ack> =>
+    ipcRenderer.invoke(IpcChannels.devSignal, deviceId, signal),
 
   // 推送订阅
   onServerState: (l: (s: ServerClientState) => void) => subscribe<ServerClientState>(IpcEvents.serverState, l),
@@ -326,6 +361,12 @@ const api = {
   onRtcEnded: (l: (d: RtcEndedEvent) => void) => subscribe<RtcEndedEvent>(IpcEvents.rtcEnded, l),
   onRtcGroupCall: (l: (d: RtcGroupCallEvent) => void) => subscribe<RtcGroupCallEvent>(IpcEvents.rtcGroupCall, l),
   onRtcChatMessage: (l: (d: RtcChatMessageEvent) => void) => subscribe<RtcChatMessageEvent>(IpcEvents.rtcChatMessage, l),
+  // 远程设备控制（被控端）事件订阅
+  onDevView: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devView, l),
+  onDevEnumerate: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devEnumerate, l),
+  onDevStart: (l: (d: { deviceId?: string; kind?: string; device?: unknown }) => void) => subscribe<{ deviceId?: string; kind?: string; device?: unknown }>(IpcEvents.devStart, l),
+  onDevStop: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devStop, l),
+  onDevSignal: (l: (d: { deviceId?: string; signal?: unknown }) => void) => subscribe<{ deviceId?: string; signal?: unknown }>(IpcEvents.devSignal, l),
   onGroupMembersUpdated: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupMembersUpdated, l),
   onGroupInvite: (l: (d: GroupInviteEvent) => void) => subscribe<GroupInviteEvent>(IpcEvents.groupInvite, l),
   onGroupDissolved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupDissolved, l),
