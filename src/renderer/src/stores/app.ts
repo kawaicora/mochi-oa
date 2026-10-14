@@ -22,6 +22,7 @@ import type {
 } from '../../../shared/server-types'
 import type { NotifTarget } from '../../../shared/ipc'
 import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type NotifyPolicy } from '../utils/notify-manager'
+import { mergeReadPosition } from '../utils/read-receipt'
 
 /** 从 ack 提取 data 载荷 */
 function d<T>(ack: unknown): T | undefined {
@@ -325,16 +326,12 @@ export const useAppStore = defineStore('app', () => {
   // 位置只前进不后退：乱序/重复回执不会把「已读」打回「未读」。
   const mergeReceipt = (list: ReadReceipt[], userId: number, lastReadMessageId: number | null): void => {
     const uid = Number(userId)
-    const next = lastReadMessageId != null && lastReadMessageId > 0 ? lastReadMessageId : null
     const i = list.findIndex((r) => r.userId === uid)
     if (i < 0) {
-      list.push({ userId: uid, lastReadMessageId: next })
+      list.push({ userId: uid, lastReadMessageId: mergeReadPosition(null, lastReadMessageId) })
       return
     }
-    const prev = list[i]!.lastReadMessageId
-    // null 视为「无位置信息」，保留原值；否则取较大者
-    const merged = next == null ? prev : prev != null && prev > next ? prev : next
-    list[i]!.lastReadMessageId = merged ?? null
+    list[i]!.lastReadMessageId = mergeReadPosition(list[i]!.lastReadMessageId, lastReadMessageId)
   }
   window.pantry.onServerChatReadReceipt((ev) => {
     const id = Number(ev.conversationId)

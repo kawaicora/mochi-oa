@@ -11,6 +11,7 @@ import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 import { convKey } from '../utils/notify-manager'
+import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -129,7 +130,7 @@ const newBelow = ref(false)
 function nearBottom(): boolean {
   const el = msgListEl.value
   if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX
+  return isNearBottom(el.scrollHeight, el.scrollTop, el.clientHeight, NEAR_BOTTOM_PX)
 }
 function shouldStickToBottom(): boolean {
   const last = app.messages[app.messages.length - 1]
@@ -212,13 +213,11 @@ function flushRead(): void {
   if (!sel || sel.conversationId <= 0) return
   // 窗口被最小化/遮挡时 Chromium 会把页面标成 hidden：这时不算「看过」
   if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-  let maxId = 0
-  for (const id of visibleRowIds.values()) if (id > maxId) maxId = id
-  if (maxId <= 0) return
   const known = Math.max(sentRead.convId === sel.conversationId ? sentRead.id : 0, myReadPos(sel.conversationId))
-  if (maxId <= known) return
-  sentRead = { convId: sel.conversationId, id: maxId }
-  void app.markRead(sel.conversationId, maxId)
+  const pos = readPositionToReport(visibleRowIds.values(), known)
+  if (pos == null) return
+  sentRead = { convId: sel.conversationId, id: pos }
+  void app.markRead(sel.conversationId, pos)
 }
 
 /** 窗口重新可见（最小化/遮挡后回来）不会有新的 intersection 回调，需主动补一次判定 */
