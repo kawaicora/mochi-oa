@@ -8,7 +8,14 @@
  */
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import PRESETS from './docx/presets.json'
-import { renderPreset, srcRectCss, outerShdwCss, maskPolygonPts, wrapInsetAtMid } from './docx/geom.mjs'
+import {
+  renderPreset,
+  srcRectCss,
+  outerShdwCss,
+  maskPolygonPts,
+  wrapInsetAtMid,
+  type GeomPreset
+} from './docx/geom.mjs'
 import { applyAutoPagination, applyFontFallback } from './docx/pagination.mjs'
 import { collectInk, inkToSvgPaths } from './docx/ink.mjs'
 
@@ -904,7 +911,7 @@ function applyDrawingAnchors(host: HTMLElement, anchors: DrawingAnchor[]): numbe
       }
       // prstGeom 预设形状（rect/snip2DiagRect/roundRect/ellipse/star/…）：
       // 查预设几何表 → 求值出 SVG 轮廓，按形状框拉伸绘制（替代原来的纯色矩形 + CSS 近似遮罩）。
-      const presetData = (PRESETS as Record<string, { av: unknown; gd: unknown; rect: unknown; paths: unknown }>)[a.geom]
+      const presetData = (PRESETS as Record<string, GeomPreset>)[a.geom]
       if (presetData && a.geom !== 'line') {
         const r = renderPreset(presetData, a.geomAv)
         const shapeBox = document.createElement('div')
