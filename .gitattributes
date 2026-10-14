@@ -1,0 +1,12 @@
+# Git 属性配置
+#
+# jinmo 分支的品牌差异化文件：小墨（xiaomo-oa / 小墨办公 / com.jinmo.oa）。
+# main 分支的品牌不同，两边都会改动这个文件，于是每次把 main 合并进 jinmo 都会冲突。
+#
+# merge=ours：该文件发生内容冲突时，保留「当前分支（jinmo）」的版本，永不冲突。
+# 需要配套的本地配置（每个 clone 都要执行一次，git 的 merge driver 不能随仓库提交）：
+#     git config merge.ours.driver true
+# 缺失该配置时，git 会退回到默认文本合并，也就是又会冲突。
+#
+# 验证：git check-attr merge -- resources/brand.json  应输出 merge: ours
+resources/brand.json merge=ours
