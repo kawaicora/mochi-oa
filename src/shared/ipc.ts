@@ -300,6 +300,8 @@ export const IpcEvents = {
   userProfileUpdated: 'server:event:user:profileUpdated',
   /** 分块上传进度：{ uploadId, fileName, percent, done? } */
   uploadProgress: 'server:event:uploadProgress',
+  /** 下载到本地的进度：{ url, received, total, percent }（total=0 表示未知，做不确定进度） */
+  downloadProgress: 'server:event:downloadProgress',
   /** 托盘"设置"入口，通知 renderer 打开设置面板 */
   uiOpenSettings: 'ui:event:openSettings',
   /** 截屏窗口保存成功 → 通知主窗口把临时 PNG 发送到当前会话 */

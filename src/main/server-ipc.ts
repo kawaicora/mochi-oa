@@ -549,8 +549,26 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     )
   )
   // 下载远程文件到本地存储路径（图片/视频/3D 预览用），返回 {ok,path,fileUrl,error}
-  ipcMain.handle(IpcChannels.serverDownloadFile, async (_e, url) => {
+  //
+  // 下载期间向发起窗口推送 downloadProgress：大文件（几十 MB 的 Office 文档/视频）
+  // 纯下载要好几秒到几十秒，界面上没有任何反馈会被当成「点了没反应」的 bug。
+  ipcMain.handle(IpcChannels.serverDownloadFile, async (e, url) => {
     const t0 = Date.now()
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const urlStr = String(url)
+    // 节流：>=120ms 或整数百分比变化才推一次，避免大文件把 IPC 打满
+    let lastAt = 0
+    let lastPct = Number.NaN
+    const onProgress = (received: number, total: number): void => {
+      const pct = total > 0 ? Math.floor((received / total) * 100) : -1
+      const now = Date.now()
+      if (now - lastAt < 120 && pct === lastPct) return
+      lastAt = now
+      lastPct = pct
+      if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+        win.webContents.send(IpcEvents.downloadProgress, { url: urlStr, received, total, percent: pct })
+      }
+    }
     try {
       const rawUrl = String(url)
       const safeUrl = (u: string): string => String(u).replace(/token=[^&]+/g, 'token=***')
@@ -577,7 +595,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           break
         }
       }
-      const dl = await serverClient.downloadFile(rawUrl)
+      const dl = await serverClient.downloadFile(rawUrl, onProgress)
       if (!dl.ok || !dl.buf) {
         console.log(`[fs:download] 失败 url=${safeUrl(rawUrl)} err=${dl.error ?? ''} ${Date.now() - t0}ms`)
         return { ok: false, error: dl.error || '下载失败' }

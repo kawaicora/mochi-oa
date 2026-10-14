@@ -28,6 +28,44 @@ function flashToast(msg: string): void {
   dlToastTimer = setTimeout(() => { dlToast.value = '' }, 6000)
 }
 
+/**
+ * 下载到本地的进度卡片。
+ * 右键「下载 / 打开文件所在路径 / 预览」在缓存未命中时都要先把文件从服务端拉下来，
+ * 大文件要好几秒到几十秒；不给进度的话界面毫无反应，会被当成点了没反应的 bug。
+ * 只显示「本次操作发起的那一个下载」（按 url 匹配），后台自动下载不打扰界面。
+ */
+const dlProgress = ref<{ url: string; name: string; received: number; total: number; percent: number } | null>(null)
+
+/** 标记开始下载（返回 true 表示需要显示进度卡片） */
+function beginDownload(url: string, name: string): void {
+  dlProgress.value = { url, name, received: 0, total: 0, percent: -1 }
+}
+function endDownload(): void {
+  dlProgress.value = null
+}
+function dlPercentText(): string {
+  const p = dlProgress.value
+  if (!p) return ''
+  if (p.percent < 0) return p.received > 0 ? `${fmtSize(p.received)}（大小未知）` : '正在连接…'
+  return `${p.percent}% · ${fmtSize(p.received)}${p.total > 0 ? ' / ' + fmtSize(p.total) : ''}`
+}
+function fmtSize(n: number): string {
+  if (!n || n < 0) return '0 B'
+  if (n < 1024) return n + ' B'
+  if (n < 1048576) return (n / 1024).toFixed(0) + ' KB'
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'
+  return (n / 1073741824).toFixed(2) + ' GB'
+}
+// 订阅主进程的下载进度：只更新「本次操作发起的那一个下载」，后台自动下载不打扰界面
+const offDownloadProgress = window.pantry.onDownloadProgress((d) => {
+  const cur = dlProgress.value
+  if (!cur || cur.url !== d.url) return
+  cur.received = d.received
+  cur.total = d.total
+  cur.percent = d.percent
+})
+onBeforeUnmount(() => { offDownloadProgress() })
+
 const selected = computed(() => app.selected)
 const myId = computed(() => server.state.userId)
 
@@ -389,7 +427,10 @@ async function onDownload(): Promise<void> {
     else flashToast(`下载失败：${r.error || '未知错误'}`)
   } else {
     // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
-    const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
+    const url = server.absFileUrl(m.content)
+    beginDownload(url, fileNameOf(m.content))
+    const r = await window.pantry.serverDownloadFile(url)
+    endDownload()
     if (r.ok && r.path) flashToast(`已下载 → ${r.path}`)
     else flashToast(`下载失败：${r.error || '未知错误'}`)
   }
@@ -408,7 +449,10 @@ async function onOpenFileLocation(): Promise<void> {
       const r = await app.downloadFolder(m.content)
       if (r.ok && r.destDir) path = r.destDir
     } else {
-      const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
+      const url = server.absFileUrl(m.content)
+      beginDownload(url, fileNameOf(m.content))
+      const r = await window.pantry.serverDownloadFile(url)
+      endDownload()
       if (r.ok && r.path) path = r.path
     }
   }
@@ -489,7 +533,10 @@ async function ensureLocalPath(m: { content: string; id: string }): Promise<stri
   const cached = app.localCache[m.id]?.path
   if (cached) return cached
   // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
-  const r = await window.pantry.serverDownloadFile(server.absFileUrl(m.content))
+  const url = server.absFileUrl(m.content)
+  beginDownload(url, fileNameOf(m.content))
+  const r = await window.pantry.serverDownloadFile(url)
+  endDownload()
   return r.ok && r.path ? r.path : null
 }
 
@@ -697,6 +744,21 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
       <button class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
+    </div>
+
+    <!-- 下载进度卡片：大文件下载期间给出明确反馈，避免"点了没反应"的错觉 -->
+    <div v-if="dlProgress" class="dl-progress">
+      <div class="dl-progress-name">
+        <i class="fas fa-download"></i>&nbsp;正在下载 {{ dlProgress.name }}
+      </div>
+      <div class="dl-progress-bar">
+        <div
+          class="dl-progress-fill"
+          :class="{ indet: dlProgress.percent < 0 }"
+          :style="dlProgress.percent >= 0 ? { width: dlProgress.percent + '%' } : undefined"
+        ></div>
+      </div>
+      <div class="dl-progress-meta">{{ dlPercentText() }}<span class="dl-progress-hint">下载完成后自动继续</span></div>
     </div>
 
     <!-- 下载结果提示 -->
@@ -1053,6 +1115,61 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 .msg-folder-dl:hover {
   background: var(--dt-primary-hover);
 }
+/* 下载进度卡片（大文件下载期间） */
+.dl-progress {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(420px, 80%);
+  background: rgba(20, 24, 33, 0.94);
+  color: #fff;
+  font-size: 13px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  z-index: 131;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+.dl-progress-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dl-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.dl-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--dt-primary, #0089ff);
+  transition: width 0.15s linear;
+}
+/* 服务端没给 content-length 时：不确定进度，来回滑动 */
+.dl-progress-fill.indet {
+  width: 35%;
+  animation: dl-indet 1.1s ease-in-out infinite;
+}
+@keyframes dl-indet {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+.dl-progress-meta {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+}
+.dl-progress-hint { flex-shrink: 0; opacity: 0.7; }
+
 /* 下载结果提示 */
 .dl-toast {
   position: absolute;

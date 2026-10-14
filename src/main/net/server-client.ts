@@ -180,8 +180,10 @@ function parseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-/** 用 node:http/https 发 GET，返回状态码 + 原始 Buffer（文件内容为二进制）。 */
-function httpGet(url: string): Promise<{ status: number; buf: Buffer }> {
+/** 用 node:http/https 发 GET，返回状态码 + 原始 Buffer（文件内容为二进制）。
+ *  onProgress 有传时按 (已接收字节, 总字节) 回调；总字节取自 content-length，
+ *  服务端没给（分块传输）时为 0，界面据此做「不确定进度」。 */
+function httpGet(url: string, onProgress?: (received: number, total: number) => void): Promise<{ status: number; buf: Buffer }> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now()
     let u: URL
@@ -194,7 +196,14 @@ function httpGet(url: string): Promise<{ status: number; buf: Buffer }> {
     const mod = u.protocol === 'https:' ? httpsRequest : httpRequest
     const req = mod(u, { method: 'GET' }, (res) => {
       const chunks: Buffer[] = []
-      res.on('data', (c) => chunks.push(Buffer.from(c)))
+      const total = Number(res.headers['content-length'] ?? 0) || 0
+      let received = 0
+      res.on('data', (c) => {
+        const b = Buffer.from(c)
+        chunks.push(b)
+        received += b.length
+        if (onProgress) onProgress(received, total)
+      })
       res.on('end', () => {
         const buf = Buffer.concat(chunks)
         console.log(`[http] GET ${safeUrl(url)} -> ${res.statusCode ?? 0} ${buf.length}B ${Date.now() - t0}ms`)
@@ -987,10 +996,10 @@ export class ServerClient extends EventEmitter {
   }
 
   // ─── 文件夹下载（HTTP：清单 → 逐文件落盘到配置目录） ──────
-  async downloadFile(url: string): Promise<{ ok: boolean; error?: string; buf?: Buffer }> {
+  async downloadFile(url: string, onProgress?: (received: number, total: number) => void): Promise<{ ok: boolean; error?: string; buf?: Buffer }> {
     if (!this.token) { this.logNoToken('downloadFile'); return { ok: false, error: '未登录（无会话 token）' } }
     try {
-      const fr = await httpGet(String(url))
+      const fr = await httpGet(String(url), onProgress)
       if (fr.status >= 200 && fr.status < 300) return { ok: true, buf: fr.buf }
       return { ok: false, error: `下载失败（http ${fr.status}）` }
     } catch (err) {
