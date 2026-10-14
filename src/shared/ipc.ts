@@ -249,6 +249,8 @@ export const IpcChannels = {
   appClipboardWriteImage: 'app:clipboardWriteImage',
   /** 把一段二进制写成临时文件并返回路径（粘贴剪贴板图片发送、主进程不碰渲染层 blob） */
   appWriteTempFile: 'app:writeTempFile',
+  /** 解析通知提示音该播哪个文件：自定义存在用它，丢失/为空自动回退 resources 里的默认 */
+  appResolveNotifySound: 'app:resolveNotifySound',
   // 远程控制输入注入（被控端 main）：start 设键鼠模式，event 分发控制指令，stop 复位+结束
   remoteInputStart: 'remote:input:start',
   remoteInputStop: 'remote:input:stop',
@@ -259,6 +261,38 @@ export const IpcChannels = {
 export type NotifTarget =
   | { kind: 'main'; nav?: string; conversationId?: number }
   | { kind: 'meeting'; mode: 'create' | 'join'; callType?: 'voice' | 'video'; meetingNo?: string; password?: string }
+
+/**
+ * 通知类型：通知管理器按类型区分处理（提示音、托盘闪动、紧急程度、免打扰策略）。
+ *   - message  普通会话消息（受全局/会话免打扰影响）
+ *   - call     单人语音/视频来电（来电优先级最高，不受免打扰静音）
+ *   - meeting  会议 / 群通话邀请（同上）
+ *   - task     任务提醒
+ *   - alarm    闹钟：闹钟自己会播放铃声（见 utils/alarms.ts），不走通知管理器
+ *   - system   其他系统级提示（新设备登录、远程控制请求等）
+ */
+export type NotifKind = 'message' | 'call' | 'meeting' | 'task' | 'alarm' | 'system'
+
+/** 通知管理器入参（渲染层 → 主进程） */
+export interface NotifyPayload {
+  kind?: NotifKind
+  title: string
+  body: string
+  target?: NotifTarget
+  tray?: boolean
+  /** 免打扰判定已在渲染层完成；这里只描述「显示行为」 */
+  force?: boolean
+}
+
+/** 各种通知类型的中文名（日志与调试用） */
+export const NOTIF_KIND_LABEL: Record<NotifKind, string> = {
+  message: '消息',
+  call: '电话',
+  meeting: '会议',
+  task: '任务',
+  alarm: '闹钟',
+  system: '系统'
+}
 
 /** 主进程 → 渲染进程推送事件 */
 export const IpcEvents = {

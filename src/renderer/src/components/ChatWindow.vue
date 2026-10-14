@@ -10,6 +10,7 @@ import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
+import { convKey } from '../utils/notify-manager'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -523,6 +524,29 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
   }
 }
 
+/** 取文件名用于展示 */
+function shortName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+/** 当前会话的本地设置 key（group:<id> / dm:<id>），免打扰与自定义铃声都用它 */
+const currentConvKey = computed(() => convKey(selected.value?.kind ?? 'group', selected.value?.conversationId ?? 0))
+
+/** 为本会话挑选专属来电铃声（选空文件不生效；想清除用设置里的「恢复默认」或再次点选取消） */
+async function pickConvRing(): Promise<void> {
+  const key = currentConvKey.value
+  const cur = app.convRingOf(key)
+  const p = await window.pantry.pickFile()
+  if (!p) return
+  if (p === cur) {
+    await app.setConvRing(key, '') // 再选一次同一个文件 = 取消专属铃声
+    flashToast('已取消本会话专属铃声')
+    return
+  }
+  await app.setConvRing(key, p)
+  flashToast(`本会话铃声：${shortName(p)}`)
+}
+
 function fileNameOf(url: string): string {
   const seg = url.split('/').pop() || ''
   return decodeURIComponent(seg)
@@ -659,6 +683,26 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <header class="chat-head">
         <div class="chat-title">{{ selected.name }}</div>
         <div class="chat-actions">
+          <!-- 本会话免打扰（群/个人都适用，只影响这一个会话） -->
+          <button
+            v-if="selected.conversationId > 0"
+            class="chat-act"
+            :class="{ on: app.isConvMuted(currentConvKey) }"
+            :title="app.isConvMuted(currentConvKey) ? '已免打扰（点击恢复提醒）' : '对本会话开启免打扰'"
+            @click="app.setConvMuted(currentConvKey, !app.isConvMuted(currentConvKey))"
+          >
+            <i :class="app.isConvMuted(currentConvKey) ? 'fas fa-bell-slash' : 'far fa-bell'"></i>
+          </button>
+          <!-- 本会话自定义来电铃声（个人/群各自不同） -->
+          <button
+            v-if="selected.conversationId > 0"
+            class="chat-act"
+            :class="{ on: !!app.convRingOf(currentConvKey) }"
+            :title="app.convRingOf(currentConvKey) ? '本会话铃声：' + shortName(app.convRingOf(currentConvKey)) : '为本会话设置专属铃声'"
+            @click="pickConvRing"
+          >
+            <i class="fas fa-music"></i>
+          </button>
           <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="群设置" @click="app.openGroupSettings(selected.groupId!, selected.name)">
             <i class="fas fa-cog"></i>
           </button>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
+import { IpcChannels, IpcEvents, type NotifKind, type NotifTarget } from '../shared/ipc'
 import type {
   Ack,
   AuthAck,
@@ -85,8 +85,11 @@ const api = {
   /** 工具栏窗口订阅“进入编辑”通知（返回退订函数） */
   onScreenshotToolbarEdit: (l: () => void): (() => void) => subscribe(IpcEvents.screenshotToolbarEdit, l),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起
-  notify: (opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
+  notify: (opts: { kind?: NotifKind; title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.notify, opts),
+  // 解析要播放的提示音文件：自定义存在用它，丢失/为空自动回退 resources 里的默认
+  resolveNotifySound: (opts: { kind?: NotifKind; customPath?: string }): Promise<{ ok: boolean; path?: string; source?: 'custom' | 'fallback' | 'default'; missing?: string; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.appResolveNotifySound, opts),
   getWindowState: (): Promise<{ focused: boolean; visible: boolean; minimized: boolean }> =>
     ipcRenderer.invoke(IpcChannels.getWindowState),
   focusWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IpcChannels.focusWindow),

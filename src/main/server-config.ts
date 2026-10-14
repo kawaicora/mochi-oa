@@ -37,7 +37,14 @@ function defaultConfig(): ServerSettings {
     downloadDir: defaultDownloadDir(),
     autoDownload: true,
     audioSampleRate: 48000,
-    audioChannels: 2
+    audioChannels: 2,
+    notifySound: true,
+    callSound: true,
+    messageSoundFile: '',
+    callSoundFile: '',
+    dnd: false,
+    dndConvs: [],
+    convRings: {}
   }
 }
 
@@ -63,7 +70,23 @@ export function loadServerConfig(): ServerSettings {
       downloadDir: typeof parsed.downloadDir === 'string' && parsed.downloadDir.trim() ? parsed.downloadDir.trim() : fallback.downloadDir,
       autoDownload: typeof parsed.autoDownload === 'boolean' ? parsed.autoDownload : true,
       audioSampleRate: typeof parsed.audioSampleRate === 'number' && parsed.audioSampleRate > 0 ? parsed.audioSampleRate : 48000,
-      audioChannels: parsed.audioChannels === 1 || parsed.audioChannels === 2 ? parsed.audioChannels : 2
+      audioChannels: parsed.audioChannels === 1 || parsed.audioChannels === 2 ? parsed.audioChannels : 2,
+      notifySound: typeof parsed.notifySound === 'boolean' ? parsed.notifySound : true,
+      callSound: typeof parsed.callSound === 'boolean' ? parsed.callSound : true,
+      messageSoundFile: typeof parsed.messageSoundFile === 'string' ? parsed.messageSoundFile : '',
+      callSoundFile: typeof parsed.callSoundFile === 'string' ? parsed.callSoundFile : '',
+      dnd: typeof parsed.dnd === 'boolean' ? parsed.dnd : false,
+      dndConvs: Array.isArray(parsed.dndConvs)
+        ? parsed.dndConvs.filter((x): x is string => typeof x === 'string')
+        : [],
+      convRings:
+        parsed.convRings && typeof parsed.convRings === 'object' && !Array.isArray(parsed.convRings)
+          ? Object.fromEntries(
+              Object.entries(parsed.convRings as Record<string, unknown>).filter(
+                (e): e is [string, string] => typeof e[1] === 'string'
+              )
+            )
+          : {}
     }
   } catch (err) {
     console.warn('[mochi-oa] 读取服务器配置失败，使用默认：', err)
@@ -97,7 +120,26 @@ export function saveServerConfig(patch: Partial<ServerSettings>): ServerSettings
     audioChannels:
       patch.audioChannels === 1 || patch.audioChannels === 2
         ? patch.audioChannels
-        : current.audioChannels
+        : current.audioChannels,
+    notifySound:
+      typeof patch.notifySound === 'boolean' ? patch.notifySound : current.notifySound,
+    callSound: typeof patch.callSound === 'boolean' ? patch.callSound : current.callSound,
+    messageSoundFile:
+      typeof patch.messageSoundFile === 'string' ? patch.messageSoundFile : current.messageSoundFile,
+    callSoundFile:
+      typeof patch.callSoundFile === 'string' ? patch.callSoundFile : current.callSoundFile,
+    dnd: typeof patch.dnd === 'boolean' ? patch.dnd : current.dnd,
+    dndConvs: Array.isArray(patch.dndConvs)
+      ? patch.dndConvs.filter((x): x is string => typeof x === 'string')
+      : current.dndConvs,
+    convRings:
+      patch.convRings && typeof patch.convRings === 'object' && !Array.isArray(patch.convRings)
+        ? Object.fromEntries(
+            Object.entries(patch.convRings as Record<string, unknown>).filter(
+              (e): e is [string, string] => typeof e[1] === 'string'
+            )
+          )
+        : current.convRings
   }
   try {
     writeFileSync(configPath(), JSON.stringify(next, null, 2), 'utf-8')

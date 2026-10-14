@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type {
   Ack,
   RtcDmIncomingEvent,
@@ -9,7 +9,8 @@ import type {
   RtcPeer,
   RtcRoom
 } from '@shared/server-types'
-import type { NotifTarget } from '@shared/ipc'
+import type { NotifKind, NotifTarget } from '@shared/ipc'
+import { notifyEvent, stopRing } from '@renderer/utils/notify-manager'
 import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
@@ -91,15 +92,24 @@ export const useRtcStore = defineStore('rtc', () => {
 
   // ─── 事件订阅 ───
 
-  async function maybeNotify(title: string, body: string, target?: NotifTarget, force = false): Promise<void> {
+  /**
+   * 统一走通知管理器（它按类型决定弹通知/响不响/响哪个音，并统一处理免打扰）。
+   * kind：call=单人语音视频来电、meeting=群通话/会议邀请、system=远程控制等系统提示。
+   */
+  async function maybeNotify(title: string, body: string, target?: NotifTarget, kind: NotifKind = 'system', force = false): Promise<void> {
     try {
-      const st = await rtcPantry.getWindowState()
-      // force=true（远程控制等高风险请求）：无论窗口是否聚焦都发系统通知
-      if (force || (st && !st.focused)) await rtcPantry.notify({ title, body, target })
+      await notifyEvent({ kind, title, body, target, force })
     } catch (e) {
-      console.error('[rtc] 系统通知发送失败', title, e)
+      console.error('[rtc] 通知发送失败', title, e)
     }
   }
+
+  // 来电铃声的停止点用 watch 兜底：只要「没有待接来电」就停铃。
+  // 这样接听、拒接、对方取消、超时挂断全都覆盖，不依赖每个调用点记得调 stopRing
+  // ——漏一处就会一直响，这是最基本的常识问题。
+  watch([incomingDm, incomingGroup], ([dm, grp]) => {
+    if (!dm && !grp) stopRing()
+  })
 
   function wire(): () => void {
     cleanupFns.push(
@@ -112,8 +122,9 @@ export const useRtcStore = defineStore('rtc', () => {
         const body = isRemote
           ? `${who} 请求远程控制你的电脑。同意后对方将看到并操作你的屏幕。`
           : d.kind === 'video' ? '视频通话' : '语音通话'
-        // 远程控制涉及他人操控本机，有风险：无论窗口是否聚焦都显著系统通知提醒
-        void maybeNotify(title, body, { kind: 'main' }, isRemote)
+        // 远程控制涉及他人操控本机，有风险：无论窗口是否聚焦都显著系统通知提醒（但不响铃声）
+        // 语音/视频来电走 call 类型：会按设置循环播来电铃声，接听/拒接/取消时自动停
+        void maybeNotify(title, body, { kind: 'main' }, isRemote ? 'system' : 'call', isRemote)
       })
     )
 
@@ -176,7 +187,7 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcGroupCall((d) => {
         if (activeCall.value) return // 已有通话，忽略
         incomingGroup.value = d
-        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, '群通话', { kind: 'main' })
+        void maybeNotify(`群通话邀请：${d.from.nick ?? d.from.userId}`, '群通话', { kind: 'main' }, 'meeting')
       })
     )
 
@@ -568,6 +579,7 @@ export const useRtcStore = defineStore('rtc', () => {
     activeCall.value = null
     incomingDm.value = null
     incomingGroup.value = null
+    stopRing() // 挂断一定停铃（上面的 watch 已覆盖「清空来电」，这里是显式兜底）
   }
 
   return {

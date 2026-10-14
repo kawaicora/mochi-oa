@@ -11,9 +11,9 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import * as iconv from 'iconv-lite'
-import { IpcChannels, IpcEvents, ScreenshotToolbar } from '../shared/ipc'
+import { IpcChannels, IpcEvents, ScreenshotToolbar, type NotifKind } from '../shared/ipc'
 import { serverClient } from './net/server-client'
-import { notify as notifyManager, openMeetingWindow } from './notif'
+import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
@@ -803,6 +803,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       win.center()
     }
     return Promise.resolve()
+  })
+  // 解析通知提示音文件：自定义路径存在就用它；丢失/为空自动回退 resources 里的默认
+  // （message.wav / calling.wav）。判定放主进程，渲染层不用猜路径。
+  ipcMain.handle(IpcChannels.appResolveNotifySound, (_e, opts) => {
+    const o = (opts ?? {}) as { kind?: unknown; customPath?: unknown }
+    const kind = (typeof o.kind === 'string' ? o.kind : 'message') as NotifKind
+    return resolveSoundFile(kind, typeof o.customPath === 'string' ? o.customPath : undefined)
   })
   ipcMain.handle(IpcChannels.appInfo, () => {
     const { app } = require('electron') as typeof import('electron')

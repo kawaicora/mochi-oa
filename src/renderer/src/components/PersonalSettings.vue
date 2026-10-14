@@ -1,11 +1,26 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useServerStore } from '../stores/server'
+import { useAppStore } from '../stores/app'
 import UserAvatar from './UserAvatar.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
 const server = useServerStore()
+const app = useAppStore()
+
+/** 取文件名用于展示（完整路径太长） */
+function shortName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+/** 选择自定义提示音/铃声文件 */
+async function pickSound(which: 'message' | 'call'): Promise<void> {
+  const p = await window.pantry.pickFile()
+  if (!p) return
+  if (which === 'message') await app.saveNotifyCfg({ messageSoundFile: p })
+  else await app.saveNotifyCfg({ callSoundFile: p })
+}
 
 const tab = ref<'info' | 'security' | 'mail'>('info')
 
@@ -280,6 +295,63 @@ async function onSaveMainMail(): Promise<void> {
           <p class="sec-hint">文件夹等不可预览的仍需手动下载</p>
         </div>
 
+        <!-- 通知：消息 / 来电分开控制；闹钟自带铃声不走这里 -->
+        <div class="sec-group">
+          <div class="sec-title"><i class="fas fa-bell"></i>&nbsp;消息通知</div>
+          <label class="switch-row">
+            <span class="switch-label">新消息播放提示音</span>
+            <span class="switch" :class="{ on: app.notifyCfg.notifySound }" @click="app.saveNotifyCfg({ notifySound: !app.notifyCfg.notifySound })">
+              <i class="switch-knob"></i>
+            </span>
+          </label>
+          <div class="ps-field">
+            <label class="ps-label">消息提示音文件</label>
+            <div class="file-row">
+              <span class="file-name" :title="app.notifyCfg.messageSoundFile">
+                {{ app.notifyCfg.messageSoundFile ? shortName(app.notifyCfg.messageSoundFile) : '默认（resources/message.wav）' }}
+              </span>
+              <button class="dt-btn" @click="pickSound('message')">选择</button>
+              <button v-if="app.notifyCfg.messageSoundFile" class="dt-btn" @click="app.saveNotifyCfg({ messageSoundFile: '' })">恢复默认</button>
+            </div>
+          </div>
+          <p class="sec-hint">自定义文件丢失会自动回退默认提示音</p>
+        </div>
+
+        <div class="sec-group">
+          <div class="sec-title"><i class="fas fa-phone-alt"></i>&nbsp;来电 / 会议</div>
+          <label class="switch-row">
+            <span class="switch-label">来电与会议邀请播放铃声</span>
+            <span class="switch" :class="{ on: app.notifyCfg.callSound }" @click="app.saveNotifyCfg({ callSound: !app.notifyCfg.callSound })">
+              <i class="switch-knob"></i>
+            </span>
+          </label>
+          <div class="ps-field">
+            <label class="ps-label">来电铃声文件</label>
+            <div class="file-row">
+              <span class="file-name" :title="app.notifyCfg.callSoundFile">
+                {{ app.notifyCfg.callSoundFile ? shortName(app.notifyCfg.callSoundFile) : '默认（resources/calling.wav）' }}
+              </span>
+              <button class="dt-btn" @click="pickSound('call')">选择</button>
+              <button v-if="app.notifyCfg.callSoundFile" class="dt-btn" @click="app.saveNotifyCfg({ callSoundFile: '' })">恢复默认</button>
+            </div>
+          </div>
+          <p class="sec-hint">接听 / 拒接 / 对方取消时会自动停铃；单个群或个人可在聊天窗口标题栏单独设置铃声</p>
+        </div>
+
+        <div class="sec-group">
+          <div class="sec-title"><i class="fas fa-bell-slash"></i>&nbsp;免打扰</div>
+          <label class="switch-row">
+            <span class="switch-label">全局免打扰（静音所有消息提示音）</span>
+            <span class="switch" :class="{ on: app.notifyCfg.dnd }" @click="app.saveNotifyCfg({ dnd: !app.notifyCfg.dnd })">
+              <i class="switch-knob"></i>
+            </span>
+          </label>
+          <p class="sec-hint">
+            来电铃声不受免打扰影响（避免漏接）；单独屏蔽某个群或个人，在该聊天窗口的标题栏里切换。
+            <template v-if="app.notifyCfg.dndConvs.length">已单独免打扰 {{ app.notifyCfg.dndConvs.length }} 个会话。</template>
+          </p>
+        </div>
+
         <div class="sec-group">
           <div class="sec-title"><i class="fas fa-rocket"></i>&nbsp;启动</div>
           <label class="switch-row">
@@ -534,5 +606,25 @@ async function onSaveMainMail(): Promise<void> {
 .switch-row.disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+/* 自定义音频文件行 */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-name {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 12px;
+  border: 1px dashed var(--dt-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--dt-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

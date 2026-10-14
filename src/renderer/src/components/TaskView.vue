@@ -344,7 +344,7 @@ function checkReminders(): void {
     const body = level === 'overdue'
       ? `「${t.title}」已超时！${remainText(t)}`
       : `「${t.title}」${level === 'red' ? '红色警告' : '黄色提醒'}，${remainText(t)}`
-    void window.pantry.notify({ title: '任务提醒', body, target: undefined })
+    void window.pantry.notify({ kind: 'task', title: '任务提醒', body, target: undefined })
   }
 }
 let remindTimer: number | null = null

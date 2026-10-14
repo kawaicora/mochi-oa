@@ -13,7 +13,8 @@ import type {
   RtcPeer,
   RtcRoom
 } from '@shared/server-types'
-import type { NotifTarget } from '@shared/ipc'
+import type { NotifKind, NotifTarget } from '@shared/ipc'
+import { notifyEvent } from '@renderer/utils/notify-manager'
 
 
 // 发送会议聊天消息：preload 发送封装由主进程侧注册，此处做窄类型断言桥接（与 stores/rtc.ts 同约定）
@@ -269,11 +270,10 @@ const props = withDefaults(
   { meetingNo: '', password: '' }
 )
 
-// 窗口未聚焦时弹 Windows 通知（来电/会议消息提醒）
-async function notifyIfUnfocused(title: string, body: string, target?: NotifTarget): Promise<void> {
+// 会议内消息提醒：统一交给通知管理器（按类型处理提示音与免打扰）
+async function notifyIfUnfocused(title: string, body: string, target?: NotifTarget, kind: NotifKind = 'message'): Promise<void> {
   try {
-    const st = await window.pantry.getWindowState()
-    if (st && !st.focused) await window.pantry.notify({ title, body, target })
+    await notifyEvent({ kind, title, body, target })
   } catch { /* 忽略 */ }
 }
 

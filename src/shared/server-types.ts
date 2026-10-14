@@ -30,6 +30,20 @@ export interface ServerSettings {
   audioSampleRate?: number
   /** 音视频通话：声道数（默认 2） */
   audioChannels?: number
+  /** 新消息播放提示音（默认开） */
+  notifySound?: boolean
+  /** 来电/会议播放铃声（默认开） */
+  callSound?: boolean
+  /** 自定义消息提示音（绝对路径；空=用 resources/message.wav；文件丢失自动回退默认） */
+  messageSoundFile?: string
+  /** 自定义来电铃声（绝对路径；空=用 resources/calling.wav；文件丢失自动回退默认） */
+  callSoundFile?: string
+  /** 全局免打扰：静音消息类通知（来电照响；默认关） */
+  dnd?: boolean
+  /** 单独免打扰的会话 key（group:<conversationId> / dm:<conversationId>） */
+  dndConvs?: string[]
+  /** 每个会话的自定义铃声：key=会话 key，value=绝对路径（缺省用全局来电铃声） */
+  convRings?: Record<string, string>
 }
 
 /** 账号 Acknowledge */

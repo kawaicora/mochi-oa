@@ -21,6 +21,7 @@ import type {
   MessageKind
 } from '../../../shared/server-types'
 import type { NotifTarget } from '../../../shared/ipc'
+import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type NotifyPolicy } from '../utils/notify-manager'
 
 /** 从 ack 提取 data 载荷 */
 function d<T>(ack: unknown): T | undefined {
@@ -398,6 +399,7 @@ export const useAppStore = defineStore('app', () => {
   async function bootstrap(): Promise<void> {
     loading.value = true
     try {
+      await loadNotifyCfg() // 通知/免打扰设置随启动一起载入，消息到达前就绪
       await refreshCompanies()
       if (companies.value.length === 0) {
         await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
@@ -1048,14 +1050,84 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) messages.value = messages.value.filter((m) => m.id !== messageId)
     return { ok: ack.ok, error: ack.error }
   }
-  async function notifyIfUnfocused(title: string, body: string, target?: NotifTarget): Promise<void> {
+  // ─── 通知设置（本地存储 userData/server-config.json）───
+  // 通知的「弹不弹 / 响不响 / 响哪个音」全部由 utils/notify-manager.ts 统一决策，
+  // 这里只负责持有设置并提供读写，供设置面板与会话右键使用。
+  const notifyCfg = ref<{
+    notifySound: boolean
+    callSound: boolean
+    messageSoundFile: string
+    callSoundFile: string
+    dnd: boolean
+    dndConvs: string[]
+    convRings: Record<string, string>
+  }>({ notifySound: true, callSound: true, messageSoundFile: '', callSoundFile: '', dnd: false, dndConvs: [], convRings: {} })
+
+  async function loadNotifyCfg(): Promise<void> {
     try {
-      const st = await window.pantry.getWindowState()
-      if (st && !st.focused) await window.pantry.notify({ title, body, target })
-    } catch {
-      // 忽略
+      const cfg = await window.pantry.serverGetSettings()
+      notifyCfg.value = {
+        notifySound: cfg.notifySound !== false,
+        callSound: cfg.callSound !== false,
+        messageSoundFile: cfg.messageSoundFile ?? '',
+        callSoundFile: cfg.callSoundFile ?? '',
+        dnd: cfg.dnd === true,
+        dndConvs: Array.isArray(cfg.dndConvs) ? cfg.dndConvs : [],
+        convRings: cfg.convRings && typeof cfg.convRings === 'object' ? cfg.convRings : {}
+      }
+    } catch (e) {
+      console.warn('[app] 读取通知设置失败', e)
+    }
+    setNotifyPolicy(notifyPolicy())
+  }
+
+  async function saveNotifyCfg(patch: Partial<typeof notifyCfg.value>): Promise<void> {
+    notifyCfg.value = { ...notifyCfg.value, ...patch }
+    try {
+      await window.pantry.serverSaveSettings(notifyCfg.value)
+    } catch (e) {
+      console.warn('[app] 保存通知设置失败', e)
+    }
+    setNotifyPolicy(notifyPolicy())
+    // 换了音频文件必须让缓存失效，否则还是播旧的
+    if ('messageSoundFile' in patch || 'callSoundFile' in patch || 'convRings' in patch) invalidateSoundCache()
+  }
+
+  /** 打包成通知管理器需要的策略对象 */
+  function notifyPolicy(): NotifyPolicy {
+    const c = notifyCfg.value
+    return {
+      sound: c.notifySound,
+      callSound: c.callSound,
+      dnd: c.dnd,
+      dndConvs: c.dndConvs,
+      messageSoundFile: c.messageSoundFile,
+      callSoundFile: c.callSoundFile,
+      convRings: c.convRings
     }
   }
+
+  /** 会话是否免打扰 */
+  function isConvMuted(key: string): boolean {
+    return notifyCfg.value.dndConvs.includes(key)
+  }
+  /** 切换会话免打扰 */
+  async function setConvMuted(key: string, muted: boolean): Promise<void> {
+    const list = notifyCfg.value.dndConvs.filter((k) => k !== key)
+    if (muted) list.push(key)
+    await saveNotifyCfg({ dndConvs: list })
+  }
+  /** 设置会话自定义铃声（空串=清除，回到全局来电铃声） */
+  async function setConvRing(key: string, file: string): Promise<void> {
+    const next = { ...notifyCfg.value.convRings }
+    if (file) next[key] = file
+    else delete next[key]
+    await saveNotifyCfg({ convRings: next })
+  }
+  function convRingOf(key: string): string {
+    return notifyCfg.value.convRings[key] ?? ''
+  }
+
   function onServerMessage(msg: ServerChatMessage): void {
     const idx = messages.value.findIndex((m) => m.id === msg.id)
     const inConv =
@@ -1075,7 +1147,16 @@ export const useAppStore = defineStore('app', () => {
     const preview =
       msg.kind === 'text' ? msg.content : msg.kind === 'image' ? '[图片]' : msg.kind === 'video' ? '[视频]' : msg.kind === 'folder' ? '[文件夹]' : '[文件]'
     if (msg.fromId !== server.state.userId) {
-      void notifyIfUnfocused(conv?.name ? `新消息：${conv.name}` : '新消息', preview, { kind: 'main', conversationId: msg.conversationId })
+      // 统一走通知管理器：它按类型（消息/来电/会议/闹钟）决定弹不弹通知、响不响、响哪个音，
+      // 并统一处理全局免打扰、会话级免打扰、以及「正在看这个会话就不打扰」。
+      void notifyEvent({
+        kind: 'message',
+        title: conv?.name ? `新消息：${conv.name}` : '新消息',
+        body: preview,
+        convKey: convKey(msg.type, msg.conversationId),
+        inCurrentConv: inConv,
+        target: { kind: 'main', conversationId: msg.conversationId }
+      })
     }
     if (conv) {
       const isSelf = msg.fromId === server.state.userId
@@ -1097,6 +1178,14 @@ export const useAppStore = defineStore('app', () => {
   }
 
   return {
+    // 通知 / 免打扰（本地设置，统一由 utils/notify-manager.ts 决策）
+    notifyCfg,
+    loadNotifyCfg,
+    saveNotifyCfg,
+    isConvMuted,
+    setConvMuted,
+    setConvRing,
+    convRingOf,
     ready,
     loading,
     companies,

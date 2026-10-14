@@ -50,6 +50,20 @@ export function brandingIconPath(): string | null {
   return null
 }
 
+/**
+ * resources 目录下的文件绝对路径（随安装包分发，运行时只读；文件不存在返回 null）。
+ * 用于「换文件即可生效、不用重新编译」的资源，比如提示音 resources/message.wav、
+ * 来电铃声 resources/calling.wav。
+ */
+export function resourceFilePath(name: string): string | null {
+  try {
+    const p = join(resourcesDir(), name)
+    return existsSync(p) ? p : null
+  } catch {
+    return null
+  }
+}
+
 /** 读取品牌配置（带内存缓存；配置缺失/损坏用默认值） */
 export function readBranding(): Branding {
   if (cached) return cached
