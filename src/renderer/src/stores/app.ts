@@ -321,21 +321,31 @@ export const useAppStore = defineStore('app', () => {
     }
   })
 
-  // 已读回执：他端读到某条消息 → 更新本地该会话/当前会话的已读位置，供消息"已读"标记渲染
+  // 已读回执：他端读到某条消息 → 更新本地该会话/当前会话的已读位置，供消息"已读"标记渲染。
+  // 位置只前进不后退：乱序/重复回执不会把「已读」打回「未读」。
+  const mergeReceipt = (list: ReadReceipt[], userId: number, lastReadMessageId: number | null): void => {
+    const uid = Number(userId)
+    const next = lastReadMessageId != null && lastReadMessageId > 0 ? lastReadMessageId : null
+    const i = list.findIndex((r) => r.userId === uid)
+    if (i < 0) {
+      list.push({ userId: uid, lastReadMessageId: next })
+      return
+    }
+    const prev = list[i]!.lastReadMessageId
+    // null 视为「无位置信息」，保留原值；否则取较大者
+    const merged = next == null ? prev : prev != null && prev > next ? prev : next
+    list[i]!.lastReadMessageId = merged ?? null
+  }
   window.pantry.onServerChatReadReceipt((ev) => {
     const id = Number(ev.conversationId)
     const item = conversations.value.find((c) => c.conversationId === id)
     if (item) {
       if (!Array.isArray(item.readReceipts)) item.readReceipts = []
-      const idx = item.readReceipts.findIndex((r) => r.userId === Number(ev.userId))
-      if (idx >= 0) item.readReceipts[idx]!.lastReadMessageId = ev.lastReadMessageId
-      else item.readReceipts.push({ userId: Number(ev.userId), lastReadMessageId: ev.lastReadMessageId })
+      mergeReceipt(item.readReceipts, ev.userId, ev.lastReadMessageId)
     }
     if (selected.value && selected.value.conversationId === id) {
       if (!Array.isArray(selected.value.readReceipts)) selected.value.readReceipts = []
-      const i2 = selected.value.readReceipts.findIndex((r) => r.userId === Number(ev.userId))
-      if (i2 >= 0) selected.value.readReceipts[i2]!.lastReadMessageId = ev.lastReadMessageId
-      else selected.value.readReceipts.push({ userId: Number(ev.userId), lastReadMessageId: ev.lastReadMessageId })
+      mergeReceipt(selected.value.readReceipts, ev.userId, ev.lastReadMessageId)
     }
   })
 
@@ -816,6 +826,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ─── 会话/消息 ───
+  // 打开会话不再直接标记已读：已读由 ChatWindow 按「窗口可见 + 消息真的滚进可视区域」上报，
+  // 否则对方只是点开窗口（甚至消息在屏幕外）就变成已读，发送方看到的是假回执。
   async function openGroup(groupId: number, name: string): Promise<void> {
     selected.value = { conversationId: 0, kind: 'group', groupId, name, pinned: false, readReceipts: [] }
     const conv = conversations.value.find((c) => c.groupId === groupId)
@@ -823,13 +835,8 @@ export const useAppStore = defineStore('app', () => {
       selected.value.conversationId = conv.conversationId
       selected.value.pinned = conv.pinned
       selected.value.readReceipts = conv.readReceipts ? [...conv.readReceipts] : []
-      void markRead(conv.conversationId)
     }
     await loadGroupHistory(groupId)
-    if (conv && selected.value) {
-      const lm = messages.value[messages.value.length - 1]
-      void markRead(conv.conversationId, lm && !String(lm.id).startsWith('local-') ? Number(lm.id) : null)
-    }
   }
   async function openDm(userId: number, name: string): Promise<void> {
     selected.value = { conversationId: 0, kind: 'dm', dmUserId: userId, name, pinned: false, readReceipts: [] }
@@ -838,13 +845,8 @@ export const useAppStore = defineStore('app', () => {
       selected.value.conversationId = conv.conversationId
       selected.value.pinned = conv.pinned
       selected.value.readReceipts = conv.readReceipts ? [...conv.readReceipts] : []
-      void markRead(conv.conversationId)
     }
     await loadDmHistory(userId)
-    if (conv && selected.value) {
-      const lm = messages.value[messages.value.length - 1]
-      void markRead(conv.conversationId, lm && !String(lm.id).startsWith('local-') ? Number(lm.id) : null)
-    }
   }
   async function openConversation(item: ConversationItem): Promise<void> {
     if (item.type === 'group' && item.groupId) await openGroup(item.groupId, item.name)
@@ -1019,11 +1021,15 @@ export const useAppStore = defineStore('app', () => {
     const ack = await window.pantry.serverConversationPin(conversationId, pinned)
     if (ack.ok) await refreshConversations()
   }
+  /**
+   * 上报已读位置（由 ChatWindow 的「滚动到可视区域」判定触发）。
+   *
+   * 这里不本地清零未读：服务端按位置重算真实未读并通过 conversations:updated 推回来，
+   * 因为只滚到会话中间时下方消息仍然是未读，不能像以前那样一律清 0。
+   */
   async function markRead(conversationId: number, lastMessageId?: number | null): Promise<void> {
     if (conversationId <= 0) return
     await window.pantry.serverConversationRead(conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null)
-    const item = conversations.value.find((c) => c.conversationId === conversationId)
-    if (item) item.unread = 0
   }
   async function deleteMessage(messageId: string): Promise<{ ok: boolean; error?: string }> {
     const s = selected.value
@@ -1141,7 +1147,7 @@ export const useAppStore = defineStore('app', () => {
       if (idx >= 0) messages.value[idx] = msg
       else messages.value.push(msg)
       void ensureLocalPreview(msg)
-      if (inConv) void markRead(selected.value.conversationId, Number(msg.id) || null)
+      // 这里不再标记已读：由 ChatWindow 观察消息是否真的滚进可视区域再上报
     }
     const conv = conversations.value.find((c) => c.conversationId === msg.conversationId)
     const preview =

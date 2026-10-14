@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, type Directive } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
@@ -67,6 +67,20 @@ const offDownloadProgress = window.pantry.onDownloadProgress((d) => {
 })
 onBeforeUnmount(() => { offDownloadProgress() })
 
+// 已读判定用的观察器与窗口可见性监听
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  ensureReadObserver()
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  if (readTimer) clearTimeout(readTimer)
+  readObserver?.disconnect()
+  readObserver = null
+  readRoot = null
+  visibleRowIds.clear()
+})
+
 const selected = computed(() => app.selected)
 const myId = computed(() => server.state.userId)
 
@@ -75,9 +89,18 @@ const groupMembers = ref<Array<{ userId: number; nick?: string; avatar?: string;
 
 watch(
   () => app.messages.length,
-  async () => {
+  async (n, o) => {
+    // 采样必须在 DOM 更新之前：只有本来就在底部才跟随新消息。
+    // 否则会把正在翻历史的人硬拽到底部，那些其实没被看到的消息也不该算已读。
+    // 自己发的消息永远跟随（发出去就想看到）。
+    const stick = shouldStickToBottom()
     await nextTick()
-    scrollBottom()
+    if (stick) {
+      scrollBottom()
+      newBelow.value = false
+    } else if (n > (o ?? 0)) {
+      newBelow.value = true
+    }
   }
 )
 watch(
@@ -86,14 +109,121 @@ watch(
     showMembers.value = false
     showMsgMenu.value = null
     showEmoji.value = false
+    newBelow.value = false
+    visibleRowIds.clear()
+    sentRead = { convId: selected.value?.conversationId ?? 0, id: 0 }
     await nextTick()
     scrollBottom()
+    scheduleReadFlush()
   }
 )
 
 const msgListEl = ref<HTMLElement | null>(null)
 function scrollBottom(): void {
   if (msgListEl.value) msgListEl.value.scrollTop = msgListEl.value.scrollHeight
+}
+/** 距离底部多少 px 以内算「贴着底部」（跟随新消息） */
+const NEAR_BOTTOM_PX = 80
+/** 有新消息落在可视区下方（用户在看历史，没跟到底部） */
+const newBelow = ref(false)
+function nearBottom(): boolean {
+  const el = msgListEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX
+}
+function shouldStickToBottom(): boolean {
+  const last = app.messages[app.messages.length - 1]
+  const mine = !!last && last.fromId === myId.value
+  return mine || nearBottom()
+}
+function onListScroll(): void {
+  if (newBelow.value && nearBottom()) newBelow.value = false
+}
+function jumpToBottom(): void {
+  newBelow.value = false
+  scrollBottom()
+}
+
+// ─── 已读判定：窗口可见 + 这条消息真的滚进可视区域，才算已读 ───
+//
+// 旧行为：打开会话就把整个会话标记已读、在会话里收到新消息也立刻标记已读——
+// 对方可能根本没看（窗口在后台、消息还在可视区外），发送方看到的却是「已读」。
+// 现在由 IntersectionObserver 盯着消息行：只有落在可视区内的行才计入，
+// 上报它们之中最大的消息 id（已读位置单向：读到第 10 条即前 10 条都读过）。
+const READ_FLUSH_MS = 400
+const visibleRowIds = new Map<Element, number>()
+let readObserver: IntersectionObserver | null = null
+let readRoot: HTMLElement | null = null
+let readTimer: ReturnType<typeof setTimeout> | undefined
+/** 已上报的位置（按会话），避免滚动过程中重复上报同一个位置 */
+let sentRead = { convId: 0, id: 0 }
+
+function ensureReadObserver(): void {
+  const root = msgListEl.value
+  if (!root) return
+  if (readObserver && readRoot === root) return
+  // 列表元素被重建（空态↔会话切换）后旧观察根已脱离文档，必须重建
+  readObserver?.disconnect()
+  visibleRowIds.clear()
+  readRoot = root
+  readObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        const id = Number((e.target as HTMLElement).dataset.mid)
+        if (!Number.isFinite(id) || id <= 0) continue // 本地临时消息（local-xxx）没有服务端 id
+        if (e.isIntersecting) visibleRowIds.set(e.target, id)
+        else visibleRowIds.delete(e.target)
+      }
+      scheduleReadFlush()
+    },
+    // 底部留 8px 余量：只从底部露出个边不算「滚到可视区域」
+    { root, threshold: 0, rootMargin: '0px 0px -8px 0px' }
+  )
+}
+
+/** v-read-row：消息行挂载/卸载时登记与注销观察 */
+const vReadRow: Directive<HTMLElement> = {
+  mounted(el) {
+    ensureReadObserver()
+    readObserver?.observe(el)
+  },
+  unmounted(el) {
+    visibleRowIds.delete(el)
+    readObserver?.unobserve(el)
+  }
+}
+
+function scheduleReadFlush(): void {
+  if (readTimer) clearTimeout(readTimer)
+  readTimer = setTimeout(flushRead, READ_FLUSH_MS)
+}
+
+/** 我在该会话的已读位置（会话列表带回的 readReceipts 里包含自己） */
+function myReadPos(convId: number): number {
+  const sel = selected.value
+  if (!sel || sel.conversationId !== convId) return 0
+  const mine = (sel.readReceipts ?? []).find((r) => r.userId === myId.value)
+  return mine?.lastReadMessageId && mine.lastReadMessageId > 0 ? mine.lastReadMessageId : 0
+}
+
+function flushRead(): void {
+  readTimer = undefined
+  const sel = selected.value
+  if (!sel || sel.conversationId <= 0) return
+  // 窗口被最小化/遮挡时 Chromium 会把页面标成 hidden：这时不算「看过」
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+  let maxId = 0
+  for (const id of visibleRowIds.values()) if (id > maxId) maxId = id
+  if (maxId <= 0) return
+  const known = Math.max(sentRead.convId === sel.conversationId ? sentRead.id : 0, myReadPos(sel.conversationId))
+  if (maxId <= known) return
+  sentRead = { convId: sel.conversationId, id: maxId }
+  void app.markRead(sel.conversationId, maxId)
+}
+
+/** 窗口重新可见（最小化/遮挡后回来）不会有新的 intersection 回调，需主动补一次判定 */
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') scheduleReadFlush()
 }
 
 function fmtTime(ts: number): string {
@@ -725,8 +855,15 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       </header>
 
       <!-- 消息列表 -->
-      <div ref="msgListEl" class="chat-list" @click="closeMsgMenu">
-        <div v-for="m in app.messages" :key="m.id" class="msg-row" :class="{ me: m.fromId === myId }">
+      <div ref="msgListEl" class="chat-list" @click="closeMsgMenu" @scroll.passive="onListScroll">
+        <div
+          v-for="m in app.messages"
+          :key="m.id"
+          v-read-row
+          :data-mid="m.id"
+          class="msg-row"
+          :class="{ me: m.fromId === myId }"
+        >
           <UserAvatar :nick="m.nick" :avatar="m.avatar" :size="36" />
           <div class="msg-body">
             <div class="msg-meta">
@@ -779,6 +916,10 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           </div>
         </div>
         <div v-if="app.messages.length === 0" class="chat-none">暂无消息，发一条吧</div>
+        <!-- 新消息在可视区下方（没跟随到底部）：点一下回到最新，未读也才算读到 -->
+        <button v-if="newBelow" class="chat-newbelow" @click="jumpToBottom">
+          <i class="fas fa-arrow-down"></i>&nbsp;新消息
+        </button>
       </div>
 
       <!-- 输入区 -->
@@ -1292,6 +1433,25 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
   z-index: 130;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   max-width: 80%;
+}
+/* 「新消息」提示：贴在列表底部（sticky），只在没跟到底部时出现 */
+.chat-newbelow {
+  position: sticky;
+  bottom: 12px;
+  display: block;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 14px;
+  background: var(--dt-primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+.chat-newbelow:hover {
+  filter: brightness(1.06);
 }
 .chat-none {
   text-align: center;
