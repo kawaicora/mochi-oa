@@ -9,12 +9,15 @@ const rtc = useRtcStore()
   <Teleport to="body">
     <div v-if="rtc.incomingDm" class="call-modal-overlay">
       <div class="call-modal">
-        <div class="call-modal-avatar">
-          <i :class="rtc.incomingDm.kind === 'video' ? 'fas fa-video' : 'fas fa-phone'"></i>
+        <div class="call-modal-avatar" :class="{ remote: rtc.incomingDm.kind === 'remote' }">
+          <i :class="rtc.incomingDm.kind === 'video' ? 'fas fa-video' : rtc.incomingDm.kind === 'remote' ? 'fas fa-desktop' : 'fas fa-phone'"></i>
         </div>
         <div class="call-modal-name">{{ rtc.incomingDm.from.nick }}</div>
         <div class="call-modal-type">
-          {{ rtc.incomingDm.kind === 'video' ? '视频通话' : '语音通话' }}
+          {{ rtc.incomingDm.kind === 'video' ? '视频通话' : rtc.incomingDm.kind === 'remote' ? '请求远程控制你的电脑' : '语音通话' }}
+        </div>
+        <div v-if="rtc.incomingDm.kind === 'remote'" class="call-modal-from">
+          同意后对方可查看你的屏幕并控制键鼠
         </div>
         <div class="call-modal-ringing">
           <span class="ring-dot"></span>

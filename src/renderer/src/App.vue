@@ -6,6 +6,8 @@ import { useRtcStore } from './stores/rtc'
 import LoginScreen from './components/LoginScreen.vue'
 import MainScreen from './components/MainScreen.vue'
 import IncomingCallModal from './components/IncomingCallModal.vue'
+import RemoteViewer from './remote/RemoteViewer.vue'
+import { remoteSlaveState } from './remote/RemoteUi'
 import type { NewDeviceLoginEvent, SessionRevokedEvent } from '@shared/server-types'
 
 const server = useServerStore()
@@ -81,6 +83,13 @@ onMounted(async () => {
   <!-- 全局通话：来电弹窗 + 全屏通话浮层 -->
   <IncomingCallModal />
 
+  <!-- 远程控制：控制端查看面板 + 被控端被控提示 -->
+  <RemoteViewer />
+  <div v-if="remoteSlaveState.controlling" class="remote-slave-banner">
+    <i class="fas fa-desktop"></i>
+    <span>正在被「{{ remoteSlaveState.byName || '对方' }}」远程控制</span>
+  </div>
+
   <!-- 全局弹窗提醒 -->
   <transition-group name="toast" tag="div" class="toast-wrap">
     <div v-for="t in toasts" :key="t.id" class="toast" :class="t.kind">
@@ -136,5 +145,22 @@ onMounted(async () => {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(20px);
+}
+.remote-slave-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 20px;
+  background: rgba(217, 48, 38, 0.95);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 18px rgba(217, 48, 38, 0.4);
 }
 </style>

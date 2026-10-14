@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
+import { remoteInputSetMode, remoteInputDispatch, remoteInputStop } from './remote-input'
 import { IpcChannels, type NotifTarget } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
@@ -118,6 +119,8 @@ let trayEnabled = false
 let isQuitting = false
 
 // 单实例锁：避免重复启动（用户数据隔离靠 PANTRY_USER_DATA 环境变量）
+// Windows 通知中心需 AppUserModelID 才能显示系统通知（远程控制/来电/闹钟等），必须在创建窗口前设置
+app.setAppUserModelId('com.kawaicora.mochi-oa')
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
@@ -268,6 +271,20 @@ app.whenReady().then(() => {
       w.show()
       w.focus()
     }
+    return { ok: true }
+  })
+
+  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
+  ipcMain.handle(IpcChannels.remoteInputStart, (_e, mode: unknown) => {
+    remoteInputSetMode(mode === 'local' ? 'local' : 'remote')
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteInputEvent, (_e, evt: unknown) => {
+    remoteInputDispatch((evt ?? {}) as Record<string, unknown>)
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteInputStop, () => {
+    remoteInputStop()
     return { ok: true }
   })
 

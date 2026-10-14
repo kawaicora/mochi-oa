@@ -56,6 +56,10 @@ const api = {
     ipcRenderer.invoke(IpcChannels.openTaskWindow, taskId),
   openPreviewWindow: (params: { kind: 'pdf' | 'word' | 'excel'; path: string; name: string }): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.openPreviewWindow, params),
+  openRemoteWindow: (params: { room: string; iceServers: unknown[]; mode: 'remote' | 'local'; peerId: number; peerName?: string; meId: number }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.openRemoteWindow, params),
+  remoteGetParams: (): Promise<{ room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null> =>
+    ipcRenderer.invoke(IpcChannels.remoteGetParams),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.openScreenshotWindow, payload),
   screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
@@ -306,14 +310,21 @@ const api = {
     ipcRenderer.invoke(IpcChannels.rtcLeave, roomId),
   rtcEnd: (roomId: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcEnd, roomId),
-  rtcDmCall: (userId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind } }> =>
-    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind),
+  rtcDmCall: (userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> =>
+    ipcRenderer.invoke(IpcChannels.rtcDmCall, userId, kind, password ?? undefined),
   rtcDmAnswer: (roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
     ipcRenderer.invoke(IpcChannels.rtcDmAnswer, roomId, accept),
   rtcGroupCall: (groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
     ipcRenderer.invoke(IpcChannels.rtcGroupCall, groupId, kind),
   rtcChatMessage: (roomId: string, content: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcChatSend, roomId, content),
+  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
+  remoteInputStart: (mode: 'remote' | 'local'): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputStart, mode),
+  remoteInputStop: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputStop),
+  remoteInputEvent: (evt: Record<string, unknown>): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputEvent, evt),
   // 远程设备控制（被控端）
   devGetInfo: (): Promise<{ deviceId: string; hostname: string; os: string; ip: string }> =>
     ipcRenderer.invoke(IpcChannels.devGetInfo),

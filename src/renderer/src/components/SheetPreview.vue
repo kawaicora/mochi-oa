@@ -15,6 +15,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { CellObject, Range, WorkBook, WorkSheet } from 'xlsx'
 import { readXlsxStyles, type CellStyle, type SheetStyleMap } from '../utils/xlsx-style'
 import { readXlsxDrawings, type DrawingItem } from '../utils/xlsx-drawing'
+import { prstGeomToSvgPath } from '../utils/drawingml-shapes'
 
 const props = defineProps<{ path: string; name: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -210,7 +211,7 @@ function layoutDrawings(): void {
   }
   const colThs = Array.from(table.querySelectorAll('thead .sheet-colno')) as HTMLElement[]
   const trs = Array.from(table.querySelectorAll('tbody tr')) as HTMLElement[]
-  const pos = (col: number, row: number, dx: number, dy: number): { x: number; y: number } | null => {
+  const cellPos = (col: number, row: number, dx: number, dy: number): { x: number; y: number } | null => {
     const th = colThs[col]
     const tr = trs[row]
     if (!th || !tr) return null
@@ -218,8 +219,22 @@ function layoutDrawings(): void {
   }
   const out: Array<{ item: DrawingItem; x: number; y: number; w: number; h: number }> = []
   for (const item of sheetDrawings.value) {
-    const a = pos(item.from.col, item.from.row, item.from.dx, item.from.dy)
-    const b = pos(item.to.col, item.to.row, item.to.dx, item.to.dy)
+    if (item.anchorType === 'absolute') {
+      // absoluteAnchor：pos EMU 从 A1 左上角起算；A1 左上角 = (th[0].offsetLeft, trs[0].offsetTop)
+      const th0 = colThs[0]
+      const tr0 = trs[0]
+      if (!th0 || !tr0) continue
+      const x = th0.offsetLeft + (item.absXEmu ?? 0) / 9525
+      const y = tr0.offsetTop + (item.absYEmu ?? 0) / 9525
+      const w = item.to.dx
+      const h = item.to.dy
+      if (w <= 0 || h <= 0) continue
+      out.push({ item, x, y, w, h })
+      continue
+    }
+    // twoCell / oneCell：from + to 差
+    const a = cellPos(item.from.col, item.from.row, item.from.dx, item.from.dy)
+    const b = cellPos(item.to.col, item.to.row, item.to.dx, item.to.dy)
     if (!a || !b) continue // 锚点超出当前已渲染的行/列范围
     const w = b.x - a.x
     const h = b.y - a.y
@@ -229,16 +244,11 @@ function layoutDrawings(): void {
   placements.value = out
 }
 
-/** 形状（prstGeom）→ 内联样式 */
-function shapeStyle(p: { item: DrawingItem; w: number; h: number }): Record<string, string> {
-  const out: Record<string, string> = {}
-  if (p.item.fill) out.background = p.item.fill
-  if (p.item.line) out.border = `1px solid ${p.item.line}`
-  if (p.item.round) {
-    // roundRect 的 adj 默认 16667 → 圆角半径 = 短边 * 1/6
-    out.borderRadius = `${Math.round(Math.min(p.w, p.h) * 0.16667)}px`
-  }
-  return out
+/** 形状 SVG path：优先 custGeom，其次 prstGeom 高频形状；都不认识则返回 null（降级为矩形） */
+function shapeSvgPath(item: DrawingItem, w: number, h: number): string | null {
+  if (item.cust && item.cust.paths.length) return item.cust.paths.join(' ')
+  if (item.prst) return prstGeomToSvgPath(item.prst, w, h)
+  return null
 }
 
 /** xlsx 行高（磅/像素）→ px */
@@ -443,7 +453,7 @@ onBeforeUnmount(() => {
           </tbody>
         </table>
 
-        <!-- 绘图层：贴图 / 形状 / 图表占位（按单元格锚点绝对定位覆盖在网格上） -->
+        <!-- 绘图层：贴图 / 形状 / 连接线 / 图表占位（按单元格锚点绝对定位覆盖在网格上） -->
         <div v-if="placements.length" class="sheet-draw-layer">
           <template v-for="(p, i) in placements" :key="i">
             <img
@@ -453,12 +463,53 @@ onBeforeUnmount(() => {
               :alt="p.item.name"
               :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' }"
             />
-            <div
-              v-else-if="p.item.kind === 'shape'"
-              class="sheet-draw-shape"
+            <!-- 形状 / 连接线：SVG 渲染 -->
+            <svg
+              v-else-if="(p.item.kind === 'shape' || p.item.kind === 'cxnSp')"
+              class="sheet-draw-svg"
               :title="p.item.name"
-              :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px', ...shapeStyle(p) }"
-            ></div>
+              :viewBox="`0 0 ${p.w} ${p.h}`"
+              :style="{
+                left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px',
+                transform: p.item.rot ? `rotate(${p.item.rot}deg)` : undefined,
+                transformOrigin: 'center'
+              }"
+            >
+              <path
+                v-if="shapeSvgPath(p.item, p.w, p.h)"
+                :d="shapeSvgPath(p.item, p.w, p.h) ?? ''"
+                :fill="p.item.noFill ? 'none' : (p.item.fill ?? '#4472C4')"
+                fill-rule="evenodd"
+                :stroke="p.item.line?.color ?? 'none'"
+                :stroke-width="p.item.line ? Math.max(0.5, p.item.line.widthPt * 96 / 72) : 0"
+                stroke-linejoin="round"
+              />
+              <!-- 无 SVG path 的形状降级为矩形 -->
+              <rect
+                v-else
+                :x="0" :y="0" :width="p.w" :height="p.h"
+                :fill="p.item.noFill ? 'none' : (p.item.fill ?? '#4472C4')"
+                :stroke="p.item.line?.color ?? 'none'"
+                :stroke-width="p.item.line ? Math.max(0.5, p.item.line.widthPt * 96 / 72) : 0"
+                rx="2"
+              />
+              <!-- 形状内文本 -->
+              <text
+                v-if="p.item.text"
+                x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+                font-size="12" fill="#333"
+              >{{ p.item.text }}</text>
+            </svg>
+            <!-- 组合 / AlternateContent：占位框 -->
+            <div
+              v-else-if="p.item.kind === 'grpSp' || p.item.kind === 'placeholder'"
+              class="sheet-draw-chart"
+              :title="p.item.note ?? p.item.name"
+              :style="{ left: p.x + 'px', top: p.y + 'px', width: p.w + 'px', height: p.h + 'px' }"
+            >
+              <i class="fas fa-shapes"></i><span>{{ p.item.note ?? '组合' }}</span>
+            </div>
+            <!-- 图表 -->
             <div
               v-else
               class="sheet-draw-chart"
@@ -640,13 +691,16 @@ onBeforeUnmount(() => {
   z-index: 3;
 }
 .sheet-draw-pic,
-.sheet-draw-shape,
+.sheet-draw-svg,
 .sheet-draw-chart {
   position: absolute;
   pointer-events: auto;
 }
 .sheet-draw-pic {
   object-fit: fill;
+}
+.sheet-draw-svg {
+  overflow: visible;
 }
 .sheet-draw-chart {
   display: flex;

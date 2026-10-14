@@ -115,7 +115,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           // 服务端 ack 为 { ok, status }，normalizeAck 会把 status 归入 data，故从 ack.data.status 读取
           const status = (ack as { data?: { status?: string } }).data?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
-          void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
+          // void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
             const info = (p.info ?? {}) as Record<string, unknown>
             const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
@@ -483,7 +483,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.rtcSignal, (_e, roomId, signal) => serverClient.rtcSignal(String(roomId), signal as import('../shared/server-types').RtcSignalPayload))
   ipcMain.handle(IpcChannels.rtcLeave, (_e, roomId) => serverClient.rtcLeave(String(roomId)))
   ipcMain.handle(IpcChannels.rtcEnd, (_e, roomId) => serverClient.rtcEnd(String(roomId)))
-  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : 'video'))
+  ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind, password) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : kind === 'remote' ? 'remote' : 'video', typeof password === 'string' ? password : undefined))
   ipcMain.handle(IpcChannels.rtcDmAnswer, (_e, roomId, accept) => serverClient.rtcDmAnswer(String(roomId), accept === true))
   ipcMain.handle(IpcChannels.rtcGroupCall, (_e, groupId, kind) => serverClient.rtcGroupCall(Number(groupId) || 0, kind === 'voice' ? 'voice' : 'video'))
   ipcMain.handle(IpcChannels.rtcChatSend, (_e, roomId, content) => serverClient.rtcChatMessage(String(roomId), String(content ?? '')))
@@ -851,6 +851,35 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
     return { ok: true }
   })
+
+  // 打开独立远程控制窗口（控制端）：无边框 + 主窗口样式 + 可缩放。
+  // 会话参数先暂存，远程窗口 ready 后经 remoteGetParams 取回，再由远程窗口内建 WebRTC 会话。
+  let pendingRemote: { room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null = null
+  ipcMain.handle(IpcChannels.openRemoteWindow, (_e, params) => {
+    const p = (params ?? {}) as { room?: unknown; iceServers?: unknown; mode?: unknown; peerId?: unknown; peerName?: unknown; meId?: unknown }
+    const room = String(p.room ?? '')
+    if (!room) return { ok: false, error: '缺少会话标识' }
+    pendingRemote = {
+      room,
+      iceServers: Array.isArray(p.iceServers) ? p.iceServers : [],
+      mode: p.mode === 'local' ? 'local' : 'remote',
+      peerId: Number(p.peerId) || 0,
+      peerName: String(p.peerName ?? ''),
+      meId: Number(p.meId) || 0
+    }
+    const win = new BrowserWindow({
+      width: 1240, height: 820, minWidth: 800, minHeight: 560,
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#0e0f12',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/remote.html`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/remote.html'))
+    }
+    return { ok: true }
+  })
+  ipcMain.handle(IpcChannels.remoteGetParams, () => pendingRemote)
 
   // 打开独立全屏截屏窗口（固定、不可调整）——先把截图数据暂存，截图窗口 ready 后再取
   // 同时打开独立工具栏窗口（框选时用）；全屏编辑时隐藏独立窗口、工具栏内嵌在编辑窗口内部

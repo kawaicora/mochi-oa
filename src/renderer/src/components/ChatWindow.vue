@@ -307,6 +307,44 @@ async function onPin(): Promise<void> {
 function startDmVideo(): void {
   if (selected.value?.dmUserId) void rtc.startDmCall(selected.value.dmUserId, 'video')
 }
+// 远程控制：主叫发起；对方设了密码 → 弹密码输入框重试
+const remotePwOpen = ref(false)
+const remotePw = ref('')
+const remoteReqUserId = ref(0)
+async function startDmRemote(): Promise<void> {
+  if (!selected.value?.dmUserId) return
+  const id = selected.value.dmUserId
+  try {
+    const r = await rtc.startDmCall(id, 'remote')
+    if (r.needPassword) {
+      remoteReqUserId.value = id
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 发起远程控制失败', e)
+    flashToast(String(e))
+  }
+}
+async function submitRemotePw(): Promise<void> {
+  const id = remoteReqUserId.value
+  const pw = remotePw.value
+  remotePwOpen.value = false
+  try {
+    const r = await rtc.startDmCall(id, 'remote', pw)
+    if (r.needPassword) {
+      remotePw.value = ''
+      remotePwOpen.value = true
+    } else if (rtc.error) {
+      flashToast(rtc.error)
+    }
+  } catch (e) {
+    console.error('[chat] 提交远程控制密码失败', e)
+    flashToast(String(e))
+  }
+}
 function startGroupVoice(): void {
   if (selected.value?.groupId) void rtc.startGroupCall(selected.value.groupId, 'voice')
 }
@@ -520,6 +558,9 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="通话" @click="startDmVideo">
             <i class="fas fa-video"></i>
           </button>
+          <button v-if="selected.kind === 'dm' && selected.dmUserId" class="chat-act" title="远程控制" @click="startDmRemote">
+            <i class="fas fa-desktop"></i>
+          </button>
           <button v-if="selected.kind === 'group' && selected.groupId" class="chat-act" title="通话" @click="startGroupVideo">
             <i class="fas fa-video"></i>
           </button>
@@ -661,6 +702,21 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
     <!-- 下载结果提示 -->
     <div v-if="dlToast" class="dl-toast">{{ dlToast }}</div>
 
+    <!-- 远程控制密码输入（对方设置了远程控制密码） -->
+    <Teleport to="body">
+      <div v-if="remotePwOpen" class="remote-pw-overlay" @click.self="remotePwOpen = false">
+        <div class="remote-pw-box">
+          <div class="remote-pw-title"><i class="fas fa-desktop"></i> 远程控制</div>
+          <div class="remote-pw-desc">对方设置了远程控制密码，请输入后继续：</div>
+          <input v-model="remotePw" class="remote-pw-input" type="password" placeholder="远程控制密码" @keydown.enter="submitRemotePw" autofocus />
+          <div class="remote-pw-actions">
+            <button class="remote-pw-cancel" @click="remotePwOpen = false">取消</button>
+            <button class="remote-pw-ok" @click="submitRemotePw">确认连接</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 3D 模型预览 -->
     <ModelPreview v-if="previewModel" :path="previewModel.path" :name="previewModel.name" @close="previewModel = null" />
 
@@ -673,6 +729,72 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 </template>
 
 <style scoped>
+.remote-pw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.remote-pw-box {
+  background: #161b22;
+  border-radius: 14px;
+  padding: 24px 28px;
+  width: 340px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.remote-pw-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6edf3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.remote-pw-desc {
+  font-size: 13px;
+  color: #8b949e;
+  margin-bottom: 14px;
+}
+.remote-pw-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.remote-pw-input:focus {
+  outline: none;
+  border-color: #6b7bff;
+}
+.remote-pw-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.remote-pw-cancel {
+  background: #30363d;
+  color: #e6edf3;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.remote-pw-ok {
+  background: #6b7bff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
 .chat-panel {
   flex: 1;
   display: flex;

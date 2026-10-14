@@ -56,7 +56,14 @@ export default defineConfig({
             'three/examples/jsm/loaders/FBXLoader.js',
             'three/examples/jsm/loaders/STLLoader.js',
             'three/examples/jsm/loaders/GLTFLoader.js',
-            'three/examples/jsm/controls/OrbitControls.js'
+            'three/examples/jsm/controls/OrbitControls.js',
+            // 跨 preload/renderer 的 IPC API 名：preload 不混淆、renderer 混淆，
+            // 强制保留字面量，避免 stringArray 编码后与 preload 实际键名不一致。
+            'openRemoteWindow',
+            'remoteGetParams',
+            'remoteInputStart',
+            'remoteInputStop',
+            'remoteInputEvent'
           ]
         }
       })
@@ -71,7 +78,8 @@ export default defineConfig({
           task: resolve(__dirname, 'src/renderer/task.html'),
           screenshot: resolve(__dirname, 'src/renderer/screenshot.html'),
           toolbar: resolve(__dirname, 'src/renderer/toolbar.html'),
-          preview: resolve(__dirname, 'src/renderer/preview.html')
+          preview: resolve(__dirname, 'src/renderer/preview.html'),
+          remote: resolve(__dirname, 'src/renderer/remote.html')
         }
       }
     }

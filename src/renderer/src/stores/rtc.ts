@@ -13,6 +13,7 @@ import type { NotifTarget } from '@shared/ipc'
 import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
+import RemoteUi from '@renderer/remote/RemoteUi'
 import { useServerStore } from '@renderer/stores/server'
 
 // ─── RTC preload API 类型（主进程层同时实现，此处做类型断言） ───
@@ -35,7 +36,8 @@ interface RtcPantryApi {
   rtcEnd(roomId: string): Promise<Ack>
   rtcDmCall(
     userId: number,
-    kind: RtcKind
+    kind: RtcKind,
+    password?: string
   ): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }>
   rtcDmAnswer(
     roomId: string,
@@ -89,11 +91,14 @@ export const useRtcStore = defineStore('rtc', () => {
 
   // ─── 事件订阅 ───
 
-  async function maybeNotify(title: string, body: string, target?: NotifTarget): Promise<void> {
+  async function maybeNotify(title: string, body: string, target?: NotifTarget, force = false): Promise<void> {
     try {
       const st = await rtcPantry.getWindowState()
-      if (st && !st.focused) await rtcPantry.notify({ title, body, target })
-    } catch { /* 忽略 */ }
+      // force=true（远程控制等高风险请求）：无论窗口是否聚焦都发系统通知
+      if (force || (st && !st.focused)) await rtcPantry.notify({ title, body, target })
+    } catch (e) {
+      console.error('[rtc] 系统通知发送失败', title, e)
+    }
   }
 
   function wire(): () => void {
@@ -101,7 +106,14 @@ export const useRtcStore = defineStore('rtc', () => {
       rtcPantry.onRtcDmIncoming((d) => {
         if (activeCall.value) return // 已有通话，忽略新来电
         incomingDm.value = d
-        void maybeNotify(`${d.from.nick ?? d.from.userId} 正在呼叫你`, '通话', { kind: 'main' })
+        const isRemote = d.kind === 'remote'
+        const who = d.from.nick ?? `用户 ${d.from.userId}`
+        const title = isRemote ? '远程控制请求' : `${who} 正在呼叫你`
+        const body = isRemote
+          ? `${who} 请求远程控制你的电脑。同意后对方将看到并操作你的屏幕。`
+          : d.kind === 'video' ? '视频通话' : '语音通话'
+        // 远程控制涉及他人操控本机，有风险：无论窗口是否聚焦都显著系统通知提醒
+        void maybeNotify(title, body, { kind: 'main' }, isRemote)
       })
     )
 
@@ -177,18 +189,28 @@ export const useRtcStore = defineStore('rtc', () => {
 
   // ─── 通话入口 ───
 
-  async function startDmCall(userId: number, kind: RtcKind): Promise<void> {
+  async function startDmCall(userId: number, kind: RtcKind, password?: string): Promise<{ needPassword?: boolean }> {
     error.value = ''
     try {
-      const ack = await rtcPantry.rtcDmCall(userId, kind)
+      const ack = await rtcPantry.rtcDmCall(userId, kind, password)
       if (!ack.ok || !ack.data?.room) {
         error.value = ack.error || '发起通话失败'
-        return
+        // 远程控制：对方设置了密码 → 主叫弹密码输入框
+        if (kind === 'remote' && ack.error && ack.error.includes('密码')) return { needPassword: true }
+        return {}
+      }
+      if (kind === 'remote') {
+        // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制）
+        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId })
+        return {}
       }
       // 统一走通用通话窗口（与会议同一组件 RtcCallRoom）
       void window.pantry.openMeetingWindow({ mode: 'join', kind, meetingNo: ack.data.room.id })
+      return {}
     } catch (e) {
+      console.error('[rtc] startDmCall 失败', kind, 'userId=', userId, e)
       error.value = String(e)
+      return {}
     }
   }
 
@@ -197,6 +219,8 @@ export const useRtcStore = defineStore('rtc', () => {
     error.value = ''
     const roomId = incomingDm.value.room
     const kind = incomingDm.value.kind
+    // 远程控制：对端（控制端/发起者）userId，用于信令精确匹配
+    const peerId = incomingDm.value.from?.userId ?? 0
     try {
       const ack = await rtcPantry.rtcDmAnswer(roomId, true)
       if (!ack.ok || !ack.data?.room) {
@@ -204,9 +228,15 @@ export const useRtcStore = defineStore('rtc', () => {
         return
       }
       incomingDm.value = null
+      if (kind === 'remote') {
+        // 被控端：同意后启动被控会话（采集屏幕 + 系统声音 + 键鼠注入）
+        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId })
+        return
+      }
       // 统一走通用通话窗口
-      void window.pantry.openMeetingWindow({ mode: 'join', kind, meetingNo: ack.data.room.id })
+      void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -226,8 +256,9 @@ export const useRtcStore = defineStore('rtc', () => {
         return
       }
       // 统一走通用通话窗口
-      void window.pantry.openMeetingWindow({ mode: 'join', kind, meetingNo: ack.data.room.id })
+      void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -245,8 +276,9 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       incomingGroup.value = null
       // 统一走通用通话窗口
-      void window.pantry.openMeetingWindow({ mode: 'join', kind, meetingNo: ack.data.room.id })
+      void window.pantry.openMeetingWindow({ mode: 'join', kind: kind as 'video' | 'voice', meetingNo: ack.data.room.id })
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }
@@ -276,6 +308,7 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind)
     } catch (e) {
+      console.error('[rtc] 调用失败', e)
       error.value = String(e)
     }
   }

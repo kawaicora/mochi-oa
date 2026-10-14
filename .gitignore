@@ -11,3 +11,4 @@ tools/.shot/
 electron.vite.config.*.mjs
 .dsh-verify
 .doubao-workspace
+tools
