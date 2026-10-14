@@ -388,6 +388,8 @@ const api = {
   runAlarmCommand: (command: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.alarmRun, command),
   readAudioFile: (path: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> => ipcRenderer.invoke(IpcChannels.audioReadFile, path),
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l),
+  onDownloadProgress: (l: (d: { url: string; received: number; total: number; percent: number }) => void) =>
+    subscribe<{ url: string; received: number; total: number; percent: number }>(IpcEvents.downloadProgress, l),
   onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l)
 }
 
