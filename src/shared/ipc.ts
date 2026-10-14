@@ -243,6 +243,12 @@ export const IpcChannels = {
   brandingGet: 'app:brandingGet',
   /** 在系统文件管理器中打开本地文件所在路径 */
   appOpenFileLocation: 'app:openFileLocation',
+  /** 写系统剪贴板（消息右键「复制」用）：走主进程 Electron clipboard，不依赖页面是否聚焦/安全上下文 */
+  appClipboardWriteText: 'app:clipboardWriteText',
+  /** 把本地图片文件写进系统剪贴板（右键图片消息「复制图片」） */
+  appClipboardWriteImage: 'app:clipboardWriteImage',
+  /** 把一段二进制写成临时文件并返回路径（粘贴剪贴板图片发送、主进程不碰渲染层 blob） */
+  appWriteTempFile: 'app:writeTempFile',
   // 远程控制输入注入（被控端 main）：start 设键鼠模式，event 分发控制指令，stop 复位+结束
   remoteInputStart: 'remote:input:start',
   remoteInputStop: 'remote:input:stop',

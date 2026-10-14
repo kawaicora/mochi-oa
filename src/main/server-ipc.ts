@@ -812,6 +812,55 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     if (typeof p === 'string' && p) shell.showItemInFolder(p)
     return Promise.resolve()
   })
+  // 写系统剪贴板：用 Electron clipboard（渲染层的 navigator.clipboard 依赖页面聚焦与安全上下文，
+  // 打包后走 file:// 时不稳），消息右键「复制」走这里。
+  ipcMain.handle(IpcChannels.appClipboardWriteText, (_e, text) => {
+    try {
+      const { clipboard } = require('electron') as typeof import('electron')
+      clipboard.writeText(typeof text === 'string' ? text : String(text ?? ''))
+      return { ok: true }
+    } catch (err) {
+      console.log(`[clipboard] 写入文本失败 ${err instanceof Error ? err.message : String(err)}`)
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  // 把本地图片文件写进系统剪贴板（右键图片消息「复制图片」）：
+  // 剪贴板放进的是图片本身（不是路径/URL），可以直接粘到微信、Word 等任何地方。
+  ipcMain.handle(IpcChannels.appClipboardWriteImage, (_e, filePath) => {
+    try {
+      const { clipboard, nativeImage } = require('electron') as typeof import('electron')
+      const p = typeof filePath === 'string' ? filePath : ''
+      if (!p) return { ok: false, error: '缺少图片路径' }
+      const img = nativeImage.createFromPath(p)
+      if (img.isEmpty()) return { ok: false, error: '图片读取失败（文件不存在或格式不支持）' }
+      clipboard.writeImage(img)
+      return { ok: true }
+    } catch (err) {
+      console.log(`[clipboard] 写入图片失败 ${err instanceof Error ? err.message : String(err)}`)
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  // 把一段二进制落成临时文件并返回路径：粘贴剪贴板图片时渲染层只能拿到 blob，
+  // 而上传链路全是按「本地文件路径」走的，所以先落临时文件再复用 serverUploadChunked。
+  ipcMain.handle(IpcChannels.appWriteTempFile, async (_e, payload) => {
+    try {
+      const p = (payload ?? {}) as { name?: unknown; data?: unknown }
+      const buf = Buffer.from(p.data as ArrayBuffer)
+      if (buf.length === 0) return { ok: false, error: '内容为空' }
+      const rawName = String(p.name ?? `paste_${Date.now()}.png`)
+      const safe = rawName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || `paste_${Date.now()}.png`
+      const { app } = require('electron') as typeof import('electron')
+      const dir = join(app.getPath('temp'), 'mochi-oa-paste')
+      await mkdir(dir, { recursive: true })
+      const dest = join(dir, `${Date.now()}_${safe}`)
+      await writeFile(dest, buf)
+      console.log(`[paste] 临时文件 ${dest} ${buf.length}B`)
+      return { ok: true, path: dest }
+    } catch (err) {
+      console.log(`[paste] 写临时文件失败 ${err instanceof Error ? err.message : String(err)}`)
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   // 打开独立会议窗口
   ipcMain.handle(IpcChannels.openMeetingWindow, (_e, params) => {

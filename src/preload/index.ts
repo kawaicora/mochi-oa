@@ -390,7 +390,15 @@ const api = {
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l),
   onDownloadProgress: (l: (d: { url: string; received: number; total: number; percent: number }) => void) =>
     subscribe<{ url: string; received: number; total: number; percent: number }>(IpcEvents.downloadProgress, l),
-  onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l)
+  onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l),
+  // 消息右键「复制」：文本/表情 → writeClipboardText；图片 → writeClipboardImage(本地绝对路径)
+  writeClipboardText: (text: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.appClipboardWriteText, text),
+  writeClipboardImage: (path: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.appClipboardWriteImage, path),
+  // 粘贴剪贴板图片：渲染层只有 blob，落成临时文件拿路径后复用 sendFile 上传
+  writeTempFile: (payload: { name: string; data: ArrayBuffer }): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.appWriteTempFile, payload)
 }
 
 export type PantryApi = typeof api

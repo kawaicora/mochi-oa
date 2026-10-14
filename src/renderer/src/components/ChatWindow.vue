@@ -313,10 +313,13 @@ function preventWindowDrop(e: DragEvent): void {
 onMounted(() => {
   window.addEventListener('dragover', preventWindowDrop)
   window.addEventListener('drop', preventWindowDrop)
+  // 粘贴剪贴板图片：挂在 window 上，焦点在聊天区任意位置都能直接粘图发送
+  window.addEventListener('paste', onPaste)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', preventWindowDrop)
   window.removeEventListener('drop', preventWindowDrop)
+  window.removeEventListener('paste', onPaste)
 })
 
 const emojiList = [
@@ -461,6 +464,63 @@ async function onOpenFileLocation(): Promise<void> {
     return
   }
   await window.pantry.openFileLocation(path)
+}
+
+/** 复制文本消息内容（表情消息同为 kind='text'，内容是 emoji 字符，一并覆盖） */
+async function onCopyText(): Promise<void> {
+  const id = showMsgMenu.value?.id
+  closeMsgMenu()
+  if (!id) return
+  const m = app.messages.find((x) => x.id === id)
+  if (!m || !m.content) return
+  const r = await window.pantry.writeClipboardText(m.content)
+  flashToast(r.ok ? '已复制' : `复制失败：${r.error || '未知错误'}`)
+}
+
+/** 复制图片消息：先把图片落到本地（缓存命中则直接用），再把图片本身写进剪贴板 */
+async function onCopyImage(): Promise<void> {
+  const id = showMsgMenu.value?.id
+  closeMsgMenu()
+  if (!id) return
+  const m = app.messages.find((x) => x.id === id)
+  if (!m) return
+  const path = await ensureLocalPath(m) // 需要下载时会显示下载进度卡片
+  if (!path) {
+    flashToast('图片下载失败，无法复制')
+    return
+  }
+  const r = await window.pantry.writeClipboardImage(path)
+  flashToast(r.ok ? '图片已复制到剪贴板' : `复制失败：${r.error || '未知错误'}`)
+}
+
+/**
+ * 粘贴剪贴板图片到输入框并发送。
+ * 剪贴板图片在渲染层只是 blob，而上传链路（serverUploadChunked）按本地文件路径走，
+ * 所以先经主进程落成临时文件，再复用 sendFile 的格式检查与上传进度。
+ * 剪贴板里没有图片时直接返回，不影响正常粘贴文字。
+ */
+async function onPaste(e: ClipboardEvent): Promise<void> {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const imgs: File[] = []
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i]
+    if (it && it.kind === 'file' && it.type.startsWith('image/')) {
+      const f = it.getAsFile()
+      if (f) imgs.push(f)
+    }
+  }
+  if (!imgs.length) return
+  e.preventDefault()
+  for (const f of imgs) {
+    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+    const r = await window.pantry.writeTempFile({ name: `粘贴图片_${Date.now()}.${ext}`, data: await f.arrayBuffer() })
+    if (!r.ok || !r.path) {
+      flashToast(`粘贴图片失败：${r.error || '未知错误'}`)
+      continue
+    }
+    await app.sendFile(r.path)
+  }
 }
 
 function fileNameOf(url: string): string {
@@ -701,7 +761,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           <button class="chat-tool" title="发送视频" @click="onPickVideo"><i class="far fa-file-video"></i></button>
           <button class="chat-tool" title="发送音频" @click="onPickAudio"><i class="far fa-file-audio"></i></button>
           <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button>
-          <button class="chat-tool" title="发送文件" @click="onPickFile"><i class="far fa-paperclip"></i></button>
+          <button class="chat-tool" title="发送文件" @click="onPickFile"><i class="fas fa-paperclip"></i></button>
           <button class="chat-tool" title="发送文件夹" @click="onPickFolder"><i class="far fa-folder-open"></i></button>
         </div>
         <div v-if="showEmoji" class="emoji-panel">
@@ -741,6 +801,10 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 
     <!-- 消息右键菜单 -->
     <div v-if="showMsgMenu" class="ctx-menu" :style="{ left: showMsgMenu.x + 'px', top: showMsgMenu.y + 'px' }">
+      <!-- 文本消息：复制文字（表情消息也是 kind='text'，内容是 emoji，所以一并覆盖） -->
+      <button v-if="menuMsg && menuMsg.kind === 'text'" class="ctx-item" @click="onCopyText"><i class="far fa-copy"></i> 复制</button>
+      <!-- 图片消息：把图片本身写进剪贴板（可直接粘贴到微信/Word 等） -->
+      <button v-if="menuMsg && menuMsg.kind === 'image'" class="ctx-item" @click="onCopyImage"><i class="far fa-copy"></i> 复制图片</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
       <button class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
