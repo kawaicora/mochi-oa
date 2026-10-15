@@ -172,9 +172,9 @@ async function recoverPeer(userId: number): Promise<void> {
   recoveringPeers.add(userId)
   try {
     rtcRetrying.value = `与「${name}」的连接中断，正在重连（${streak}/${MAX_RTC_RETRY}）…`
-    console.log(`[RTC] 对端 ${userId} 掉线，第 ${streak}/${MAX_RTC_RETRY} 次尝试 ICE 重启恢复`)
-    // 有 PC 就 ICE 重启（首选：不拆连接、不重新协商媒体），没有才新建
-    engine.restartIce(userId)
+    console.log(`[RTC] 对端 ${userId} 掉线，第 ${streak}/${MAX_RTC_RETRY} 次重建连接`)
+    // 与网页版一致：重建连接（addPeer 内部已有稳定连接就跳过，不会乱拆）
+    engine.addPeer(userId)
   } finally {
     recoveringPeers.delete(userId)
   }

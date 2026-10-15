@@ -49,6 +49,22 @@ function describeCandidate(candidate: string): string {
   return `${typ} ${address}:${port}`
 }
 
+/**
+ * 视频 Sender 参数：带宽不足时优先保分辨率（降帧率而不是降清晰度）。
+ * 与网页版一致——失败只记日志，绝不影响建连。
+ */
+async function configureVideoSender(sender: RTCRtpSender): Promise<void> {
+  const params = sender.getParameters()
+  if (!params.encodings) params.encodings = [{}]
+  params.degradationPreference = 'maintain-resolution'
+  try {
+    await sender.setParameters(params)
+    console.log('[RtcEngine] 视频参数已锁定：清晰（maintain-resolution）')
+  } catch (e) {
+    console.error('[RtcEngine] 设置视频参数失败:', e)
+  }
+}
+
 class RtcEngine {
   private roomId: string
   private iceServers: RTCIceServer[]
@@ -60,8 +76,6 @@ class RtcEngine {
 
   /** peer key = userId */
   private peers = new Map<number, RTCPeerConnection>()
-  /** 本端主动关闭的 peer：close() 也会触发 connectionState=closed，不能当成对端掉线 */
-  private closing = new Set<number>()
 
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
@@ -80,77 +94,48 @@ class RtcEngine {
   }
 
   // ─── 建立连接 ──────────────────────────────────────────
+  // 以下 addPeer / handleSignal / closePeer / closeAll / _handleOffer / _handleAnswer /
+  // _handleIce / _flushIce / _renegotiate 与【服务端网页版 RtcEngine】逐条对齐：
+  // 那边是确认可用的实现，逻辑简单且不会互相回敬 offer。
 
-  /** 为新 peer 创建 PC 并发起 offer */
-  addPeer(userId: number): void {
-    // 新建 = 这是一次主动发起（含重连），清掉上次的「主动关闭」标记
-    this.closing.delete(userId)
-    // 已存在连接：若 signalingState 不稳定则 close 重建
-    const existing = this.peers.get(userId)
-    if (existing) {
-      if (existing.signalingState !== 'stable') {
-        existing.close()
-        this.peers.delete(userId)
-      } else {
-        return // 已存在且稳定，不重复创建
-      }
-    }
-
+  /** 建 PC + 加本地轨道 + 挂事件（不发 offer） */
+  private newPc(userId: number): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
     this.peers.set(userId, pc)
     console.log(
-      '[RtcEngine] [addPeer] user=' + userId,
-      '创建PC',
+      '[RtcEngine] [newPc] user=' + userId,
       'ice=' +
         (this.iceServers.map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)) + (s.username && s.credential ? '(@auth)' : '')).join(' | ') || '(none)'),
-      'localTracks=' + this.localStream.getTracks().length,
-      'sig=' + pc.signalingState
+      'localTracks=' + this.localStream.getTracks().length
     )
-
-    // 把本地流每条轨道加到 PC
-    const senders = [];
     this.localStream.getTracks().forEach((track) => {
       const sender = pc.addTrack(track, this.localStream)
-      // 只处理视频轨道，音频不需要设置分辨率/比特率策略
+      // 只处理视频轨道：带宽不足时降帧率、保清晰度
       if (track.kind === 'video') {
         configureVideoSender(sender).catch((err) => {
           console.error('配置视频发送参数失败:', err)
         })
       }
     })
-    
-    // 2. 对每个视频 Sender 设置“禁止模糊”和“指定比特率”
-    async function configureVideoSender(sender: RTCRtpSender) {
-      const params = sender.getParameters();
-      
-      // 指定比特率 (Bitrate) ---
-      // 注意：encodings 是一个数组，通常 simulcast 未开启时只有一个元素
-      if (!params.encodings) params.encodings = [{}];
-      
-      // params.encodings[0].maxBitrate = 3_000_000; 
-      // 禁止画面模糊 (Degradation Preference) ---
-      // 'maintain-resolution': 优先保分辨率。带宽不足时，降低帧率（变卡），但保持清晰度（不糊）。
-      // 'maintain-framerate': 优先保流畅。带宽不足时，降低分辨率（变糊），但保持帧率（不卡）。
-      // 'balanced': 默认行为，两者权衡。
-      params.degradationPreference = 'maintain-resolution';
-
-      try {
-        await sender.setParameters(params);
-        console.log('视频参数已锁定：清晰');
-      } catch (e) {
-        console.error('设置参数失败:', e);
-      }
-    }
     this._bindPeerEvents(pc, userId)
-
-    // 发起 offer
-    void this._createOffer(userId, pc)
+    return pc
   }
 
-
-
-  
-
+  /** 为新 peer 创建 PC 并发起 offer（与网页版一致：已有稳定连接就跳过） */
+  addPeer(userId: number): void {
+    const ex = this.peers.get(userId)
+    if (ex) {
+      if (ex.signalingState !== 'stable') {
+        console.log(`[RtcEngine] [addPeer] user=${userId} 旧 PC 卡在 ${ex.signalingState} → 关掉重建`)
+        ex.close()
+        this.peers.delete(userId)
+      } else {
+        return // 已存在且稳定：绝不动它
+      }
+    }
+    const pc = this.newPc(userId)
+    void this._createOffer(userId, pc)
+  }
 
   // ─── 处理对端信令 ─────────────────────────────────────
 
@@ -158,14 +143,9 @@ class RtcEngine {
     console.log('[RtcEngine] [signal] from=' + fromUserId, 'type=' + signal.type, 'hasPc=' + this.peers.has(fromUserId))
     let pc = this.peers.get(fromUserId)
 
-    // 对端发来 offer 但本地还没有 PC（说明对端先发起），先创建一个
+    // 对端发来 offer 但本地还没有 PC（说明对端先发起），先创建一个（只应答，不发 offer）
     if (!pc && signal.type === 'offer') {
-      pc = new RTCPeerConnection({ iceServers: this.iceServers })
-      this.peers.set(fromUserId, pc)
-      this.localStream.getTracks().forEach((track) => {
-        pc!.addTrack(track, this.localStream)
-      })
-      this._bindPeerEvents(pc, fromUserId)
+      pc = this.newPc(fromUserId)
     }
     if (!pc) return
 
@@ -187,46 +167,19 @@ class RtcEngine {
   closePeer(userId: number): void {
     const pc = this.peers.get(userId)
     if (pc) {
-      this.closing.add(userId)
       pc.close()
       this.peers.delete(userId)
     }
   }
 
   closeAll(): void {
-    this.peers.forEach((pc, userId) => {
-      this.closing.add(userId)
-      pc.close()
-    })
+    this.peers.forEach((pc) => pc.close())
     this.peers.clear()
   }
 
-  /** 是否已有该对端的 PC（重连时用来决定「ICE 重启」还是「新建连接」） */
+  /** 是否已有该对端的 PC（上层判断"要不要发起/重建"用） */
   hasPeer(userId: number): boolean {
     return this.peers.has(userId)
-  }
-
-  /**
-   * ICE 重启（重连的首选手段）：
-   * 在【已有的 PC】上重新收集候选，不新建连接、不重新协商媒体。
-   * 比起 closePeer + addPeer —— 后者会让两端同时发 offer 造成 SDP glare，
-   * 正是"通话必然连不上"的根因。
-   */
-  restartIce(userId: number): void {
-    const pc = this.peers.get(userId)
-    if (!pc) {
-      console.warn(`[RtcEngine] [restartIce] user=${userId} 没有 PC，改走 addPeer`)
-      this.addPeer(userId)
-      return
-    }
-    try {
-      console.log(`[RtcEngine] [restartIce] user=${userId} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
-      pc.restartIce()
-    } catch (e) {
-      console.error(`[RtcEngine] [restartIce] user=${userId} 失败，退回重建:`, e)
-      this.closePeer(userId)
-      this.addPeer(userId)
-    }
   }
 
   // ─── 轨道替换 ─────────────────────────────────────────
@@ -296,29 +249,15 @@ class RtcEngine {
         this.onPeerConnected?.(userId)
         return
       }
-      if (state === 'disconnected') {
-        // 不做任何处理：这是 WebRTC 自己的中间态（丢包/切网），它会自愈回 connected，
-        // 或者由它自己判定为 failed。我们自己加"宽限期"是在替浏览器瞎猜一个数字——
-        // 猜短了会把还能恢复的连接掐死，猜长了又白等，所以这里一律交给 WebRTC 的状态机。
-        console.log(`[RtcEngine] [conn-state] user=${userId} disconnected（交给 WebRTC 自愈/判定，本端不干预）`)
-        return
-      }
-      if (state === 'failed' || state === 'closed') {
-        if (this.closing.has(userId)) {
-          // 本端主动 closePeer/closeAll 触发的，不算对端掉线
-          this.closing.delete(userId)
-          return
-        }
-        // failed = WebRTC 自己已经重试到头了，这才是真的连不上
-        this.handleDrop(userId)
+      // 与网页版一致：disconnected / failed / closed 一律清理并通知上层，不自己造秒数、不自己重连。
+      // 唯一的加固：只有「当前登记的还是这个 PC」才处理 ——
+      // 老 PC 被主动关掉后它的异步事件不能误伤刚建好的新 PC。
+      if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+        if (this.peers.get(userId) !== pc) return
+        this.closePeer(userId)
+        this.onPeerDisconnected(userId)
       }
     }
-  }
-
-  /** 对端确实连不上（状态机给出 failed，或本端已关闭）：通知上层去处理 */
-  private handleDrop(userId: number): void {
-    this.closePeer(userId)
-    this.onPeerDisconnected(userId)
   }
 
   /** 连接建立后：用 getStats 找出成功候选对，判定直连/中转，并输出本地/远端候选与中心服务器(TURN)地址 */
@@ -404,38 +343,25 @@ class RtcEngine {
   private async _handleOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
     console.log('[RtcEngine] [收到offer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + pc.signalingState)
     try {
-      // 若已有未完成的 remote offer，先回滚
+      // 与网页版逐条对齐：
+      //  - have-remote-offer（上一个对端 offer 还没答完）→ 先回滚再接受新的；
+      //  - have-local-offer（双方同时发起 = glare）→ 下面的 setRemoteDescription 会抛
+      //    InvalidStateError，被 catch 吞掉 = 本端不接这个 offer，等对端回我自己的 answer。
+      //    这样两边不会互相回敬 offer，不会出现"有人进来所有人都掉线"。
       if (pc.signalingState === 'have-remote-offer') {
-        // 检查后状态可能已被并发 offer 变更（如已是 stable）→ rollback 失败时忽略，继续尝试 set 新 offer
         try {
           await pc.setRemoteDescription({ type: 'rollback' })
-        } catch {
-          /* ignore：状态已变，交由下方 setRemoteDescription 决定 */
-        }
-      }
-      // SDP glare：双方同时发了 offer（重连重试、双方同时重建连接时很容易发生）。
-      // 本端还停在 have-local-offer，此刻直接 setRemoteDescription(offer) 会抛
-      // InvalidStateError，PC 就永久卡死在 have-local-offer —— 表现就是"连接必然失败"。
-      // 标准做法（perfect negotiation）：放弃本端这次 offer（rollback），接受对端的。
-      if (pc.signalingState === 'have-local-offer') {
-        console.warn('[RtcEngine] [glare] user=' + userId + ' 双方同时发 offer → 本端回滚自己的 offer，接受对端 offer（避免 PC 卡死）')
-        try {
-          await pc.setLocalDescription({ type: 'rollback' })
-        } catch (e) {
-          console.error('[RtcEngine] [glare] rollback 失败（PC 可能已坏，重建）:', e)
-          this.closePeer(userId)
-          this.addPeer(userId)
-          return
-        }
+        } catch { /* 状态已变，交由下面 setRemoteDescription 决定 */ }
       }
       await pc.setRemoteDescription({ type: 'offer', sdp })
       await this._flushPendingIce(userId, pc)
       const answer = await pc.createAnswer()
       answer.sdp = EnforceStereo(answer.sdp ?? '')
       await pc.setLocalDescription(answer)
+      console.log('[RtcEngine] [发送answer] user=' + userId, 'sdpLen=' + (answer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'answer', sdp: answer.sdp ?? '' })
     } catch (err) {
-      console.error('[RtcEngine] handleOffer failed:', err)
+      console.warn(`[RtcEngine] [收到offer] user=${userId} 未能处理（多为双方同时发 offer，等对端回 answer 即可）：`, err instanceof Error ? err.message : err)
     }
   }
 
