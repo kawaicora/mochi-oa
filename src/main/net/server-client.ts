@@ -223,7 +223,7 @@ function httpGet(url: string, onProgress?: (received: number, total: number) => 
  * socket.io 本身是无限重连（reconnectionAttempts: Infinity），这里额外兜一层：
  * 连续失败到上限就退回登录页（保留 token），避免用户对着一个永远转圈的主界面干等。
  */
-const MAX_RECONNECT_FAILURES = 3
+const MAX_RECONNECT_FAILURES = 9999
 
 export class ServerClient extends EventEmitter {
   private socket: Socket | null = null
