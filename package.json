@@ -38,6 +38,9 @@
       "icon": "resources\\mochi_256.png",
       "target": [
         "AppImage"
+      ],
+      "executableArgs": [
+        "--no-sandbox"
       ]
     },
     "nsis": {

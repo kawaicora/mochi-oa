@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, screen, session, shell, webContents } from 'electron'
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
+import { existsSync, mkdirSync, appendFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
@@ -11,6 +11,57 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
+
+/**
+ * Linux 沙箱兜底（必须在 app ready 之前、越早越好）。
+ *
+ * 打包出来的 chrome-sandbox 需要 root 属主 + 4755 才能用。AppImage 是挂载到用户目录的
+ * squashfs，里面的文件属主是当前用户、且挂载时保留不了 setuid 位，于是直接双击运行时
+ * Chromium 会 FATAL 退出：
+ *   setuid_sandbox_host.cc ... The SUID sandbox helper binary was found, but is not configured correctly
+ * 或（内核禁了非特权 user namespace 时）
+ *   Failed to move to new namespace: Operation not permitted
+ * electron-builder 里配的 executableArgs 只在 .desktop 启动项（菜单/自启动）生效，
+ * 直接跑 AppImage 文件不经过它，所以这里再兜一层：只在确实用不了沙箱时才关。
+ * 想强制保留沙箱：MOCHI_KEEP_SANDBOX=1。
+ */
+function applyLinuxSandboxFallback(): void {
+  if (process.platform !== 'linux') return
+  if (process.argv.includes('--no-sandbox')) return
+  if (process.env['MOCHI_KEEP_SANDBOX'] === '1') {
+    console.log('[sandbox] MOCHI_KEEP_SANDBOX=1 → 保留沙箱（若启动闪退请去掉该环境变量）')
+    return
+  }
+  let need = false
+  let why = ''
+  try {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : -1
+    if (uid === 0) {
+      need = true
+      why = '以 root 运行'
+    } else {
+      const sandbox = join(process.resourcesPath, 'chrome-sandbox')
+      if (!existsSync(sandbox)) {
+        need = true
+        why = '未找到 chrome-sandbox'
+      } else {
+        const st = statSync(sandbox)
+        if (st.uid !== 0 || (st.mode & 0o4000) === 0) {
+          need = true
+          why = `chrome-sandbox 权限不满足要求（uid=${st.uid} 应为 0，mode=${(st.mode & 0o7777).toString(8)} 需含 4755）`
+        }
+      }
+    }
+  } catch (e) {
+    need = true
+    why = `检查 chrome-sandbox 失败：${e instanceof Error ? e.message : String(e)}`
+  }
+  if (need) {
+    console.warn(`[sandbox] Linux 沙箱不可用（${why}）→ 本次以 --no-sandbox 启动；如需保留沙箱请执行：sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox`)
+    app.commandLine.appendSwitch('no-sandbox')
+  }
+}
+applyLinuxSandboxFallback()
 
 // ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
 // 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
