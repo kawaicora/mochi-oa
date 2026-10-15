@@ -166,6 +166,7 @@ class RtcEngine {
 
   closePeer(userId: number): void {
     const pc = this.peers.get(userId)
+    this._clearAnswerWatchdog(userId)
     if (pc) {
       pc.close()
       this.peers.delete(userId)
@@ -173,6 +174,8 @@ class RtcEngine {
   }
 
   closeAll(): void {
+    this._answerTimers.forEach((t) => clearTimeout(t))
+    this._answerTimers.clear()
     this.peers.forEach((pc) => pc.close())
     this.peers.clear()
   }
@@ -309,8 +312,41 @@ class RtcEngine {
       await pc.setLocalDescription(offer)
       console.log('[RtcEngine] [发送offer] user=' + userId, 'sdpLen=' + (offer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'offer', sdp: offer.sdp ?? '' })
+      this._armAnswerWatchdog(userId, pc)
     } catch (err) {
       console.error('[RtcEngine] createOffer failed:', err)
+    }
+  }
+
+  /**
+   * 应答看门狗：发了 offer 却迟迟收不到 answer → 把这条连接丢掉让上层重连，
+   * 免得一直卡在 have-local-offer（对端若同时也在等我回，就永远僵住 = 死锁）。
+   * 重试上限交给上层（recoverPeer 的连续 3 次），这里只负责"发现僵住并解绑"。
+   */
+  private _answerTimers = new Map<number, ReturnType<typeof setTimeout>>()
+  private static readonly ANSWER_TIMEOUT_MS = 8000
+
+  private _armAnswerWatchdog(userId: number, pc: RTCPeerConnection): void {
+    this._clearAnswerWatchdog(userId)
+    this._answerTimers.set(
+      userId,
+      setTimeout(() => {
+        this._answerTimers.delete(userId)
+        // 连接已经好了 / 这个 PC 已被换掉 → 什么都不用做
+        if (this.peers.get(userId) !== pc) return
+        if (pc.signalingState !== 'have-local-offer') return
+        console.warn(`[RtcEngine] [answer超时] user=${userId} 发出 offer 后 ${RtcEngine.ANSWER_TIMEOUT_MS}ms 未收到 answer → 丢弃该连接等上层重连`)
+        this.closePeer(userId)
+        this.onPeerDisconnected(userId)
+      }, RtcEngine.ANSWER_TIMEOUT_MS)
+    )
+  }
+
+  private _clearAnswerWatchdog(userId: number): void {
+    const t = this._answerTimers.get(userId)
+    if (t) {
+      clearTimeout(t)
+      this._answerTimers.delete(userId)
     }
   }
 
@@ -366,19 +402,39 @@ class RtcEngine {
   }
 
   private async _handleAnswer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
-    console.log('[RtcEngine] [收到answer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + pc.signalingState)
+    const sig = pc.signalingState
+    console.log('[RtcEngine] [收到answer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + sig)
+    // 只有"本端等着对方回 answer"时才收：
+    //  - have-local-offer → 正常路径；
+    //  - stable → 这个 answer 对应的是本端已经作废的 offer（比如双方同时发 offer 后本端那个
+    //    被丢了/已被别的 answer 答完）。此时绝不能硬 set —— 会抛 wrong state: stable，
+    //    更糟的是把当前正常的连接毁掉。答案很简单：忽略，本端手里的连接是好的。
+    if (sig !== 'have-local-offer') {
+      console.log(`[RtcEngine] [收到answer] user=${userId} 忽略：本端不处于 have-local-offer（${sig}），说明该 answer 对应的 offer 已作废`)
+      return
+    }
     try {
-      // 仅当本地有未解决的 offer 时才接受 answer
-      if (pc.signalingState === 'have-local-offer') {
-        await pc.setRemoteDescription({ type: 'answer', sdp })
-        await this._flushPendingIce(userId, pc)
-      }
+      await pc.setRemoteDescription({ type: 'answer', sdp })
+      this._clearAnswerWatchdog(userId)
+      await this._flushPendingIce(userId, pc)
     } catch (err) {
-      console.error('[RtcEngine] handleAnswer failed:', err)
+      // 真的失败了（比如 SDP 角色冲突）→ 这个连接救不回来，丢掉它让上层重连，
+      // 但只动这一个 peer，绝不波及其它人。
+      console.error(`[RtcEngine] [收到answer] user=${userId} 应用失败，重建该连接：`, err)
+      if (this.peers.get(userId) === pc) {
+        this.closePeer(userId)
+        this.onPeerDisconnected(userId)
+      }
     }
   }
 
   private async _handleIce(pc: RTCPeerConnection, userId: number, signal: Extract<RtcSignalPayload, { type: 'ice' }>): Promise<void> {
+    // 这个 candidate 属于被换掉的旧连接（对端已重建）→ 直接丢，不要塞进新 PC。
+    // 老 candidate 配新 ufrag 一定会被 addIceCandidate 拒绝，还会刷一堆报错。
+    if (this.peers.get(userId) !== pc) {
+      console.log(`[RtcEngine] [收到ICE] user=${userId} 丢弃：该候选属于已被替换的旧连接`)
+      return
+    }
     // 远端描述尚未 set：先缓存，待 offer/answer 处理完成后统一补加，避免 addIceCandidate 报 remote description was null
     console.log(`[RtcEngine] [收到ICE] user=${userId} ${describeCandidate(signal.candidate)} cached=${pc.remoteDescription === null} sig=${pc.signalingState}`)
     if (!pc.remoteDescription) {
@@ -398,7 +454,7 @@ class RtcEngine {
         })
       )
     } catch (err) {
-      console.error('[RtcEngine] handleIce failed:', err)
+      console.warn(`[RtcEngine] [收到ICE] user=${userId} 添加失败（通常是旧连接的候选）：${err instanceof Error ? err.message : err}`)
     }
   }
 
