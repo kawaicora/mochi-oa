@@ -6,9 +6,6 @@
 
 import type { RtcIceServer, RtcSignalPayload } from '@shared/server-types'
 
-/** 'disconnected' 的宽限期：丢包/切网通常能自愈，超过这个时间还没恢复才算掉线 */
-const DISCONNECT_GRACE_MS = 3000
-
 export interface RtcEngineOptions {
   roomId: string
   iceServers: RtcIceServer[]
@@ -65,8 +62,6 @@ class RtcEngine {
   private peers = new Map<number, RTCPeerConnection>()
   /** 本端主动关闭的 peer：close() 也会触发 connectionState=closed，不能当成对端掉线 */
   private closing = new Set<number>()
-  /** 'disconnected' 的宽限计时器：短暂抖动 WebRTC 常能自愈，别立刻重连 */
-  private disconnectGrace = new Map<number, ReturnType<typeof setTimeout>>()
 
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
@@ -90,7 +85,6 @@ class RtcEngine {
   addPeer(userId: number): void {
     // 新建 = 这是一次主动发起（含重连），清掉上次的「主动关闭」标记
     this.closing.delete(userId)
-    this.clearGrace(userId)
     // 已存在连接：若 signalingState 不稳定则 close 重建
     const existing = this.peers.get(userId)
     if (existing) {
@@ -192,7 +186,6 @@ class RtcEngine {
 
   closePeer(userId: number): void {
     const pc = this.peers.get(userId)
-    this.clearGrace(userId)
     if (pc) {
       this.closing.add(userId)
       pc.close()
@@ -202,11 +195,38 @@ class RtcEngine {
 
   closeAll(): void {
     this.peers.forEach((pc, userId) => {
-      this.clearGrace(userId)
       this.closing.add(userId)
       pc.close()
     })
     this.peers.clear()
+  }
+
+  /** 是否已有该对端的 PC（重连时用来决定「ICE 重启」还是「新建连接」） */
+  hasPeer(userId: number): boolean {
+    return this.peers.has(userId)
+  }
+
+  /**
+   * ICE 重启（重连的首选手段）：
+   * 在【已有的 PC】上重新收集候选，不新建连接、不重新协商媒体。
+   * 比起 closePeer + addPeer —— 后者会让两端同时发 offer 造成 SDP glare，
+   * 正是"通话必然连不上"的根因。
+   */
+  restartIce(userId: number): void {
+    const pc = this.peers.get(userId)
+    if (!pc) {
+      console.warn(`[RtcEngine] [restartIce] user=${userId} 没有 PC，改走 addPeer`)
+      this.addPeer(userId)
+      return
+    }
+    try {
+      console.log(`[RtcEngine] [restartIce] user=${userId} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
+      pc.restartIce()
+    } catch (e) {
+      console.error(`[RtcEngine] [restartIce] user=${userId} 失败，退回重建:`, e)
+      this.closePeer(userId)
+      this.addPeer(userId)
+    }
   }
 
   // ─── 轨道替换 ─────────────────────────────────────────
@@ -271,25 +291,16 @@ class RtcEngine {
       const state = pc.connectionState
       console.log(`[RtcEngine] [conn-state] user=${userId} ${state} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
       if (state === 'connected') {
-        this.clearGrace(userId)
         // 连接建立 → 读取选中的候选对，报告直连 or 中转及各端地址；并通知上层「这次成功了」
         void this._logPeerInfo(userId, pc)
         this.onPeerConnected?.(userId)
         return
       }
       if (state === 'disconnected') {
-        // 丢包/切网常会自愈：给 3 秒宽限，恢复不了才按掉线处理（避免无谓重连）
-        if (this.disconnectGrace.has(userId)) return
-        this.disconnectGrace.set(
-          userId,
-          setTimeout(() => {
-            this.disconnectGrace.delete(userId)
-            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-              console.log(`[RtcEngine] [conn-state] user=${userId} disconnected 超时未恢复 → 按掉线处理`)
-              this.handleDrop(userId)
-            }
-          }, DISCONNECT_GRACE_MS)
-        )
+        // 不做任何处理：这是 WebRTC 自己的中间态（丢包/切网），它会自愈回 connected，
+        // 或者由它自己判定为 failed。我们自己加"宽限期"是在替浏览器瞎猜一个数字——
+        // 猜短了会把还能恢复的连接掐死，猜长了又白等，所以这里一律交给 WebRTC 的状态机。
+        console.log(`[RtcEngine] [conn-state] user=${userId} disconnected（交给 WebRTC 自愈/判定，本端不干预）`)
         return
       }
       if (state === 'failed' || state === 'closed') {
@@ -298,24 +309,16 @@ class RtcEngine {
           this.closing.delete(userId)
           return
         }
+        // failed = WebRTC 自己已经重试到头了，这才是真的连不上
         this.handleDrop(userId)
       }
     }
   }
 
-  /** 对端掉线：关掉旧 PC 并通知上层（上层据此自动重连） */
+  /** 对端确实连不上（状态机给出 failed，或本端已关闭）：通知上层去处理 */
   private handleDrop(userId: number): void {
-    this.clearGrace(userId)
     this.closePeer(userId)
     this.onPeerDisconnected(userId)
-  }
-
-  private clearGrace(userId: number): void {
-    const t = this.disconnectGrace.get(userId)
-    if (t) {
-      clearTimeout(t)
-      this.disconnectGrace.delete(userId)
-    }
   }
 
   /** 连接建立后：用 getStats 找出成功候选对，判定直连/中转，并输出本地/远端候选与中心服务器(TURN)地址 */
@@ -408,6 +411,21 @@ class RtcEngine {
           await pc.setRemoteDescription({ type: 'rollback' })
         } catch {
           /* ignore：状态已变，交由下方 setRemoteDescription 决定 */
+        }
+      }
+      // SDP glare：双方同时发了 offer（重连重试、双方同时重建连接时很容易发生）。
+      // 本端还停在 have-local-offer，此刻直接 setRemoteDescription(offer) 会抛
+      // InvalidStateError，PC 就永久卡死在 have-local-offer —— 表现就是"连接必然失败"。
+      // 标准做法（perfect negotiation）：放弃本端这次 offer（rollback），接受对端的。
+      if (pc.signalingState === 'have-local-offer') {
+        console.warn('[RtcEngine] [glare] user=' + userId + ' 双方同时发 offer → 本端回滚自己的 offer，接受对端 offer（避免 PC 卡死）')
+        try {
+          await pc.setLocalDescription({ type: 'rollback' })
+        } catch (e) {
+          console.error('[RtcEngine] [glare] rollback 失败（PC 可能已坏，重建）:', e)
+          this.closePeer(userId)
+          this.addPeer(userId)
+          return
         }
       }
       await pc.setRemoteDescription({ type: 'offer', sdp })
