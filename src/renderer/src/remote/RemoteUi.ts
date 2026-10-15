@@ -10,6 +10,7 @@ import { reactive } from 'vue'
 import type { RtcIceServer, RtcKind, RtcSignalPayload } from '@shared/server-types'
 import RemoteSession, { type RemoteMode } from './RemoteSession'
 import { useServerStore } from '../stores/server'
+import { rlog, rwarn, rerr } from '../../../shared/remote-log'
 
 /** 控制端查看面板显示状态（RemoteViewer 组件订阅） */
 export const remoteViewer = reactive({
@@ -57,6 +58,7 @@ class RemoteUi {
     const server = useServerStore()
     remoteSlaveState.byName = opts.byName ?? ''
     remoteSlaveState.controlling = true
+    rlog('ui', `被控端开始：room=${opts.room} by=${opts.byName ?? ''} mode=${opts.mode}`)
     const ok = await RemoteSession.startSlave({
       room: opts.room,
       iceServers: opts.iceServers ?? this.iceFallback(),
@@ -66,13 +68,20 @@ class RemoteUi {
       sendSignal: (s) => window.pantry.rtcSignal(opts.room, s as unknown as RtcSignalPayload),
       callbacks: {
         onState: (st) => {
-          if (st.ended) remoteSlaveState.controlling = false
+          // 会话真的结束（对端 bye / 掉线超时 / 连接失败）→ 立刻撤掉「正在被控制」提示
+          if (st.ended) {
+            rlog('ui', '会话结束 → 清除「正在被控制」提示')
+            remoteSlaveState.controlling = false
+          }
         },
-        onError: () => { remoteSlaveState.controlling = false }
+        onError: (msg) => {
+          rwarn('ui', `被控端会话错误：${msg}`)
+          remoteSlaveState.controlling = false
+        }
       }
     })
     if (!ok) {
-      console.error('[remote] 被控端启动会话失败')
+      rerr('ui', '被控端启动会话失败')
       remoteSlaveState.controlling = false
     }
     return ok
@@ -80,7 +89,8 @@ class RemoteUi {
 
   /** 关闭远程会话（任一端主动结束） */
   end(): void {
-    RemoteSession.stop()
+    rlog('ui', '主动结束远程会话')
+    RemoteSession.stop('ui-end')
     remoteViewer.open = false
     remoteViewer.stream = null
     remoteViewer.meta = null

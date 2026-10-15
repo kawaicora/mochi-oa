@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
-import { remoteInputSetMode, remoteInputDispatch, remoteInputStop } from './remote-input'
+import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputShutdown } from './remote-input'
 import { IpcChannels, type NotifTarget } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
@@ -283,10 +283,14 @@ app.whenReady().then(() => {
     return { ok: true }
   })
 
-  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
-  ipcMain.handle(IpcChannels.remoteInputStart, (_e, mode: unknown) => {
-    remoteInputSetMode(mode === 'local' ? 'local' : 'remote')
-    return { ok: true }
+  // 远程控制输入注入（被控端）：start 选后端+设键鼠模式（并返回能力描述）/ event 分发控制指令 / stop 复位+结束
+  ipcMain.handle(IpcChannels.remoteInputStart, async (_e, mode: unknown, screen: unknown) => {
+    const sc = (screen ?? {}) as { w?: unknown; h?: unknown }
+    const cap = await remoteInputStart(mode === 'local' ? 'local' : 'remote', {
+      w: Number(sc.w) || 0,
+      h: Number(sc.h) || 0
+    })
+    return { ok: cap.ok, capability: cap }
   })
   ipcMain.handle(IpcChannels.remoteInputEvent, (_e, evt: unknown) => {
     remoteInputDispatch((evt ?? {}) as Record<string, unknown>)
@@ -328,6 +332,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  // 注入助手（python3 uinput / osascript CGEvent）不会随父进程自动退出，必须显式收掉
+  remoteInputShutdown()
 })
 
 app.on('window-all-closed', () => {

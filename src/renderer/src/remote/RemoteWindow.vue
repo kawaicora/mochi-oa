@@ -6,7 +6,8 @@
  * 传输键鼠控制。窗口关闭自动结束会话并复位/解冻被控端鼠标。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import RemoteSession, { type RemoteMode, type RemoteRole } from './RemoteSession'
+import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability } from './RemoteSession'
+import { rlog, rwarn } from '../../../shared/remote-log'
 
 const props = defineProps<{
   room: string
@@ -21,6 +22,8 @@ const videoEl = ref<HTMLVideoElement | null>(null)
 const holderEl = ref<HTMLDivElement | null>(null)
 const stream = ref<MediaStream | null>(null)
 const meta = ref<{ w: number; h: number; mode: RemoteMode } | null>(null)
+/** 被控端键鼠注入能力：不可用时在界面上说清楚，否则用户会以为「连上了但坏了」 */
+const inputCap = ref<RemoteInputCapability | null>(null)
 const connected = ref(false)
 const errMsg = ref('')
 
@@ -68,6 +71,10 @@ onMounted(() => {
   document.addEventListener('mouseup', onMouseUp)
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
+  rlog('window', `远程窗口打开 room=${props.room} peer=${props.peerId}(${props.peerName}) mode=${props.mode}`)
+  // 窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时也要收场：
+  // 渲染层来得及就自己 stop（会发 bye）；来不及则由主进程在 close 时补发（见 server-ipc）
+  window.addEventListener('beforeunload', onBeforeUnload)
   // 建立会话（控制端等被控 offer）
   RemoteSession.startMaster({
     room: props.room,
@@ -77,24 +84,43 @@ onMounted(() => {
     peerId: props.peerId,
     sendSignal: (s) => window.pantry.rtcSignal(props.room, s as never),
     callbacks: {
-      onRemoteStream: (s) => { stream.value = s },
-      onMeta: (m) => { meta.value = m },
+      onRemoteStream: (s) => {
+        rlog('window', `收到远程画面 tracks=${s.getTracks().map((t) => t.kind).join('+')}`)
+        stream.value = s
+      },
+      onMeta: (m) => {
+        meta.value = m
+        inputCap.value = m.input ?? null
+        if (m.input && !m.input.ok) {
+          rwarn('window', `被控端键鼠注入不可用：${m.input.backend} ${m.input.detail}`)
+        }
+      },
       onState: (st) => {
         connected.value = st.connected
-        if (st.ended) window.pantry.closeWindow()
+        if (st.ended) {
+          rlog('window', '会话结束 → 关闭远程窗口')
+          window.pantry.closeWindow()
+        }
       },
       onError: (msg) => {
+        rwarn('window', `远程会话错误：${msg}`)
         errMsg.value = msg
         setTimeout(() => window.pantry.closeWindow(), 2600)
       }
     }
   })
 })
+function onBeforeUnload(): void {
+  // 主动结束：发 bye 通知被控端收场（best-effort，主进程还有一道兜底）
+  rlog('window', '窗口即将关闭 → 结束远程会话')
+  RemoteSession.stop('window-unload')
+}
 onBeforeUnmount(() => {
   document.removeEventListener('mouseup', onMouseUp)
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('keyup', onKeyUp)
-  RemoteSession.stop()
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  RemoteSession.stop('window-unmount')
 })
 
 watch(
@@ -109,7 +135,8 @@ watch(
 function minimize(): void { void window.pantry.minimizeWindow() }
 function toggleMax(): void { void window.pantry.toggleMaximize() }
 function close(): void {
-  RemoteSession.stop()
+  rlog('window', '点击关闭按钮 → 结束远程会话')
+  RemoteSession.stop('window-close')
   window.pantry.closeWindow()
 }
 </script>
@@ -136,6 +163,11 @@ function close(): void {
       <video ref="videoEl" autoplay playsinline muted class="rw-video" />
       <div v-if="!stream" class="rw-loading">
         {{ errMsg || (connected ? '正在建立远程控制连接…' : '等待对端接受远程控制…') }}
+      </div>
+      <!-- 被控端键鼠注入不可用：直接说清楚原因，别让人以为是"点不动"的玄学问题 -->
+      <div v-if="inputCap && !inputCap.ok" class="rw-inputwarn">
+        <i class="fas fa-triangle-exclamation"></i>
+        <span>对方键鼠不可用（{{ inputCap.backend }}）：{{ inputCap.detail }}</span>
       </div>
     </div>
   </div>
@@ -224,5 +256,23 @@ function close(): void {
   justify-content: center;
   color: #9aa0aa;
   font-size: 15px;
+}
+/* 被控端键鼠注入不可用提示（贴近画面底部，不挡操作） */
+.rw-inputwarn {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  max-width: 90%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(255, 125, 0, 0.94);
+  color: #fff;
+  font-size: 12.5px;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 </style>

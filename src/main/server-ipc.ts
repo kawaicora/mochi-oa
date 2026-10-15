@@ -1024,6 +1024,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     } else {
       void win.loadFile(join(__dirname, '../renderer/remote.html'))
     }
+    // 兜底：远程窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时，渲染层可能已经来不及发 bye
+    // ——那样被控端会一直挂着「正在被 [对方] 控制」。这里在主进程补一发：
+    // 信令 bye（让被控端立刻收场）+ rtc:leave（把本端移出房间，对端还会收到 peerLeft）。
+    win.on('closed', () => {
+      console.log(`[remote] 远程窗口已关闭 room=${room} → 补发 bye 信令 + rtc:leave`)
+      void serverClient.rtcSignal(room, { type: 'bye' } as never).catch(() => { /* 已断开就算了 */ })
+      void serverClient.rtcLeave(room).catch(() => { /* 已断开就算了 */ })
+    })
     return { ok: true }
   })
   ipcMain.handle(IpcChannels.remoteGetParams, () => pendingRemote)

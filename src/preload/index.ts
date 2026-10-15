@@ -326,9 +326,12 @@ const api = {
     ipcRenderer.invoke(IpcChannels.rtcGroupCall, groupId, kind),
   rtcChatMessage: (roomId: string, content: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.rtcChatSend, roomId, content),
-  // 远程控制输入注入（被控端）：start 设键鼠模式 / event 分发控制指令 / stop 复位+结束
-  remoteInputStart: (mode: 'remote' | 'local'): Promise<{ ok: boolean }> =>
-    ipcRenderer.invoke(IpcChannels.remoteInputStart, mode),
+  // 远程控制输入注入（被控端）：start 选后端+设键鼠模式（返回能力描述）/ event 分发控制指令 / stop 复位+结束
+  remoteInputStart: (
+    mode: 'remote' | 'local',
+    screen?: { w: number; h: number }
+  ): Promise<{ ok: boolean; capability?: { ok: boolean; backend: string; detail: string; screen?: { w: number; h: number } } }> =>
+    ipcRenderer.invoke(IpcChannels.remoteInputStart, mode, screen ?? null),
   remoteInputStop: (): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IpcChannels.remoteInputStop),
   remoteInputEvent: (evt: Record<string, unknown>): Promise<{ ok: boolean }> =>

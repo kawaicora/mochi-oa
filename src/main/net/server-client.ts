@@ -223,7 +223,7 @@ function httpGet(url: string, onProgress?: (received: number, total: number) => 
  * socket.io 本身是无限重连（reconnectionAttempts: Infinity），这里额外兜一层：
  * 连续失败到上限就退回登录页（保留 token），避免用户对着一个永远转圈的主界面干等。
  */
-const MAX_RECONNECT_FAILURES = 9999
+const MAX_RECONNECT_FAILURES = 3
 
 export class ServerClient extends EventEmitter {
   private socket: Socket | null = null
@@ -248,6 +248,8 @@ export class ServerClient extends EventEmitter {
   private tokenWatcher: ReturnType<typeof setInterval> | null = null
   /** 断线重连连续失败次数（连上一次就清零） */
   private reconnectFailures = 0
+  /** 是否已经因为连续失败提示过「退回登录页」（去重，避免每次重试都弹一次） */
+  private gaveUp = false
 
   /** 解析 JWT 的 exp（毫秒）。token 非 JWT 或解析失败返回 null（不触发过期巡检） */
   private parseJwtExp(token: string): number | null {
@@ -293,21 +295,20 @@ export class ServerClient extends EventEmitter {
   }
 
   /**
-   * 断线后连续重试仍连不上 → 退回登录页，但【不清 token】。
+   * 断线后连续重试仍连不上 → 退回登录页，但【不清 token、也不放弃连接】。
    *
    * 和 onAuthExpired 的区别：那是「会话真的没了」（过期/被踢），必须清 token；
-   * 这里只是「现在连不上服务器」（服务端重启、网线掉了），token 仍然有效，
-   * 留着它用户重登/下次启动还能自动登录，清了反而要重新输账号密码。
+   * 这里只是「现在连不上服务器」（服务端重启、网线掉了），token 仍然有效。
+   *
+   * 关键：这里【不 disconnect】。socket.io 自己还在按 reconnectionAttempts 无限重连，
+   * 一旦服务器回来就会连上并自动 authMe 恢复会话；如果把 socket 断掉/nil 掉，
+   * 用户回到登录页后点「登录」也发不出去（没有 socket 可 emit），只能重启客户端——
+   * 那就是「服务器已经起来了，但怎么点登录都没反应」的原因。
    */
   private onReconnectGaveUp(reason: string): void {
     this.stopTokenWatcher()
-    this.reconnectFailures = 0
-    console.error(`[io:lifecycle] 连续重试失败，退回登录页（保留 token）：${reason}`)
-    try {
-      this.socket?.disconnect()
-    } catch { /* 忽略 */ }
-    this.socket = null
-    // 注意：不动 this.token，也不落盘清 token
+    console.error(`[io:lifecycle] 连续重试失败，先退回登录页（保留 token，后台继续重连）：${reason}`)
+    // 注意：不动 this.token、不 socket.disconnect()、不置 socket=null
     this.setState({
       connected: false,
       state: 'error',
@@ -321,6 +322,41 @@ export class ServerClient extends EventEmitter {
       activeCompanyId: 0
     })
     this.emit('reconnectGaveUp', { reason, at: new Date().toISOString() })
+  }
+
+  /**
+   * 确保有可用连接（登录/注册前调用）。
+   * 场景：断线退回登录页后 socket 还没连上、或 socket 已被显式断开——
+   * 这时点「登录」必须先把连接拉起来，否则 emitWithAck 在没有 socket 时直接失败，
+   * 用户看到的就是「点登录没反应」。已连上则立即返回。
+   */
+  private async ensureConnected(timeoutMs = 8000): Promise<boolean> {
+    const sock0 = this.socket as (Socket & { connected?: boolean }) | null
+    if (sock0 && sock0.connected) return true
+    const url = this._state.serverUrl || ''
+    if (!url) {
+      console.warn('[io:lifecycle] ensureConnected：没有服务器地址，无法重连')
+      return false
+    }
+    if (!sock0) {
+      console.log(`[io:lifecycle] ensureConnected：当前没有 socket，用 ${url} 重新连接`)
+      this.connect({ serverUrl: url, token: this.token })
+    } else {
+      console.log(`[io:lifecycle] ensureConnected：socket 未连接（state=${this._state.state}），主动触发重连`)
+      this.reconnectFailures = 0
+      try { sock0.connect() } catch { /* 已在连 */ }
+    }
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const s = this.socket as (Socket & { connected?: boolean }) | null
+      if (s && s.connected) {
+        console.log('[io:lifecycle] ensureConnected：已连接')
+        return true
+      }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    console.warn(`[io:lifecycle] ensureConnected：${timeoutMs}ms 内未连上`)
+    return false
   }
 
   get state(): ServerClientState {
@@ -374,6 +410,7 @@ export class ServerClient extends EventEmitter {
     socket.on('connect', () => {
       console.log('[io:lifecycle] connect established (transport=' + (socket.io?.engine?.transport?.name ?? '?') + ')')
       this.reconnectFailures = 0
+      this.gaveUp = false
       this.setState({ state: 'connected', connected: true, error: undefined })
       if (this.token) {
         void this.authMe().then((ack) => {
@@ -397,10 +434,17 @@ export class ServerClient extends EventEmitter {
     })
     socket.on('connect_error', (err) => {
       console.log(`[io:lifecycle] connect_error ${err.message} transport=${socket.io?.engine?.transport?.name ?? '?'}`)
-      // 连续失败计数：连上一次就清零（见 'connect'），连续 MAX 次就放弃并回登录页
+      // 连续失败计数：连上一次就清零（见 'connect'）。
+      // 超过阈值后只【退回登录页一次】（gaveUp 去重，避免每 10s 弹一次提示），
+      // 但 socket 继续按 reconnectionAttempts 无限重连，服务器回来了就能自动恢复。
       this.reconnectFailures += 1
       if (this.reconnectFailures >= MAX_RECONNECT_FAILURES) {
-        this.onReconnectGaveUp(`连接服务器失败（已重试 ${this.reconnectFailures} 次）：${err.message}`)
+        if (!this.gaveUp) {
+          this.gaveUp = true
+          this.onReconnectGaveUp(`连接服务器失败（已重试 ${this.reconnectFailures} 次）：${err.message}`)
+        } else {
+          this.setState({ state: 'error', connected: false, error: err.message })
+        }
         return
       }
       this.setState({ state: 'error', connected: false, error: err.message })
@@ -507,13 +551,16 @@ export class ServerClient extends EventEmitter {
 
   /** 注册；若提供 avatarPath（可选），注册成功后自动上传头像并写入资料 */
   async register(username: string, password: string, nick?: string, email?: string, avatarPath?: string, code?: string): Promise<AuthAck> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    // 断线可能已经把连接搞没了：点注册同样要先把连接拉起来
+    if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
+    const sock = this.socket
+    if (!sock) return { ok: false, error: '未连接服务器' }
     if (!(await this.ensurePublicKey())) return { ok: false, error: '获取注册加密公钥失败' }
     const enc = this.encryptCreds({ username, password })
     if (!enc) return { ok: false, error: '注册凭据加密失败' }
     const ci = await getClientLocation()
     const ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
-      this.socket, 'auth:register', { enc, nick, email, code, device: buildDeviceLabel(), clientInfo: ci }
+      sock, 'auth:register', { enc, nick, email, code, device: buildDeviceLabel(), clientInfo: ci }
     )
     // 注册不自动登录：不 setState(userId/token)，由渲染层随后登出清理服务端自动创建的会话
     if (!ack.ok) return { ok: false, error: ack.error || '注册失败' }
@@ -524,7 +571,7 @@ export class ServerClient extends EventEmitter {
       try {
         const up = await this.uploadFile(avatarPath, 0)
         if (up.ok && up.data?.url) {
-          await emitWithAck(this.socket, 'user:updateProfile', { avatar: up.data.url })
+          await emitWithAck(sock, 'user:updateProfile', { avatar: up.data.url })
         }
       } catch {
         // 头像上传失败不影响注册本身
@@ -536,33 +583,44 @@ export class ServerClient extends EventEmitter {
 
   /** 登录：账号可为用户名或邮箱；支持密码登录，或邮箱验证码登录（传 code） */
   async login(account: string, password?: string, code?: string): Promise<AuthAck> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    // 断线退回登录页后 socket 可能还没连上：点「登录」必须先把连接拉起来。
+    // 否则 emitWithAck 在没有 socket 时直接失败，用户看到的就是「服务器明明起来了，
+    // 怎么点登录都没反应」。
+    if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
+    const sock = this.socket
+    if (!sock) return { ok: false, error: '未连接服务器' }
     if (!(await this.ensurePublicKey())) return { ok: false, error: '获取登录加密公钥失败' }
     const enc = this.encryptCreds(code ? { account, code } : { account, password })
     if (!enc) return { ok: false, error: '登录凭据加密失败' }
     const ci = await getClientLocation()
     const ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
-      this.socket, 'auth:login', { enc, device: buildDeviceLabel(), clientInfo: ci }
+      sock, 'auth:login', { enc, device: buildDeviceLabel(), clientInfo: ci }
     )
     return this.applyAuthAck(ack)
   }
 
   /** 发送邮箱验证码（注册验证 / 验证码登录） */
   async sendEmailCode(email: string, purpose: 'register' | 'login'): Promise<Ack> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck(this.socket, 'auth:sendEmailCode', { email, purpose })
+    if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
+    const sock = this.socket
+    if (!sock) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(sock, 'auth:sendEmailCode', { email, purpose })
   }
 
   /** 忘记密码：向绑定邮箱发送重置验证码 */
   async sendResetCode(email: string): Promise<Ack> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck(this.socket, 'auth:sendResetCode', { email })
+    if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
+    const sock = this.socket
+    if (!sock) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(sock, 'auth:sendResetCode', { email })
   }
 
   /** 忘记密码：验证码通过后发送重置密码邮件（含 /view/reset-pwd 链接） */
   async sendResetMail(email: string, code: string, baseUrl: string): Promise<Ack> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck(this.socket, 'auth:sendResetMail', { email, code, baseUrl })
+    if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
+    const sock = this.socket
+    if (!sock) return { ok: false, error: '未连接服务器' }
+    return emitWithAck(sock, 'auth:sendResetMail', { email, code, baseUrl })
   }
 
   private applyAuthAck(ack: Ack & { data?: { token: string; user: UserInfo; companies: CompanyMembership[] } }): AuthAck {
