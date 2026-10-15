@@ -166,7 +166,6 @@ class RtcEngine {
 
   closePeer(userId: number): void {
     const pc = this.peers.get(userId)
-    this._clearAnswerWatchdog(userId)
     if (pc) {
       pc.close()
       this.peers.delete(userId)
@@ -174,8 +173,7 @@ class RtcEngine {
   }
 
   closeAll(): void {
-    this._answerTimers.forEach((t) => clearTimeout(t))
-    this._answerTimers.clear()
+ 
     this.peers.forEach((pc) => pc.close())
     this.peers.clear()
   }
@@ -312,41 +310,8 @@ class RtcEngine {
       await pc.setLocalDescription(offer)
       console.log('[RtcEngine] [发送offer] user=' + userId, 'sdpLen=' + (offer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'offer', sdp: offer.sdp ?? '' })
-      this._armAnswerWatchdog(userId, pc)
     } catch (err) {
       console.error('[RtcEngine] createOffer failed:', err)
-    }
-  }
-
-  /**
-   * 应答看门狗：发了 offer 却迟迟收不到 answer → 把这条连接丢掉让上层重连，
-   * 免得一直卡在 have-local-offer（对端若同时也在等我回，就永远僵住 = 死锁）。
-   * 重试上限交给上层（recoverPeer 的连续 3 次），这里只负责"发现僵住并解绑"。
-   */
-  private _answerTimers = new Map<number, ReturnType<typeof setTimeout>>()
-  private static readonly ANSWER_TIMEOUT_MS = 8000
-
-  private _armAnswerWatchdog(userId: number, pc: RTCPeerConnection): void {
-    this._clearAnswerWatchdog(userId)
-    this._answerTimers.set(
-      userId,
-      setTimeout(() => {
-        this._answerTimers.delete(userId)
-        // 连接已经好了 / 这个 PC 已被换掉 → 什么都不用做
-        if (this.peers.get(userId) !== pc) return
-        if (pc.signalingState !== 'have-local-offer') return
-        console.warn(`[RtcEngine] [answer超时] user=${userId} 发出 offer 后 ${RtcEngine.ANSWER_TIMEOUT_MS}ms 未收到 answer → 丢弃该连接等上层重连`)
-        this.closePeer(userId)
-        this.onPeerDisconnected(userId)
-      }, RtcEngine.ANSWER_TIMEOUT_MS)
-    )
-  }
-
-  private _clearAnswerWatchdog(userId: number): void {
-    const t = this._answerTimers.get(userId)
-    if (t) {
-      clearTimeout(t)
-      this._answerTimers.delete(userId)
     }
   }
 
@@ -415,7 +380,7 @@ class RtcEngine {
     }
     try {
       await pc.setRemoteDescription({ type: 'answer', sdp })
-      this._clearAnswerWatchdog(userId)
+   
       await this._flushPendingIce(userId, pc)
     } catch (err) {
       // 真的失败了（比如 SDP 角色冲突）→ 这个连接救不回来，丢掉它让上层重连，
