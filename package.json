@@ -1,7 +1,7 @@
 {
   "name": "mochi-oa",
   "version": "6.0.0",
-  "description": "麻薯-办公协同客户端",
+  "description": "麻薯-好用简洁的办公软件",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
   "private": true,
@@ -22,20 +22,20 @@
       }
     ],
     "win": {
-      "icon": "resources/icon_256.png",
+      "icon": "resources\\mochi_256.png",
       "target": [
         "nsis"
       ]
     },
     "mac": {
-      "icon": "resources/icon_256.png",
+      "icon": "resources\\mochi_256.png",
       "category": "public.app-category.business",
       "target": [
         "dmg"
       ]
     },
     "linux": {
-      "icon": "resources/icon_256.png",
+      "icon": "resources\\mochi_256.png",
       "target": [
         "AppImage"
       ]
@@ -43,7 +43,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "executableName": "mochi-oa"
   },
   "scripts": {
     "dev": "electron-vite dev",
