@@ -59,6 +59,10 @@ onMounted(async () => {
     toast(d.reason === 'ended' ? '你的账号已在其他设备退出登录，本端已下线' : '登录会话已过期，请重新登录', 'warn')
     void server.clearSession()
   })
+  // 断线后连续重试仍连不上：回登录页但【保留登录状态】，重新点登录即可（不用重新输账号密码）
+  const offGaveUp = window.pantry.onServerReconnectGaveUp(() => {
+    toast('连接服务器失败，已退回登录界面（登录状态已保留，可直接重新登录）', 'warn')
+  })
 
   booted.value = true
   // 启动时按当前登录态应用一次窗口模式（自动登录成功时 authenticated 可能已为 true）
@@ -71,6 +75,7 @@ onMounted(async () => {
   void offPresence
   void offNewDevice
   void offRevoked
+  void offGaveUp
   void offRtc
 })
 </script>

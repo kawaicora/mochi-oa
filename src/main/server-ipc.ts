@@ -18,6 +18,9 @@ import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
 
+/** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
+let lastUserId: number | undefined
+
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
@@ -100,15 +103,46 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 }
 
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  /**
+   * 退回登录页时关掉所有附加窗口（会议、任务详情、预览、远程、工具栏…）。
+   * 只保留主窗口（登录页与主界面都在主窗口里）。先 close 让各窗口走正常收尾
+   * （停流、释放设备），再兜底 destroy 掉少数自己拦了 close 的窗口。
+   */
+  const closeAuxWindows = (): void => {
+    const main = getMainWindow()
+    if (!main) return
+    const sweep = (force: boolean): void => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (w === main || w.isDestroyed()) continue
+        try {
+          if (force) w.destroy()
+          else w.close()
+        } catch { /* 已销毁/关闭中被拦，忽略 */ }
+      }
+    }
+    sweep(false)
+    setTimeout(() => sweep(true), 800)
+  }
+
   // 推送 → renderer
   serverClient.on('state', (s) => {
     sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
     void console.log(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
+    // 会话丢失（登出/被踢/过期/断线退回登录页）：主界面会切回登录页，
+    // 多余的独立窗口（会议、任务详情、预览、远程…）必须一起关掉，否则会留下
+    // 「已经退出登录，会议窗口还开着」这种拿着旧会话数据的窗口。
+    const hadUser = lastUserId != null
+    lastUserId = s.userId
+    if (hadUser && s.userId == null) closeAuxWindows()
     // 登录连接后启动本机系统信息上报（被控端）；断开即停
     // 协议：动态包(dev:sys) → 服务端返回 updated（设备完整）/ lost（缺失或基础信息不全）；
     //       lost → 立即重发全量 dev:register → 服务端返回 added → 之后只发动态。
-    if (s.connected) {
-      void console.log('startSysReport 启动（被控端系统上报）')
+    // 被控端系统上报：只在【已登录】时上报。
+    // 未登录（启动停在登录页）、断线、退出登录后都不上报 —— 没登录时设备属于谁都不知道，
+    // 上报出去只会给服务端留下一堆无主设备。
+    const loggedIn = s.connected && s.userId != null
+    if (loggedIn) {
+      void console.log(`startSysReport 启动（被控端系统上报）user=${s.username ?? ''} id=${s.userId}`)
       startSysReport(async (p, onAck) => {
         try {
           const ack = await serverClient.devSys(p)
@@ -135,7 +169,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
         }
       })
     } else {
-      void console.log('stopSysReport（未连接）')
+      void console.log(`stopSysReport（${s.connected ? '已连接但未登录' : '未连接'}）`)
       stopSysReport()
     }
   })
@@ -147,6 +181,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('chatReadReceipt', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverChatReadReceipt, d))
   serverClient.on('sessionNewDevice', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionNewDevice, d))
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
+  // 断线重试失败 → 渲染层提示并回登录页（token 保留，不用清）
+  serverClient.on('reconnectGaveUp', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverReconnectGaveUp, d))
 
   // RTC 信令推送 → renderer（广播到所有窗口，会议独立窗口也需接收）
   serverClient.on('rtcDmIncoming', (d) => {
@@ -258,6 +294,19 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverLogout, async () => {
     await serverClient.logout()
     saveServerConfig({ token: '' })
+    closeAuxWindows()
+  })
+  /**
+   * 切换服务器地址：换服务器=换账号体系，旧 token 清掉，并断开当前会话，
+   * 让渲染层拿到 userId=undefined → 回登录页；随后用新地址、不带 token 重连。
+   * 顺序很重要：先 disconnect（清 userId → 渲染层立刻回登录页、关掉多余窗口），再 connect。
+   */
+  ipcMain.handle(IpcChannels.serverChangeUrl, (_e, url) => {
+    const cfg = saveServerConfig({ serverUrl: String(url ?? ''), token: '' })
+    closeAuxWindows()
+    serverClient.disconnect()
+    serverClient.connect({ serverUrl: cfg.serverUrl })
+    return cfg
   })
 
   // 登录会话（多端）/ 账号安全
@@ -818,6 +867,30 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.appOpenFileLocation, (_e, p) => {
     if (typeof p === 'string' && p) shell.showItemInFolder(p)
     return Promise.resolve()
+  })
+  /**
+   * 用系统默认程序打开本地文件。
+   * 聊天里不能内嵌预览的文件（txt / zip / exe / psd…）都走这里，而不是给渲染层一个
+   * app-file:// 链接让浏览器 target=_blank 打开 —— 那样只会弹「获取打开此"about"的应用」。
+   * shell.openPath 三平台通用（Windows ShellExecute / macOS open / Linux xdg-open）：
+   * 成功返回空串；没有关联程序时由系统自己弹「选择打开方式」，和双击文件行为一致。
+   */
+  ipcMain.handle(IpcChannels.appOpenPath, async (_e, p) => {
+    const file = typeof p === 'string' ? p : ''
+    if (!file) return { ok: false, error: '缺少文件路径' }
+    if (!existsSync(file)) return { ok: false, error: '文件不存在（可能已被移动或删除）' }
+    try {
+      const err = await shell.openPath(file)
+      if (err) {
+        console.log(`[openPath] 系统打开失败 file=${file} err=${err}`)
+        return { ok: false, error: err }
+      }
+      return { ok: true }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.log(`[openPath] 系统打开异常 file=${file} err=${msg}`)
+      return { ok: false, error: msg }
+    }
   })
   // 写系统剪贴板：用 Electron clipboard（渲染层的 navigator.clipboard 依赖页面聚焦与安全上下文，
   // 打包后走 file:// 时不稳），消息右键「复制」走这里。

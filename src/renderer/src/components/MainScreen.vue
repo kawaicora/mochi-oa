@@ -169,10 +169,9 @@ async function saveSettings(): Promise<void> {
   const url = buildUrl()
   srvError.value = ''
   try {
-    await app.refreshCompanies()
-    server.settings.token = ''
-    await window.pantry.serverSaveSettings({ token: '', downloadDir: downloadDir.value.trim() || undefined })
-    await window.pantry.serverConnect(url, undefined)
+    await window.pantry.serverSaveSettings({ downloadDir: downloadDir.value.trim() || undefined })
+    // 换服务器：清 token + 断旧会话 + 用新地址重连（渲染层随之回登录页，多余窗口一并关闭）
+    await server.changeServerUrl(url)
     showSettings.value = false
   } catch (e) {
     srvError.value = e instanceof Error ? e.message : String(e)

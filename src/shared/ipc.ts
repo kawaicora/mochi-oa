@@ -30,6 +30,11 @@ export const IpcChannels = {
   serverSendResetCode: 'server:sendResetCode',
   serverSendResetMail: 'server:sendResetMail',
   serverLogout: 'server:logout',
+  /**
+   * 切换服务器地址：清掉 token 并断开当前会话 → 渲染层回登录页（新地址不带 token 重连）。
+   * 换服务器等于换账号体系，旧 token 对新服务器无意义，必须清。
+   */
+  serverChangeUrl: 'server:changeUrl',
   // 登录会话（多端）/ 账号安全
   serverSessions: 'server:sessions',
   serverEndSession: 'server:session:end',
@@ -243,6 +248,13 @@ export const IpcChannels = {
   brandingGet: 'app:brandingGet',
   /** 在系统文件管理器中打开本地文件所在路径 */
   appOpenFileLocation: 'app:openFileLocation',
+  /**
+   * 用系统默认程序打开本地文件（shell.openPath）。
+   * 聊天里不能内嵌预览的文件（txt/zip/exe/…）必须走这里：直接给渲染层一个
+   * app-file:// 链接用 target=_blank 打开，Electron 只会弹「获取打开此"about"的应用」。
+   * Windows/macOS/Linux 通用；没有关联程序时由系统自己弹「选择打开方式」，与双击文件一致。
+   */
+  appOpenPath: 'app:openPath',
   /** 写系统剪贴板（消息右键「复制」用）：走主进程 Electron clipboard，不依赖页面是否聚焦/安全上下文 */
   appClipboardWriteText: 'app:clipboardWriteText',
   /** 把本地图片文件写进系统剪贴板（右键图片消息「复制图片」） */
@@ -307,6 +319,11 @@ export const IpcEvents = {
   serverSessionNewDevice: 'server:event:sessionNewDevice',
   /** 会话被踢下线/过期 → 本端清 token 回登录页 */
   serverSessionRevoked: 'server:event:sessionRevoked',
+  /**
+   * 断线后连续重试仍失败 → 回登录页（保留 token，方便直接重登/下次启动自动登录）。
+   * 与 sessionRevoked 的区别：那个是会话真的失效要清 token，这个只是连不上服务器。
+   */
+  serverReconnectGaveUp: 'server:event:reconnectGaveUp',
   /** RTC：单人来电 / 拒接 / 对端加入离开 / SDP+ICE / 通话结束 / 群呼 */
   rtcDmIncoming: 'server:event:rtc:dmIncoming',
   rtcDmRejected: 'server:event:rtc:dmRejected',

@@ -36,6 +36,16 @@ export const useServerStore = defineStore('server', () => {
     settings.value = await window.pantry.serverSaveSettings({ serverUrl: url })
   }
 
+  /**
+   * 切换服务器地址：清 token + 断开当前会话 + 用新地址重连（主进程一步做完）。
+   * 换服务器=换账号体系：旧 token 对新服务器没意义，必须清；同时会话被重置，
+   * 渲染层拿到 userId=undefined 就会回登录页。
+   */
+  async function changeServerUrl(url: string): Promise<void> {
+    settings.value = await window.pantry.serverChangeUrl(url)
+    settings.value.token = ''
+  }
+
   async function connect(): Promise<void> {
     await window.pantry.serverConnect(settings.value.serverUrl, settings.value.token)
   }
@@ -132,6 +142,20 @@ export const useServerStore = defineStore('server', () => {
     settings.value = await window.pantry.serverSaveSettings({ token: '' })
   }
 
+  // ─── 记住密码（本地保存；勾选后登录页自动回填账号与密码）───
+  /** 登录成功后保存：只有勾了「记住密码」才落盘，否则立即清掉 */
+  async function saveRememberedLogin(remember: boolean, account: string, password: string): Promise<void> {
+    settings.value = await window.pantry.serverSaveSettings(
+      remember
+        ? { rememberPassword: true, savedAccount: account, savedPassword: password }
+        : { rememberPassword: false, savedAccount: '', savedPassword: '' }
+    )
+  }
+  /** 取消勾选「记住密码」：立即清除本地保存的账号与密码 */
+  async function clearRememberedLogin(): Promise<void> {
+    settings.value = await window.pantry.serverSaveSettings({ rememberPassword: false, savedAccount: '', savedPassword: '' })
+  }
+
   return {
     state,
     settings,
@@ -139,6 +163,7 @@ export const useServerStore = defineStore('server', () => {
     init,
     wire,
     setServerUrl,
+    changeServerUrl,
     connect,
     absFileUrl,
     login,
@@ -151,6 +176,8 @@ export const useServerStore = defineStore('server', () => {
     endSession,
     endAllSessions,
     setSessionDays,
-    clearSession
+    clearSession,
+    saveRememberedLogin,
+    clearRememberedLogin
   }
 })

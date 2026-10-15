@@ -10,6 +10,7 @@ import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
+import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
 
 // ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
 // 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
@@ -153,6 +154,7 @@ function createWindow(): void {
     height: 638,
     resizable: false,
     maximizable: false,
+    // 开机自启（--hidden）：静默启动到托盘，不弹窗
     show: false,
     autoHideMenuBar: true,
     frame: false,
@@ -167,7 +169,14 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    // 开机自启（--hidden）：只常驻托盘，不弹窗；点托盘图标再显示
+    if (launchedHidden()) {
+      console.log('[auto-launch] 以 --hidden 启动：静默驻留托盘，不显示主窗口')
+      return
+    }
+    mainWindow?.show()
+  })
   mainWindow.setTitle(readBranding().name)
   // 窗口聚焦 → 停止托盘闪动
   mainWindow.on('focus', () => stopFlashTray())
@@ -250,11 +259,11 @@ app.whenReady().then(() => {
   })
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
-  // 开机自启：查询/设置登录项
-  ipcMain.handle(IpcChannels.getAutoLaunch, () => app.getLoginItemSettings().openAtLogin)
+  // 开机自启：三平台各自的原生做法（Windows 注册表 Run / Linux XDG 自启动项+systemd 用户服务 / macOS 登录项）
+  ipcMain.handle(IpcChannels.getAutoLaunch, () => getAutoLaunch().enabled)
   ipcMain.handle(IpcChannels.setAutoLaunch, (_e, openAtLogin: unknown) => {
-    app.setLoginItemSettings({ openAtLogin: !!openAtLogin })
-    return { ok: true, openAtLogin: app.getLoginItemSettings().openAtLogin }
+    const st = setAutoLaunch(!!openAtLogin)
+    return { ok: st.ok, openAtLogin: st.enabled, method: st.method, error: st.error }
   })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {
     const w = BrowserWindow.fromWebContents(e.sender)

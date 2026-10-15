@@ -753,6 +753,23 @@ async function ensureLocalPath(m: { content: string; id: string }): Promise<stri
   return r.ok && r.path ? r.path : null
 }
 
+/**
+ * 用系统默认程序打开文件（不能内嵌预览的 txt/zip/exe/… 都走这里）。
+ * 以前是把 app-file:// 链接直接 target=_blank 丢给浏览器，结果只会弹
+ * 「获取打开此"about"的应用」——因为 app-file 是自定义协议，浏览器没法导航。
+ * 现在按需下载到本地后交给 shell.openPath：Windows/macOS/Linux 通用，
+ * 没有关联程序时由系统自己弹「选择打开方式」，与双击文件行为一致。
+ */
+async function openWithSystemApp(m: ServerChatMessage): Promise<void> {
+  const path = await ensureLocalPath(m)
+  if (!path) {
+    flashToast('文件下载失败')
+    return
+  }
+  const r = await window.pantry.openPath(path)
+  if (!r.ok) flashToast(`无法打开：${r.error || '系统没有可用的打开方式'}`)
+}
+
 /** 3D 预览弹窗 */
 const previewModel = ref<{ path: string; name: string } | null>(null)
 /** 单独窗口预览：图片大图 / 视频全屏播放 */
@@ -900,7 +917,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
                     <i class="far fa-eye"></i>&nbsp;预览
                   </button>
                 </div>
-                <a v-else :href="app.localPreviewUrl(m)" target="_blank" class="msg-file">
+                <a v-else href="#" class="msg-file" title="用系统默认程序打开" @click.prevent="openWithSystemApp(m)">
                   <i :class="fileIcon(m.content)"></i>&nbsp;{{ fileNameOf(m.content) }}
                 </a>
               </template>

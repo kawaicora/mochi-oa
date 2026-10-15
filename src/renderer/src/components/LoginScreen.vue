@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useServerStore } from '../stores/server'
 import UserAvatar from './UserAvatar.vue'
 
@@ -20,6 +20,8 @@ const codeSending = ref(false)
 const codeCountdown = ref(0)
 let codeTimer: number | null = null
 const autoLogin = ref(true)
+/** 记住密码：勾选后账号+密码存本地（密码在磁盘上加密），下次打开自动填好 */
+const rememberPwd = ref(false)
 const busy = ref(false)
 const errorMsg = ref('')
 const successMsg = ref('')
@@ -214,15 +216,18 @@ async function saveSettings(): Promise<void> {
   const url = buildServerUrl()
   srvError.value = ''
   try {
-    await server.setServerUrl(url)
-    server.settings.token = ''
-    await window.pantry.serverSaveSettings({ token: '' })
-    await window.pantry.serverConnect(url, undefined)
+    // 换服务器：主进程清 token + 断开旧会话 + 用新地址重连，渲染层随之回登录页
+    await server.changeServerUrl(url)
     showSettings.value = false
   } catch (e) {
     srvError.value = e instanceof Error ? e.message : String(e)
   }
 }
+
+/** 取消勾选「记住密码」→ 立即清除本地保存的账号与密码（不等下次登录） */
+watch(rememberPwd, (v) => {
+  if (!v) void server.clearRememberedLogin()
+})
 
 async function doLogin(): Promise<void> {
   if (!canLogin.value) return
@@ -237,7 +242,11 @@ async function doLogin(): Promise<void> {
       errorMsg.value = server.state.error || '账号或密码错误'
     } else {
       successMsg.value = '登录成功'
-      password.value = ''
+      // 记住密码：勾了就落盘（下次自动回填），没勾就立即清掉
+      if (loginMode.value === 'password') {
+        await server.saveRememberedLogin(rememberPwd.value, account.value.trim(), password.value)
+      }
+      password.value = rememberPwd.value ? password.value : ''
       // 登录成功 → 切换为主窗口模式（可缩放、恢复大尺寸）
       void window.pantry.setMainMode()
     }
@@ -292,8 +301,13 @@ onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
   // 若已记住会话（重启自动恢复），用服务端返回的用户名回填问候语
   if (server.state.username) nick.value = server.state.username
+  // 记住密码：回填账号与密码（密码在磁盘上是加密存储的，这里读到的是明文）
+  rememberPwd.value = cfg.rememberPassword === true
+  if (rememberPwd.value) {
+    if (cfg.savedAccount) account.value = cfg.savedAccount
+    if (cfg.savedPassword) password.value = cfg.savedPassword
+  }
   void appInfo
-  void cfg
 })
 
 // 窗口控制
@@ -408,6 +422,11 @@ const closeWin = () => window.pantry.closeWindow()
             <input type="checkbox" v-model="autoLogin" />
             <span class="checkmark"></span>
             <span>自动登录</span>
+          </label>
+          <label class="checkbox" title="账号与密码保存在本机（密码加密存储），取消勾选立即清除">
+            <input type="checkbox" v-model="rememberPwd" />
+            <span class="checkmark"></span>
+            <span>记住密码</span>
           </label>
           <div class="login-links">
             <span class="link" @click="openForgot">忘记密码</span>
@@ -733,6 +752,10 @@ const closeWin = () => window.pantry.closeWindow()
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+}
+.login-sub .checkbox {
+  white-space: nowrap;
 }
 .checkbox {
   display: inline-flex;

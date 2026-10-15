@@ -94,7 +94,7 @@ const api = {
     ipcRenderer.invoke(IpcChannels.getWindowState),
   focusWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IpcChannels.focusWindow),
   getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke(IpcChannels.getAutoLaunch),
-  setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean }> =>
+  setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean; method?: string; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.setAutoLaunch, openAtLogin),
 
   // 连接 / 状态 / 设置
@@ -120,6 +120,9 @@ const api = {
   serverSendResetMail: (email: string, code: string, baseUrl: string): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverSendResetMail, email, code, baseUrl),
   serverLogout: (): Promise<void> => ipcRenderer.invoke(IpcChannels.serverLogout),
+  /** 切换服务器地址：清 token + 断开旧会话 + 用新地址重连（渲染层会回到登录页） */
+  serverChangeUrl: (url: string): Promise<import('../shared/server-types').ServerSettings> =>
+    ipcRenderer.invoke(IpcChannels.serverChangeUrl, url),
   serverUpdateProfile: (patch: { nick?: string; avatar?: string; phone?: string; extra?: { emergency: Array<{ name: string; phone: string }> } }): Promise<UserProfileUpdateAck> =>
     ipcRenderer.invoke(IpcChannels.userUpdateProfile, patch),
   serverChangePassword: (oldPassword: string, newPassword: string): Promise<Ack> =>
@@ -135,6 +138,8 @@ const api = {
   appSaveRecording: (name: string, base64: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.appSaveRecording, { name, base64 }),
   openFileLocation: (path: string): Promise<void> => ipcRenderer.invoke(IpcChannels.appOpenFileLocation, path),
+  /** 用系统默认程序打开本地文件（不可内嵌预览的文件走这里，等同双击文件） */
+  openPath: (path: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.appOpenPath, path),
   // 登录会话（多端）/ 账号安全
   serverSessions: (): Promise<Ack & { data?: { sessions: ServerSession[]; currentSessionId?: number; sessionDays?: number | null } }> =>
     ipcRenderer.invoke(IpcChannels.serverSessions),
@@ -354,6 +359,9 @@ const api = {
     subscribe<NewDeviceLoginEvent>(IpcEvents.serverSessionNewDevice, l),
   onServerSessionRevoked: (l: (d: SessionRevokedEvent) => void) =>
     subscribe<SessionRevokedEvent>(IpcEvents.serverSessionRevoked, l),
+  /** 断线连续重试仍失败 → 回登录页（token 保留） */
+  onServerReconnectGaveUp: (l: (d: { reason: string; at: string }) => void) =>
+    subscribe<{ reason: string; at: string }>(IpcEvents.serverReconnectGaveUp, l),
 
   // RTC 信令推送订阅
   onRtcDmIncoming: (l: (d: RtcDmIncomingEvent) => void) => subscribe<RtcDmIncomingEvent>(IpcEvents.rtcDmIncoming, l),

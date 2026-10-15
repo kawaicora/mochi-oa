@@ -2,7 +2,7 @@
  * Mochi OA - 服务器地址/端口配置持久化。
  * 落盘 userData/server-config.json。登录/连接成功后回写 serverUrl 与 token。
  */
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { FileTransferMode, ServerSettings } from '../shared/server-types'
@@ -44,7 +44,41 @@ function defaultConfig(): ServerSettings {
     callSoundFile: '',
     dnd: false,
     dndConvs: [],
-    convRings: {}
+    convRings: {},
+    rememberPassword: false,
+    savedAccount: '',
+    savedPassword: '',
+    passwordEnc: false
+  }
+}
+
+/**
+ * 「记住密码」的落盘加密。
+ * safeStorage 在 Windows 走 DPAPI、macOS 走钥匙串、Linux 走 libsecret/kwallet；
+ * 系统不支持时（如没装密钥环的 Linux）退化为明文，并把 passwordEnc 置 false，
+ * 读取时按该标志决定要不要解密 —— 自己加密自己解，跨机器读不了是预期行为。
+ */
+function encryptPassword(pw: string): { savedPassword: string; passwordEnc: boolean } {
+  if (!pw) return { savedPassword: '', passwordEnc: false }
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return { savedPassword: safeStorage.encryptString(pw).toString('base64'), passwordEnc: true }
+    }
+  } catch (err) {
+    console.warn('[mochi-oa] 密码加密失败，回退明文保存：', err)
+  }
+  return { savedPassword: pw, passwordEnc: false }
+}
+
+function decryptPassword(stored: string, enc: boolean): string {
+  if (!stored) return ''
+  if (!enc) return stored
+  try {
+    return safeStorage.decryptString(Buffer.from(stored, 'base64'))
+  } catch (err) {
+    // 换机器/换用户后 DPAPI 解不开：当没记住处理，别让登录页崩掉
+    console.warn('[mochi-oa] 记住的密码解密失败（可能换了机器/用户），已忽略：', err)
+    return ''
   }
 }
 
@@ -86,7 +120,14 @@ export function loadServerConfig(): ServerSettings {
                 (e): e is [string, string] => typeof e[1] === 'string'
               )
             )
-          : {}
+          : {},
+      rememberPassword: parsed.rememberPassword === true,
+      savedAccount: typeof parsed.savedAccount === 'string' ? parsed.savedAccount : '',
+      savedPassword: decryptPassword(
+        typeof parsed.savedPassword === 'string' ? parsed.savedPassword : '',
+        parsed.passwordEnc === true
+      ),
+      passwordEnc: parsed.passwordEnc === true
     }
   } catch (err) {
     console.warn('[mochi-oa] 读取服务器配置失败，使用默认：', err)
@@ -97,6 +138,8 @@ export function loadServerConfig(): ServerSettings {
 /** 合并 patch 后整体写回；返回最新配置。写盘失败仅告警。 */
 export function saveServerConfig(patch: Partial<ServerSettings>): ServerSettings {
   const current = loadServerConfig()
+  // 「记住密码」：渲染层给的是明文，落盘前统一加密一次（传空串=立即清除，这里会得到空密文）
+  const pw = typeof patch.savedPassword === 'string' ? encryptPassword(patch.savedPassword) : null
   const next: ServerSettings = {
     serverUrl:
       typeof patch.serverUrl === 'string' && patch.serverUrl.trim()
@@ -139,7 +182,15 @@ export function saveServerConfig(patch: Partial<ServerSettings>): ServerSettings
               (e): e is [string, string] => typeof e[1] === 'string'
             )
           )
-        : current.convRings
+        : current.convRings,
+    rememberPassword:
+      typeof patch.rememberPassword === 'boolean' ? patch.rememberPassword : current.rememberPassword,
+    // 渲染层传的是明文（读配置时已解密），落盘前重新加密；
+    // 取消勾选时渲染层会同时传空串 → 这里立刻清掉，不是等下次登录才清
+    savedAccount:
+      typeof patch.savedAccount === 'string' ? patch.savedAccount : current.savedAccount,
+    savedPassword: pw ? pw.savedPassword : current.savedPassword,
+    passwordEnc: pw ? pw.passwordEnc : current.passwordEnc
   }
   try {
     writeFileSync(configPath(), JSON.stringify(next, null, 2), 'utf-8')

@@ -218,6 +218,13 @@ function httpGet(url: string, onProgress?: (received: number, total: number) => 
   })
 }
 
+/**
+ * 断线重连的最大连续失败次数。
+ * socket.io 本身是无限重连（reconnectionAttempts: Infinity），这里额外兜一层：
+ * 连续失败到上限就退回登录页（保留 token），避免用户对着一个永远转圈的主界面干等。
+ */
+const MAX_RECONNECT_FAILURES = 3
+
 export class ServerClient extends EventEmitter {
   private socket: Socket | null = null
   private _state: ServerClientState = {
@@ -239,6 +246,8 @@ export class ServerClient extends EventEmitter {
   private pubKey: string | null = null
   /** token 过期巡检定时器（1 分钟一次；过期自动退出到登录页） */
   private tokenWatcher: ReturnType<typeof setInterval> | null = null
+  /** 断线重连连续失败次数（连上一次就清零） */
+  private reconnectFailures = 0
 
   /** 解析 JWT 的 exp（毫秒）。token 非 JWT 或解析失败返回 null（不触发过期巡检） */
   private parseJwtExp(token: string): number | null {
@@ -283,6 +292,37 @@ export class ServerClient extends EventEmitter {
     this.onAuthExpired(`${what} 无 token，会话已失效`)
   }
 
+  /**
+   * 断线后连续重试仍连不上 → 退回登录页，但【不清 token】。
+   *
+   * 和 onAuthExpired 的区别：那是「会话真的没了」（过期/被踢），必须清 token；
+   * 这里只是「现在连不上服务器」（服务端重启、网线掉了），token 仍然有效，
+   * 留着它用户重登/下次启动还能自动登录，清了反而要重新输账号密码。
+   */
+  private onReconnectGaveUp(reason: string): void {
+    this.stopTokenWatcher()
+    this.reconnectFailures = 0
+    console.error(`[io:lifecycle] 连续重试失败，退回登录页（保留 token）：${reason}`)
+    try {
+      this.socket?.disconnect()
+    } catch { /* 忽略 */ }
+    this.socket = null
+    // 注意：不动 this.token，也不落盘清 token
+    this.setState({
+      connected: false,
+      state: 'error',
+      error: reason,
+      userId: undefined,
+      username: undefined,
+      nick: undefined,
+      avatar: undefined,
+      phone: undefined,
+      extra: undefined,
+      activeCompanyId: 0
+    })
+    this.emit('reconnectGaveUp', { reason, at: new Date().toISOString() })
+  }
+
   get state(): ServerClientState {
     return { ...this._state }
   }
@@ -306,6 +346,7 @@ export class ServerClient extends EventEmitter {
       this.socket = null
     }
     this.token = opts.token ?? ''
+    this.reconnectFailures = 0
     this.setState({
       serverUrl: opts.serverUrl,
       state: 'connecting',
@@ -332,6 +373,7 @@ export class ServerClient extends EventEmitter {
 
     socket.on('connect', () => {
       console.log('[io:lifecycle] connect established (transport=' + (socket.io?.engine?.transport?.name ?? '?') + ')')
+      this.reconnectFailures = 0
       this.setState({ state: 'connected', connected: true, error: undefined })
       if (this.token) {
         void this.authMe().then((ack) => {
@@ -355,6 +397,12 @@ export class ServerClient extends EventEmitter {
     })
     socket.on('connect_error', (err) => {
       console.log(`[io:lifecycle] connect_error ${err.message} transport=${socket.io?.engine?.transport?.name ?? '?'}`)
+      // 连续失败计数：连上一次就清零（见 'connect'），连续 MAX 次就放弃并回登录页
+      this.reconnectFailures += 1
+      if (this.reconnectFailures >= MAX_RECONNECT_FAILURES) {
+        this.onReconnectGaveUp(`连接服务器失败（已重试 ${this.reconnectFailures} 次）：${err.message}`)
+        return
+      }
       this.setState({ state: 'error', connected: false, error: err.message })
     })
 
@@ -425,6 +473,7 @@ export class ServerClient extends EventEmitter {
       this.socket = null
     }
     this.token = ''
+    this.reconnectFailures = 0
     this.setState({ state: 'idle', connected: false, userId: undefined, username: undefined, nick: undefined, avatar: undefined, token: undefined, error: undefined, activeCompanyId: 0 })
   }
 

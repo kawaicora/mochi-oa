@@ -44,6 +44,18 @@ export interface ServerSettings {
   dndConvs?: string[]
   /** 每个会话的自定义铃声：key=会话 key，value=绝对路径（缺省用全局来电铃声） */
   convRings?: Record<string, string>
+  /** 记住密码：勾选后下次打开登录页自动填好账号与密码（本地保存） */
+  rememberPassword?: boolean
+  /** 记住的账号（配合 rememberPassword；未勾选时为空） */
+  savedAccount?: string
+  /**
+   * 记住的密码（配合 rememberPassword；未勾选时为空）。
+   * 磁盘上加密存储（Electron safeStorage：Windows DPAPI / macOS 钥匙串 / Linux 密钥环，
+   * 不可用时回退明文并置 passwordEnc=false），这里读出的是解密后的明文供输入框回填。
+   */
+  savedPassword?: string
+  /** savedPassword 在磁盘上是否为密文（读配置时内部使用，渲染层不用关心） */
+  passwordEnc?: boolean
 }
 
 /** 账号 Acknowledge */

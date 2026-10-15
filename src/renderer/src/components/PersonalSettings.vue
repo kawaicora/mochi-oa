@@ -45,6 +45,8 @@ const pwdTip = ref('')
 const autoDownload = ref(true)
 // 开机自启开关
 const autoLaunch = ref(false)
+/** 开机自启设置失败的原因（注册表被策略拦、自启动文件没权限等） */
+const autoLaunchError = ref('')
 
 
 onMounted(async () => {
@@ -116,7 +118,17 @@ async function onAutoDownloadChange(): Promise<void> {
 }
 
 async function onAutoLaunchChange(): Promise<void> {
-  await window.pantry.setAutoLaunch(autoLaunch.value)
+  const want = autoLaunch.value
+  const r = await window.pantry.setAutoLaunch(want)
+  // 写注册表/自启动文件可能被系统策略拦下：以主进程回读的值为准，失败要说清楚
+  autoLaunch.value = r.openAtLogin
+  if (!r.ok || r.openAtLogin !== want) {
+    autoLaunchError.value = r.error
+      ? `设置开机自启失败：${r.error}`
+      : '设置开机自启失败，系统未接受该设置'
+  } else {
+    autoLaunchError.value = ''
+  }
 }
 
 async function onChangePassword(): Promise<void> {
@@ -360,7 +372,11 @@ async function onSaveMainMail(): Promise<void> {
               <i class="switch-knob"></i>
             </span>
           </label>
-          <p class="sec-hint">开启后随 Windows 登录自动运行</p>
+          <p class="sec-hint">
+            Windows 写入注册表启动项，Linux 写入 ~/.config/autostart（并注册 systemd 用户服务），
+            macOS 写入系统登录项；开机后静默驻留托盘，不弹窗。
+          </p>
+          <p v-if="autoLaunchError" class="sec-hint sec-hint-error">{{ autoLaunchError }}</p>
         </div>
       </div>
 
@@ -577,6 +593,9 @@ async function onSaveMainMail(): Promise<void> {
   font-size: 12px;
   color: var(--dt-text-4);
   margin-top: 4px;
+}
+.sec-hint-error {
+  color: #f53f3f;
 }
 .mail-banner {
   display: flex;

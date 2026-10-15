@@ -53,7 +53,25 @@ const showParticipants = ref(false)
 const showMeetingInfo = ref(false)
 const showDevices = ref(false)
 const callDuration = ref(0)
-const error = ref('')
+// ─── RTC 连接重试 ──────────────────────────────────────────
+/**
+ * 会议 RTC 连接失败的重试策略（进入会议 + 会中对端掉线重连共用）：
+ *   - 失败自动重试，最多连续 3 次；
+ *   - 任何一次成功都把「连续失败」计数清零（偶发抖动不会攒到弹窗）；
+ *   - 连续 3 次仍失败 → 弹窗告知，窗口保持打开，用户可点「重试」再来，绝不直接退出。
+ */
+const MAX_RTC_RETRY = 3
+/** 第 1/2 次重试前的等待（ms）；第 3 次退避到 4s，给网络/服务端一点恢复时间 */
+const RTC_RETRY_DELAYS = [1200, 2500]
+const RTC_RETRY_MAX_DELAY = 4000
+const PEER_CONNECT_TIMEOUT_MS = 12000
+let rtcFailStreak = 0
+/** 非空 → 弹窗告知（连续 3 次失败） */
+const rtcFatal = ref('')
+/** 正在重试的提示（顶部轻提示，不打断会议） */
+const rtcRetrying = ref('')
+/** 弹窗里「重试」按钮要重跑的动作 */
+let lastRetryAction: (() => Promise<void>) | null = null
 // 轻提示（录制保存结果等，不打断通话、不弹全屏遮罩）
 const toast = ref('')
 let toastTimer: number | null = null
@@ -66,6 +84,101 @@ function showToast(msg: string): void {
 }
 function openToastPath(): void {
   if (lastSavedPath.value) void window.pantry.openFileLocation(lastSavedPath.value)
+}
+
+/**
+ * 跑一个可能失败的 RTC 动作，失败按策略重试。
+ * 成功 → 连续失败计数清零；累计到 MAX_RTC_RETRY → 弹窗告知并返回 false（窗口不关）。
+ */
+async function withRtcRetry(label: string, fn: () => Promise<void>): Promise<boolean> {
+  for (;;) {
+    try {
+      await fn()
+      rtcFailStreak = 0
+      rtcRetrying.value = ''
+      return true
+    } catch (e) {
+      rtcFailStreak += 1
+      const msg = e instanceof Error ? e.message : String(e)
+      console.warn(`[RTC] ${label} 第 ${rtcFailStreak} 次失败：${msg}`)
+      if (rtcFailStreak >= MAX_RTC_RETRY) {
+        rtcRetrying.value = ''
+        rtcFatal.value = `${label}失败（已连续重试 ${MAX_RTC_RETRY} 次）：${msg}`
+        return false
+      }
+      const delay = RTC_RETRY_DELAYS[rtcFailStreak - 1] ?? RTC_RETRY_MAX_DELAY
+      rtcRetrying.value = `${label}失败，${Math.round(delay / 1000)} 秒后自动重试（${rtcFailStreak}/${MAX_RTC_RETRY}）…`
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+}
+
+/** 弹窗「重试」：清掉弹窗与计数，重跑上次失败的动作 */
+function retryFromDialog(): void {
+  const act = lastRetryAction
+  rtcFatal.value = ''
+  rtcFailStreak = 0
+  if (act) void act()
+}
+
+/** 弹窗「退出会议」 */
+function quitFromDialog(): void {
+  rtcFatal.value = ''
+  void leaveCall()
+}
+
+// ─── 会中对端掉线重连 ───
+const peerWaiters = new Map<number, () => void>()
+/** 每个对端各自的连续失败次数（用于判断该对端是否已放弃） */
+const peerFailStreak = new Map<number, number>()
+/** 正在重连的对端，避免同一对端并发重连 */
+const recoveringPeers = new Set<number>()
+
+function nickOfPeer(userId: number): string {
+  return peers.value.find((p) => p.userId === userId)?.nick || `用户 ${userId}`
+}
+
+/** 等对端 PC 连上（超时抛错，交给 withRtcRetry 重试） */
+function waitPeerConnected(userId: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      peerWaiters.delete(userId)
+      reject(new Error('连接超时'))
+    }, PEER_CONNECT_TIMEOUT_MS)
+    peerWaiters.set(userId, () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+/**
+ * 会中某对端掉线 → 重建到他的连接。
+ * 不直接把人从会议列表里删掉（那等于「掉线即退出」），重连失败 3 次才移除并弹窗。
+ */
+async function recoverPeer(userId: number): Promise<void> {
+  if (recoveringPeers.has(userId) || !engine) return
+  recoveringPeers.add(userId)
+  const name = nickOfPeer(userId)
+  lastRetryAction = () => recoverPeer(userId)
+  try {
+    const ok = await withRtcRetry(`与「${name}」的连接`, async () => {
+      engine?.closePeer(userId) // 主动关闭，不会再次触发掉线回调
+      engine?.addPeer(userId)
+      await waitPeerConnected(userId)
+    })
+    if (ok) {
+      peerFailStreak.delete(userId)
+      showToast(`已重新连接「${name}」`)
+    } else {
+      // 连续 3 次失败：这个对端确实回不来了，从列表移除（弹窗已给出原因）
+      peerFailStreak.set(userId, MAX_RTC_RETRY)
+      delete remoteStreams[userId]
+      peers.value = peers.value.filter((p) => p.userId !== userId)
+    }
+  } finally {
+    recoveringPeers.delete(userId)
+  }
 }
 const myNick = ref('我')
 const myAvatar = ref('')
@@ -152,7 +265,7 @@ async function applyDevicesFromPanel(p: {
       isCameraOff.value = true
       return
     }
-    error.value = '设备切换失败'
+    showToast('设备切换失败')
   }
 }
 
@@ -182,7 +295,7 @@ async function switchMic(deviceId: string): Promise<void> {
     engine?.replaceTrack(track, 'audio')
     currentMic.value = deviceId
   } catch {
-    error.value = '麦克风切换失败'
+    showToast('麦克风切换失败')
   }
 }
 async function switchCamera(deviceId: string): Promise<void> {
@@ -213,7 +326,7 @@ async function switchCamera(deviceId: string): Promise<void> {
       currentCam.value = 'default'
       return
     }
-    error.value = '摄像头切换失败'
+    showToast('摄像头切换失败')
   }
 }
 
@@ -320,9 +433,17 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     localStream,
     onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
     onRemoteStream: (userId, stream) => { remoteStreams[userId] = stream },
+    onPeerConnected: (userId) => {
+      // 连接（或重连）成功 → 清了这个对端的连续失败计数，并把上层的连续失败也清零
+      peerFailStreak.delete(userId)
+      rtcFailStreak = 0
+      peerWaiters.get(userId)?.()
+      peerWaiters.delete(userId)
+    },
     onPeerDisconnected: (userId) => {
       delete remoteStreams[userId]
-      peers.value = peers.value.filter((p) => p.userId !== userId)
+      // 会中意外掉线：不把人踢出会议，先自动重连；连续 3 次失败才弹窗
+      void recoverPeer(userId)
     }
   })
 
@@ -406,7 +527,7 @@ async function toggleCamera(): Promise<void> {
     }
     isCameraOff.value = !isCameraOff.value
   } catch {
-    error.value = '切换摄像头失败'
+    showToast('切换摄像头失败')
   }
 }
 
@@ -436,7 +557,7 @@ async function toggleScreenShare(): Promise<void> {
       isScreenSharing.value = true
     }
   } catch {
-    error.value = '屏幕共享切换失败'
+    showToast('屏幕共享切换失败')
   }
 }
 
@@ -467,7 +588,7 @@ async function toggleRecording(): Promise<void> {
   } else {
     engine.startRecording()
     if (engine.isRecording()) isRecording.value = true
-    else error.value = '录制启动失败（未获取到音视频流）'
+    else showToast('录制启动失败（未获取到音视频流）')
   }
 }
 
@@ -542,7 +663,7 @@ function scrollChatToBottom(): void {
 // ─── 窗口控制 ──────────────────────────────────────────────
 function onMinimize(): void { void window.pantry.minimizeWindow() }
 function onToggleMaximize(): void { void window.pantry.toggleMaximize() }
-function onClose(): void { window.close() }
+
 
 // ─── 生命周期 ─────────────────────────────────────────────
 onMounted(async () => {
@@ -573,7 +694,7 @@ onMounted(async () => {
   const meetingNo = props.meetingNo ?? ''
   const password = props.password ?? ''
 
-  try {
+  const enterMeeting = async (): Promise<void> => {
     if (mode === 'create') {
       const ack = await window.pantry.rtcCreateMeeting({ kind })
       if (!ack.ok || !ack.data?.meeting) throw new Error(ack.error || '创建会议失败')
@@ -584,27 +705,40 @@ onMounted(async () => {
       if (!ack.ok || !ack.data?.room) throw new Error(ack.error || '加入会议失败')
       await enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, kind)
     }
-    nextTick(() => {
-      if (localVideoRef.value) VideoStream.SetVideoElement(localVideoRef.value)
-    })
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
   }
+  lastRetryAction = enterMeeting
+  // 进入会议失败自动重试（连续 3 次失败 → 弹窗告知，窗口不关；不再是「进不去就退出」）
+  const joined = await withRtcRetry(mode === 'create' ? '创建会议' : '加入会议', enterMeeting)
+  if (!joined) return
+  nextTick(() => {
+    if (localVideoRef.value) VideoStream.SetVideoElement(localVideoRef.value)
+  })
 })
 
 onBeforeUnmount(() => { cleanup() })
 </script>
 
 <template>
-  <!-- 错误页 -->
-  <div v-if="error" class="error-screen">
-    <i class="fas fa-circle-exclamation error-icon"></i>
-    <div class="error-text">{{ error }}</div>
-    <button class="error-close" @click="onClose">关闭</button>
+  <!-- 轻提示（录制保存、设备切换失败等，非阻断；双击打开所在文件夹） -->
+  <div v-if="toast" class="rec-toast" title="双击打开所在文件夹" @dblclick="openToastPath">{{ toast }}</div>
+  <!-- 连接重试中的顶部提示：不阻断会议，用户能看到在自动重连 -->
+  <div v-if="rtcRetrying" class="rtc-retrying">
+    <i class="fas fa-rotate fa-spin"></i>&nbsp;{{ rtcRetrying }}
   </div>
 
-  <!-- 轻提示（录制保存等，非阻断；双击打开所在文件夹） -->
-  <div v-if="toast" class="rec-toast" title="双击打开所在文件夹" @dblclick="openToastPath">{{ toast }}</div>
+  <!-- 连续 3 次重试仍失败：弹窗告知，窗口保持打开（绝不直接退出） -->
+  <div v-if="rtcFatal" class="rtc-fatal-mask">
+    <div class="rtc-fatal-box">
+      <i class="fas fa-triangle-exclamation rtc-fatal-icon"></i>
+      <div class="rtc-fatal-title">连接失败</div>
+      <div class="rtc-fatal-text">{{ rtcFatal }}</div>
+      <div class="rtc-fatal-tip">可以点「重试」再试一次，或退出会议。</div>
+      <div class="rtc-fatal-actions">
+        <button class="dt-btn dt-btn-default" @click="quitFromDialog">退出会议</button>
+        <button class="dt-btn dt-btn-primary" @click="retryFromDialog">重试</button>
+      </div>
+    </div>
+  </div>
 
   <template v-else>
     <div class="meeting-root">
@@ -800,27 +934,52 @@ onBeforeUnmount(() => { cleanup() })
   overflow: hidden;
 }
 
-.error-screen {
-  height: 100vh;
+/* 连接重试中的顶部轻提示 */
+.rtc-retrying {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 320;
+  padding: 7px 16px;
+  border-radius: 16px;
+  background: rgba(255, 125, 0, 0.92);
+  color: #fff;
+  font-size: 13px;
+  pointer-events: none;
+}
+/* 连续重试仍失败：弹窗告知（不关窗口，用户可重试或主动退出） */
+.rtc-fatal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  background: #0d1117;
+}
+.rtc-fatal-box {
+  width: 380px;
+  padding: 24px 22px 18px;
+  border-radius: 10px;
+  background: #161b22;
+  border: 1px solid #2b3138;
   color: #e6e6e6;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
-.error-icon { font-size: 48px; color: #ff7d00; }
-.error-text { font-size: 15px; }
-.error-close {
-  padding: 8px 28px;
-  border: none;
-  border-radius: 6px;
-  background: #ff7d00;
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
+.rtc-fatal-icon { font-size: 40px; color: #ff7d00; }
+.rtc-fatal-title { margin-top: 10px; font-size: 16px; font-weight: 600; }
+.rtc-fatal-text { margin-top: 8px; font-size: 13px; line-height: 1.6; color: #c3c9d1; word-break: break-all; }
+.rtc-fatal-tip { margin-top: 8px; font-size: 12px; color: #8b949e; }
+.rtc-fatal-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
 }
+.rtc-fatal-actions .dt-btn { min-width: 96px; }
+
 .rec-toast {
   position: fixed;
   bottom: 84px;

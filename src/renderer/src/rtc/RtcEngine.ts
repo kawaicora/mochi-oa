@@ -6,13 +6,19 @@
 
 import type { RtcIceServer, RtcSignalPayload } from '@shared/server-types'
 
+/** 'disconnected' 的宽限期：丢包/切网通常能自愈，超过这个时间还没恢复才算掉线 */
+const DISCONNECT_GRACE_MS = 3000
+
 export interface RtcEngineOptions {
   roomId: string
   iceServers: RtcIceServer[]
   localStream: MediaStream
   onSignal: (signal: RtcSignalPayload) => void
   onRemoteStream: (userId: number, stream: MediaStream) => void
+  /** 对端「意外」掉线（不是本端主动 closePeer/closeAll）——用于自动重连 */
   onPeerDisconnected: (userId: number) => void
+  /** 对端连接建立成功（含重连成功）——重试逻辑靠它判定这一次成功了 */
+  onPeerConnected?: (userId: number) => void
 }
 
 /** 把共享类型 RtcIceServer 转为 DOM 类型 RTCIceServer */
@@ -53,9 +59,14 @@ class RtcEngine {
   private onSignal: (signal: RtcSignalPayload) => void
   private onRemoteStream: (userId: number, stream: MediaStream) => void
   private onPeerDisconnected: (userId: number) => void
+  private onPeerConnected?: (userId: number) => void
 
   /** peer key = userId */
   private peers = new Map<number, RTCPeerConnection>()
+  /** 本端主动关闭的 peer：close() 也会触发 connectionState=closed，不能当成对端掉线 */
+  private closing = new Set<number>()
+  /** 'disconnected' 的宽限计时器：短暂抖动 WebRTC 常能自愈，别立刻重连 */
+  private disconnectGrace = new Map<number, ReturnType<typeof setTimeout>>()
 
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
@@ -64,6 +75,7 @@ class RtcEngine {
     this.onSignal = opts.onSignal
     this.onRemoteStream = opts.onRemoteStream
     this.onPeerDisconnected = opts.onPeerDisconnected
+    this.onPeerConnected = opts.onPeerConnected
     console.log(
       '[RtcEngine] 初始化',
       'room=' + this.roomId,
@@ -76,6 +88,9 @@ class RtcEngine {
 
   /** 为新 peer 创建 PC 并发起 offer */
   addPeer(userId: number): void {
+    // 新建 = 这是一次主动发起（含重连），清掉上次的「主动关闭」标记
+    this.closing.delete(userId)
+    this.clearGrace(userId)
     // 已存在连接：若 signalingState 不稳定则 close 重建
     const existing = this.peers.get(userId)
     if (existing) {
@@ -177,14 +192,20 @@ class RtcEngine {
 
   closePeer(userId: number): void {
     const pc = this.peers.get(userId)
+    this.clearGrace(userId)
     if (pc) {
+      this.closing.add(userId)
       pc.close()
       this.peers.delete(userId)
     }
   }
 
   closeAll(): void {
-    this.peers.forEach((pc) => pc.close())
+    this.peers.forEach((pc, userId) => {
+      this.clearGrace(userId)
+      this.closing.add(userId)
+      pc.close()
+    })
     this.peers.clear()
   }
 
@@ -250,14 +271,50 @@ class RtcEngine {
       const state = pc.connectionState
       console.log(`[RtcEngine] [conn-state] user=${userId} ${state} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
       if (state === 'connected') {
-        // 连接建立 → 读取选中的候选对，报告直连 or 中转及各端地址
+        this.clearGrace(userId)
+        // 连接建立 → 读取选中的候选对，报告直连 or 中转及各端地址；并通知上层「这次成功了」
         void this._logPeerInfo(userId, pc)
+        this.onPeerConnected?.(userId)
+        return
       }
-      if (state === 'disconnected' || state === 'failed' || state === 'closed') {
-        console.log(`[RtcEngine] [conn-state] user=${userId} ${state} → 关闭对端连接`)
-        this.closePeer(userId)
-        this.onPeerDisconnected(userId)
+      if (state === 'disconnected') {
+        // 丢包/切网常会自愈：给 3 秒宽限，恢复不了才按掉线处理（避免无谓重连）
+        if (this.disconnectGrace.has(userId)) return
+        this.disconnectGrace.set(
+          userId,
+          setTimeout(() => {
+            this.disconnectGrace.delete(userId)
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+              console.log(`[RtcEngine] [conn-state] user=${userId} disconnected 超时未恢复 → 按掉线处理`)
+              this.handleDrop(userId)
+            }
+          }, DISCONNECT_GRACE_MS)
+        )
+        return
       }
+      if (state === 'failed' || state === 'closed') {
+        if (this.closing.has(userId)) {
+          // 本端主动 closePeer/closeAll 触发的，不算对端掉线
+          this.closing.delete(userId)
+          return
+        }
+        this.handleDrop(userId)
+      }
+    }
+  }
+
+  /** 对端掉线：关掉旧 PC 并通知上层（上层据此自动重连） */
+  private handleDrop(userId: number): void {
+    this.clearGrace(userId)
+    this.closePeer(userId)
+    this.onPeerDisconnected(userId)
+  }
+
+  private clearGrace(userId: number): void {
+    const t = this.disconnectGrace.get(userId)
+    if (t) {
+      clearTimeout(t)
+      this.disconnectGrace.delete(userId)
     }
   }
 
