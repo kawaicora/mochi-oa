@@ -225,6 +225,12 @@ function httpGet(url: string, onProgress?: (received: number, total: number) => 
  */
 const MAX_RECONNECT_FAILURES = 3
 
+/** 服务端返回的错误是不是「凭据解不开」（= 客户端手上的 RSA 公钥过期了） */
+function isDecryptFailure(msg: string | undefined): boolean {
+  const s = msg ?? ''
+  return s.includes('解密失败') || /decrypt/i.test(s)
+}
+
 export class ServerClient extends EventEmitter {
   private socket: Socket | null = null
   private _state: ServerClientState = {
@@ -411,6 +417,9 @@ export class ServerClient extends EventEmitter {
       console.log('[io:lifecycle] connect established (transport=' + (socket.io?.engine?.transport?.name ?? '?') + ')')
       this.reconnectFailures = 0
       this.gaveUp = false
+      // 每次（重）连都要丢掉 RSA 公钥缓存：服务端密钥对是随连接生成的，
+      // 重连后 socketID 变了、服务端换成了新私钥，留着旧公钥加密必然解不开。
+      this.pubKey = null
       this.setState({ state: 'connected', connected: true, error: undefined })
       if (this.token) {
         void this.authMe().then((ack) => {
@@ -523,15 +532,27 @@ export class ServerClient extends EventEmitter {
 
   // ─── 账号 ───────────────────────────────────────────────
 
-  /** 获取当前连接的服务端 RSA 公钥（登录/注册凭据加密用） */
-  private async ensurePublicKey(): Promise<boolean> {
-    if (this.pubKey) return true
+  /**
+   * 获取当前连接的服务端 RSA 公钥（登录/注册凭据加密用）。
+   *
+   * 关键：服务端的密钥对是【每个 socket 连接一份】的（服务端 rsaKeyStore 以 socketID 为键，
+   * 连接一断就销毁）。所以客户端绝不能长期缓存：
+   *  - 断线重连后 socketID 变了 → 服务端是新的私钥，旧公钥加密出来的密文解不开，
+   *    服务端只能回「登录凭据解密失败」，用户看到的就是"密码明明对却登录失败"；
+   *  - 服务端重启同理（内存里的密钥对全没了）。
+   * 因此登录/注册每次都强制重新取一次（force=true），另外每次重连也会把缓存清掉。
+   */
+  private async ensurePublicKey(force = false): Promise<boolean> {
+    if (!force && this.pubKey) return true
     if (!this.socket) return false
     const ack = await emitWithAck<{ publicKey: string }>(this.socket, 'auth:getPublicKey', {})
     if (ack.ok && ack.data?.publicKey) {
+      const changed = !!this.pubKey && this.pubKey !== ack.data.publicKey
+      if (changed) console.log('[auth] 服务端 RSA 公钥已变化（服务端重启或新连接），改用新公钥')
       this.pubKey = ack.data.publicKey
       return true
     }
+    console.warn(`[auth] 获取 RSA 公钥失败：${ack.error || '未知原因'}`)
     return false
   }
 
@@ -553,15 +574,30 @@ export class ServerClient extends EventEmitter {
   async register(username: string, password: string, nick?: string, email?: string, avatarPath?: string, code?: string): Promise<AuthAck> {
     // 断线可能已经把连接搞没了：点注册同样要先把连接拉起来
     if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
-    const sock = this.socket
+    let sock = this.socket
     if (!sock) return { ok: false, error: '未连接服务器' }
-    if (!(await this.ensurePublicKey())) return { ok: false, error: '获取注册加密公钥失败' }
-    const enc = this.encryptCreds({ username, password })
+    // force=true：每次都取当前连接的新公钥（服务端密钥对是每连接一份的，缓存会解不开）
+    if (!(await this.ensurePublicKey(true))) return { ok: false, error: '获取注册加密公钥失败' }
+    let enc = this.encryptCreds({ username, password })
     if (!enc) return { ok: false, error: '注册凭据加密失败' }
     const ci = await getClientLocation()
-    const ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
+    let ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
       sock, 'auth:register', { enc, nick, email, code, device: buildDeviceLabel(), clientInfo: ci }
     )
+    // 解密失败 = 公钥过期（服务端重启/重新连接）：重新取公钥再试一次
+    if (!ack.ok && isDecryptFailure(ack.error)) {
+      console.warn(`[auth] 注册凭据解密失败（${ack.error}）→ 重新获取 RSA 公钥后重试一次`)
+      this.pubKey = null
+      sock = this.socket
+      if (sock && (await this.ensurePublicKey(true))) {
+        enc = this.encryptCreds({ username, password })
+        if (enc) {
+          ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
+            sock, 'auth:register', { enc, nick, email, code, device: buildDeviceLabel(), clientInfo: ci }
+          )
+        }
+      }
+    }
     // 注册不自动登录：不 setState(userId/token)，由渲染层随后登出清理服务端自动创建的会话
     if (!ack.ok) return { ok: false, error: ack.error || '注册失败' }
     // 可选：注册成功后用服务端自动创建的会话上传头像（随后渲染层仍会登出清理）
@@ -571,7 +607,8 @@ export class ServerClient extends EventEmitter {
       try {
         const up = await this.uploadFile(avatarPath, 0)
         if (up.ok && up.data?.url) {
-          await emitWithAck(sock, 'user:updateProfile', { avatar: up.data.url })
+          const s2 = this.socket
+          if (s2) await emitWithAck(s2, 'user:updateProfile', { avatar: up.data.url })
         }
       } catch {
         // 头像上传失败不影响注册本身
@@ -587,15 +624,34 @@ export class ServerClient extends EventEmitter {
     // 否则 emitWithAck 在没有 socket 时直接失败，用户看到的就是「服务器明明起来了，
     // 怎么点登录都没反应」。
     if (!(await this.ensureConnected())) return { ok: false, error: '连接服务器失败，请检查网络或服务器地址' }
-    const sock = this.socket
+    let sock = this.socket
     if (!sock) return { ok: false, error: '未连接服务器' }
-    if (!(await this.ensurePublicKey())) return { ok: false, error: '获取登录加密公钥失败' }
-    const enc = this.encryptCreds(code ? { account, code } : { account, password })
-    if (!enc) return { ok: false, error: '登录凭据加密失败' }
+    // force=true：登录/注册每次都取一次当前连接的 RSA 公钥。
+    // 服务端的密钥对是每个 socket 连接一份、断了就销毁的；断线重连（socketID 变了）
+    // 或服务端重启之后，用缓存的旧公钥加密出来的密文服务端解不开，
+    // 表现就是「用户名密码明明是对的，却提示登录失败」。
+    if (!(await this.ensurePublicKey(true))) return { ok: false, error: '获取登录加密公钥失败' }
     const ci = await getClientLocation()
-    const ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
+    const buildPayload = (): Record<string, unknown> => (code ? { account, code } : { account, password })
+    let enc = this.encryptCreds(buildPayload())
+    if (!enc) return { ok: false, error: '登录凭据加密失败' }
+    let ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
       sock, 'auth:login', { enc, device: buildDeviceLabel(), clientInfo: ci }
     )
+    // 服务端说解密失败 → 手上的公钥一定过期了：丢缓存、重取、重试一次
+    if (!ack.ok && isDecryptFailure(ack.error)) {
+      console.warn(`[auth] 登录凭据解密失败（${ack.error}）→ 重新获取 RSA 公钥后重试一次`)
+      this.pubKey = null
+      sock = this.socket
+      if (sock && (await this.ensurePublicKey(true))) {
+        enc = this.encryptCreds(buildPayload())
+        if (enc) {
+          ack = await emitWithAck<{ token: string; user: UserInfo; companies: CompanyMembership[] }>(
+            sock, 'auth:login', { enc, device: buildDeviceLabel(), clientInfo: ci }
+          )
+        }
+      }
+    }
     return this.applyAuthAck(ack)
   }
 
