@@ -1087,7 +1087,17 @@ export const useAppStore = defineStore('app', () => {
   async function saveNotifyCfg(patch: Partial<typeof notifyCfg.value>): Promise<void> {
     notifyCfg.value = { ...notifyCfg.value, ...patch }
     try {
-      await window.pantry.serverSaveSettings(notifyCfg.value)
+      // 必须传「纯数据」：notifyCfg 是 Vue 响应式对象，dndConvs/convRings 是 Proxy，
+      // IPC 结构化克隆碰到 Proxy 会直接抛 "An object could not be cloned"（免打扰开关点了没保存就是这个原因）。
+      await window.pantry.serverSaveSettings({
+        notifySound: notifyCfg.value.notifySound,
+        callSound: notifyCfg.value.callSound,
+        messageSoundFile: notifyCfg.value.messageSoundFile,
+        callSoundFile: notifyCfg.value.callSoundFile,
+        dnd: notifyCfg.value.dnd,
+        dndConvs: [...notifyCfg.value.dndConvs],
+        convRings: { ...notifyCfg.value.convRings }
+      })
     } catch (e) {
       console.warn('[app] 保存通知设置失败', e)
     }
@@ -1096,17 +1106,17 @@ export const useAppStore = defineStore('app', () => {
     if ('messageSoundFile' in patch || 'callSoundFile' in patch || 'convRings' in patch) invalidateSoundCache()
   }
 
-  /** 打包成通知管理器需要的策略对象 */
+  /** 打包成通知管理器需要的策略对象（同样避免把响应式 Proxy 传出去） */
   function notifyPolicy(): NotifyPolicy {
     const c = notifyCfg.value
     return {
       sound: c.notifySound,
       callSound: c.callSound,
       dnd: c.dnd,
-      dndConvs: c.dndConvs,
+      dndConvs: [...c.dndConvs],
       messageSoundFile: c.messageSoundFile,
       callSoundFile: c.callSoundFile,
-      convRings: c.convRings
+      convRings: { ...c.convRings }
     }
   }
 

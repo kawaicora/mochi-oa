@@ -224,9 +224,12 @@ async function saveSettings(): Promise<void> {
   }
 }
 
-/** 取消勾选「记住密码」→ 立即清除本地保存的账号与密码（不等下次登录） */
+/** 取消勾选「记住密码」→ 立即清除本地保存的账号与密码（不等下次登录），输入框也一起清掉 */
 watch(rememberPwd, (v) => {
-  if (!v) void server.clearRememberedLogin()
+  if (!v) {
+    void server.clearRememberedLogin()
+    password.value = ''
+  }
 })
 
 async function doLogin(): Promise<void> {
@@ -242,11 +245,19 @@ async function doLogin(): Promise<void> {
       errorMsg.value = server.state.error || '账号或密码错误'
     } else {
       successMsg.value = '登录成功'
-      // 记住密码：勾了就落盘（下次自动回填），没勾就立即清掉
+      // 「记住密码」是一个开关，输入框里有没有值、值对不对是另一回事：
+      // 只有【真的填了账号+密码并且登录成功】才保存。登录成功也可能是上次的 token 还有效
+      // 自动恢复的（这时输入框是空的），把空值存进去等于把已经记住的密码清掉。
+      // 没勾选则保持清空（正常情况下取消勾选那一刻已经清了，这里再兜一层）。
+      const acc = account.value.trim()
       if (loginMode.value === 'password') {
-        await server.saveRememberedLogin(rememberPwd.value, account.value.trim(), password.value)
+        if (!rememberPwd.value) {
+          await server.clearRememberedLogin()
+        } else if (acc && password.value) {
+          await server.saveRememberedLogin(true, acc, password.value)
+        }
       }
-      password.value = rememberPwd.value ? password.value : ''
+      if (!rememberPwd.value) password.value = ''
       // 登录成功 → 切换为主窗口模式（可缩放、恢复大尺寸）
       void window.pantry.setMainMode()
     }
@@ -301,12 +312,12 @@ onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
   // 若已记住会话（重启自动恢复），用服务端返回的用户名回填问候语
   if (server.state.username) nick.value = server.state.username
-  // 记住密码：回填账号与密码（密码在磁盘上是加密存储的，这里读到的是明文）
+  // 记住密码：勾选状态是一个开关（保存过才为 true），输入框有值才回填。
+  // 「勾着但输入框是空的」是正常状态（上次可能没保存成功 / 密码被清了），
+  // 这时不能替用户取消勾选，也不能把空值当成密码。
   rememberPwd.value = cfg.rememberPassword === true
-  if (rememberPwd.value) {
-    if (cfg.savedAccount) account.value = cfg.savedAccount
-    if (cfg.savedPassword) password.value = cfg.savedPassword
-  }
+  if (cfg.savedAccount) account.value = cfg.savedAccount
+  if (cfg.savedPassword) password.value = cfg.savedPassword
   void appInfo
 })
 
