@@ -575,14 +575,14 @@ export function remoteInputStop(): void {
   remoteInputReset()
   if (winProc) {
     rlog(S, '结束 Windows 注入进程')
-    try { winProc.stdin?.end() } catch { /* ignore */ }
-    try { winProc.kill() } catch { /* ignore */ }
+    try { winProc.stdin?.end() } catch { console.warn('结束注入进程stdin失败') }
+    try { winProc.kill() } catch { console.warn('结束win注入进程失败') }
     winProc = null
   }
   if (helper) {
     rlog(S, `结束注入助手进程（${helperBackend}）`)
-    try { helper.stdin?.end() } catch { /* ignore */ }
-    try { helper.kill() } catch { /* ignore */ }
+    try { helper.stdin?.end() } catch { console.warn('结束注入助手进程stdin失败')  }
+    try { helper.kill() } catch { console.warn('结束注入助手进程失败') }
     helper = null
   }
   helperBackend = 'none'
@@ -595,5 +595,5 @@ export function remoteInputStop(): void {
 
 /** 应用退出前兜底清理：子进程不会随父进程自动退出，必须显式收掉 */
 export function remoteInputShutdown(): void {
-  try { remoteInputStop() } catch { /* ignore */ }
+  try { remoteInputStop() } catch { console.warn('结束远程输入失败') }
 }

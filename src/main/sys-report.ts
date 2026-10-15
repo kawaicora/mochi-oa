@@ -105,7 +105,7 @@ function deviceId(): string {
       const id = (JSON.parse(fs.readFileSync(f, 'utf8')) as { id?: string }).id
       if (id) return id
     }
-  } catch { /* ignore */ }
+  } catch { console.warn('获取设备ID失败') }
   return 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 

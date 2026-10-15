@@ -404,7 +404,7 @@ class RemoteSession {
         this.channel.send(JSON.stringify({ t: 'bye' }))
         this.say('已发送 bye（DataChannel）')
       }
-    } catch { /* ignore */ }
+    } catch { console.warn('发送bye（DataChannel）失败')}
     // ② 信令 bye：DC 还没 open / 已关闭时的兜底
     try {
       if (this.sendSignalFn) {

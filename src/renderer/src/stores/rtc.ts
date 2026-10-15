@@ -228,6 +228,8 @@ export const useRtcStore = defineStore('rtc', () => {
   async function answerDm(): Promise<void> {
     if (!incomingDm.value) return
     error.value = ''
+    // 接听就立刻停铃：不等接口返回（网络慢时铃声会一直响到接口回来才停）
+    stopRing()
     const roomId = incomingDm.value.room
     const kind = incomingDm.value.kind
     // 远程控制：对端（控制端/发起者）userId，用于信令精确匹配
@@ -254,6 +256,7 @@ export const useRtcStore = defineStore('rtc', () => {
 
   function rejectDm(): void {
     if (!incomingDm.value) return
+    stopRing() // 拒接立刻停铃
     void rtcPantry.rtcDmAnswer(incomingDm.value.room, false)
     incomingDm.value = null
   }
@@ -277,6 +280,8 @@ export const useRtcStore = defineStore('rtc', () => {
   async function joinGroupCall(): Promise<void> {
     if (!incomingGroup.value) return
     error.value = ''
+    // 加入群通话/会议就立刻停铃（不等接口返回）
+    stopRing()
     const roomId = incomingGroup.value.room
     const kind = incomingGroup.value.kind
     try {
@@ -494,6 +499,8 @@ export const useRtcStore = defineStore('rtc', () => {
     iceServers: RtcIceServer[],
     kind: RtcKind
   ): Promise<void> {
+    // 一旦真的进房间，就绝不该还有铃声在响（接听/加入/被拉进会议都会走到这里）
+    stopRing()
     // 1. 初始化本地流（采集失败回退空轨，保证无摄像头/麦克风也能进入通话）
     let localStream: MediaStream
     if (kind === 'video') {

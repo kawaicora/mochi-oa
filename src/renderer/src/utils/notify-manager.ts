@@ -193,13 +193,22 @@ async function loadSound(kind: NotifKind, customPath: string): Promise<LoadedSou
 }
 
 /** 播放一次（失败会清缓存并重解析一次，仍失败就放弃） */
-async function playOnce(kind: NotifKind, customPath: string): Promise<void> {
+async function playOnce(kind: NotifKind, customPath: string, ringGen?: number): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const s = await loadSound(kind, customPath)
     if (!s) return
+    // 加载音频是异步的：等文件加载完可能已经接听/拒接了，这时绝不能再响（否则"挂了还在响"）
+    if (ringGen != null && ringGen !== ringGeneration) return
     try {
       s.audio.currentTime = 0
       await s.audio.play()
+      if (kind === 'call') {
+        if (ringGen != null && ringGen !== ringGeneration) {
+          try { s.audio.pause() } catch { /* ignore */ }
+          return
+        }
+        ringAudioEl = s.audio
+      }
       return
     } catch (e) {
       // 第一遍失败：可能文件被删/损坏 → 清掉缓存与解析结果，重来一次（会拿到默认音）
@@ -218,6 +227,10 @@ async function playOnce(kind: NotifKind, customPath: string): Promise<void> {
 
 let ringTimer: ReturnType<typeof setInterval> | null = null
 let ringing = false
+/** 正在播放的铃声元素：stopRing 必须把它停掉，光停定时器声音会一直播到文件结尾 */
+let ringAudioEl: HTMLAudioElement | null = null
+/** 铃声代数：stopRing 自增 → 在途的"加载完就播"作废，避免停了又被异步回调响起来 */
+let ringGeneration = 0
 
 /**
  * 开始来电铃声：循环播放，最长 45 秒自动停（避免没人接一直响）。
@@ -225,22 +238,37 @@ let ringing = false
  */
 export async function startRing(customRing?: string): Promise<void> {
   stopRing()
+  const gen = ++ringGeneration
   ringing = true
   const play = (): void => {
-    if (!ringing) return
-    void playOnce('call', customRing ?? '')
+    if (!ringing || gen !== ringGeneration) return
+    // 还在响就别从头再来：铃声可能是几十秒的曲子，每 3 秒重置只会一直听开头那几秒
+    if (ringAudioEl && !ringAudioEl.paused) return
+    void playOnce('call', customRing ?? '', gen)
   }
   play()
   ringTimer = setInterval(play, 3000)
-  setTimeout(() => stopRing(), 45_000)
+  setTimeout(() => { if (gen === ringGeneration) stopRing() }, 45_000)
 }
 
-/** 停止来电铃声（接听、拒绝、挂断、超时都要调） */
+/**
+ * 停止来电铃声（接听、拒绝、挂断、超时都要调）。
+ * 注意必须【真的把音频停掉】——只清定时器的话，当前这一遍会继续播到文件结束：
+ * 铃声文件如果是几十秒的曲子（比如 calling.mp3），接听后还能听见它响一分钟。
+ */
 export function stopRing(): void {
   ringing = false
+  ringGeneration++ // 让在途的 loadSound/play 作废
   if (ringTimer) {
     clearInterval(ringTimer)
     ringTimer = null
+  }
+  if (ringAudioEl) {
+    try {
+      ringAudioEl.pause()
+      ringAudioEl.currentTime = 0
+    } catch { /* ignore */ }
+    ringAudioEl = null
   }
 }
 
