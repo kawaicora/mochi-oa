@@ -16,9 +16,30 @@
  *
  * 与网页版的唯一区别（故意保留）：视频 sender 锁 maintain-resolution 与下行日志，
  * 失败只记日志，绝不影响建连。
+ *
+ * 日志：全部直接走 console，统一前缀 [RTC][user=7]。
+ *       在 DevTools 里过滤 "RTC" 就能看到完整建连流程；
+ *       级别用 console.log / warn / error，DevTools 原生按级别过滤。
  */
 
 import type { RtcIceServer, RtcSignalPayload } from '@shared/server-types'
+
+// ═══════════════════════════════════════════════════════════
+// 日志：直接走 console，DevTools 自带级别过滤 / 搜索
+// ═══════════════════════════════════════════════════════════
+
+/** 普通流程日志 */
+function log(tag: string, msg: string, data?: unknown): void {
+  console.log(`[RTC]${tag ? '[' + tag + ']' : ''} ${msg}`, ...(data !== undefined ? [data] : []))
+}
+/** 可恢复的问题（跳过 / 忽略 / 回退） */
+function logw(tag: string, msg: string, data?: unknown): void {
+  console.warn(`[RTC]${tag ? '[' + tag + ']' : ''} ${msg}`, ...(data !== undefined ? [data] : []))
+}
+/** 致命错误（连不上就是这么来的） */
+function loge(tag: string, msg: string, data?: unknown): void {
+  console.error(`[RTC]${tag ? '[' + tag + ']' : ''} ${msg}`, ...(data !== undefined ? [data] : []))
+}
 
 export interface RtcEngineOptions {
   roomId: string
@@ -48,32 +69,82 @@ function EnforceStereo(sdp: string): string {
   )
 }
 
-/** 解析 ICE candidate 字符串，抽取出类型 + 地址 + 转发服务器地址，用于日志可读 */
+/**
+ * 解析 ICE candidate，返回结构化信息用于日志。
+ * candidate 格式：candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> ...
+ * 注意 parts[0] 是 "candidate:xxxx"，所以 address 在 parts[4]、port 在 parts[5]。
+ */
+function parseCandidate(candidate: string): {
+  address: string
+  port: string
+  transport: string
+  type: string
+  raddr: string
+  rport: string
+} {
+  const parts = (candidate || '').split(' ')
+  const g = (re: RegExp): string => (candidate || '').match(re)?.[1] ?? ''
+  return {
+    address: parts[4] ?? '',
+    port: parts[5] ?? '',
+    transport: parts[2] ?? '',
+    type: g(/typ\s+(\w+)/),
+    raddr: g(/raddr\s+([\w.:-]+)/),
+    rport: g(/rport\s+(\d+)/)
+  }
+}
+
+/** 一行摘要：host/srflx/prflx/relay + 地址:端口（relay 附中转服务器地址） */
 function describeCandidate(candidate: string): string {
-  const typ = candidate.match(/typ\s+(\w+)/)?.[1] ?? '?'
-  const parts = candidate.split(' ')
-  // 标准格式：candidate:foundation component transport priority address port typ type ...
-  const address = parts[4] ?? ''
-  const port = parts[5] ?? ''
-  const raddr = candidate.match(/raddr\s+([\w.:-]+)/)?.[1] ?? ''
-  const rport = candidate.match(/rport\s+(\d+)/)?.[1] ?? ''
-  if (typ === 'relay' && raddr) return `relay ${address}:${port} (中转服务器 ${raddr}:${rport})`
-  return `${typ} ${address}:${port}`
+  const c = parseCandidate(candidate)
+  const base = `${c.type} ${c.address}:${c.port}${c.transport ? '/' + c.transport : ''}`
+  if (c.type === 'relay') return `${base}（经中转服务器 ${c.raddr || '?'}:${c.rport || '?'}）`
+  if (c.type === 'srflx' || c.type === 'prflx') return `${base}（NAT 映射）`
+  return base
+}
+
+/** SDP 摘要：媒体行 + 编解码 + ice-ufrag，一眼看出协商了什么 */
+function describeSdp(sdp: string): string {
+  const lines = (sdp || '').split(/\r?\n/)
+  const media: string[] = []
+  const codecs: string[] = []
+  let ufrag = ''
+  let setup = ''
+  for (const l of lines) {
+    if (l.startsWith('m=')) media.push(l.slice(2))
+    else if (l.startsWith('a=rtpmap:')) codecs.push(l.replace('a=rtpmap:', ''))
+    else if (l.startsWith('a=ice-ufrag:')) ufrag = l.slice('a=ice-ufrag:'.length)
+    else if (l.startsWith('a=setup:')) setup = l.slice('a=setup:'.length)
+  }
+  const uniq = Array.from(new Set(codecs.map((c) => c.split(' ')[1] ?? c))).slice(0, 10)
+  return `m=[${media.join(' | ')}] 编解码=[${uniq.join(', ')}] ufrag=${ufrag || '?'} setup=${setup || '?'}`
+}
+
+/** 统计 SDP 里的 candidate 数量（判断是否真的采集到了候选） */
+function countCandidates(sdp: string): number {
+  return ((sdp || '').match(/^a=candidate:/gm) ?? []).length
+}
+
+/** MediaStream 摘要 */
+function describeStream(stream: MediaStream | null | undefined): string {
+  if (!stream) return '(null)'
+  const ids = stream.getTracks().map((t) => `${t.kind}:${t.readyState}`).join(',')
+  return `tracks=${stream.getTracks().length}(video=${stream.getVideoTracks().length},audio=${stream.getAudioTracks().length}) [${ids}]`
 }
 
 /**
  * 视频 Sender 参数：带宽不足时优先保分辨率（降帧率而不是降清晰度）。
  * 失败只记日志，绝不影响建连。
  */
-async function configureVideoSender(sender: RTCRtpSender): Promise<void> {
+async function configureVideoSender(sender: RTCRtpSender, tag: string): Promise<void> {
   try {
     const params = sender.getParameters()
     if (!params.encodings) params.encodings = [{}]
     params.degradationPreference = 'maintain-resolution'
     await sender.setParameters(params)
-    console.log('[RtcEngine] 视频参数已锁定：清晰（maintain-resolution）')
+    log(tag, '视频 sender 参数已锁定 maintain-resolution（带宽不足时降帧率保清晰）')
   } catch (e) {
-    console.error('[RtcEngine] 设置视频参数失败:', e)
+    logw(tag, '设置视频 sender 参数失败（不影响建连）', e)
   }
 }
 
@@ -89,6 +160,14 @@ class RtcEngine {
   /** peer key = userId（服务端 from 只有 userId，见文件头说明） */
   private peers = new Map<number, RTCPeerConnection>()
 
+  /** 每个 peer 的诊断快照：候选、建连时间、最后一条信令 */
+  private peerDiag = new Map<number, {
+    localCands: { type: string; addr: string }[]
+    remoteCands: { type: string; addr: string }[]
+    created: number
+    lastSignal?: string
+  }>()
+
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
     this.iceServers = toIceServers(opts.iceServers)
@@ -97,12 +176,26 @@ class RtcEngine {
     this.onRemoteStream = opts.onRemoteStream
     this.onPeerDisconnected = opts.onPeerDisconnected
     this.onPeerConnected = opts.onPeerConnected
-    console.log(
-      '[RtcEngine] 初始化',
-      'room=' + this.roomId,
-      'iceServers=' + this.describeIce(),
-      'localTracks=' + this.localStream.getTracks().length
-    )
+
+    const R = 'room=' + this.roomId
+    log(R, '════════ RtcEngine 初始化 ════════')
+    log(R, `本地流 ${describeStream(this.localStream)}`)
+    if (this.localStream.getTracks().length === 0) {
+      loge(R, '本地流没有任何轨道！对方只会看到黑屏/无声')
+    }
+    if (this.iceServers.length === 0) {
+      loge(R, 'ICE 服务器列表为空！只能靠 host 候选直连，跨 NAT 必然连不上')
+    }
+    this.iceServers.forEach((s, i) => {
+      const urls = Array.isArray(s.urls) ? s.urls.join(', ') : String(s.urls)
+      log(R, `ICE[${i}] urls=${urls} 需鉴权=${!!(s.username && s.credential)}`)
+    })
+    const allUrls = this.iceServers
+      .map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)))
+      .join(',')
+    const hasStun = /stun:/i.test(allUrls)
+    const hasTurn = /turns?:/i.test(allUrls)
+    log(R, `ICE 类型：STUN=${hasStun} TURN=${hasTurn}${hasTurn ? '' : '（无 TURN：双方都是对称 NAT 时会连不上）'}`)
   }
 
   private describeIce(): string {
@@ -117,6 +210,24 @@ class RtcEngine {
     )
   }
 
+  private tag(userId: number): string {
+    return `user=${userId}`
+  }
+
+  private diag(userId: number): {
+    localCands: { type: string; addr: string }[]
+    remoteCands: { type: string; addr: string }[]
+    created: number
+    lastSignal?: string
+  } {
+    let d = this.peerDiag.get(userId)
+    if (!d) {
+      d = { localCands: [], remoteCands: [], created: Date.now() }
+      this.peerDiag.set(userId, d)
+    }
+    return d
+  }
+
   // ─── 建立连接（对齐网页版 addPeer）─────────────────────
 
   /**
@@ -129,11 +240,11 @@ class RtcEngine {
     const ex = this.peers.get(userId)
     if (ex) {
       if (ex.signalingState !== 'stable') {
-        console.log(`[RtcEngine] [addPeer] user=${userId} 旧 PC 停在 ${ex.signalingState} → 丢掉重来`)
+        logw(this.tag(userId), `旧 PC 停在 ${ex.signalingState}（接不了新 offer）→ 关闭重来`)
         ex.close()
         this.peers.delete(userId)
       } else {
-        console.log(`[RtcEngine] [addPeer] user=${userId} 已有 stable 连接，跳过`)
+        log(this.tag(userId), '已有 stable 连接 → 跳过（绝不发第二个 offer）')
         return
       }
     }
@@ -143,22 +254,24 @@ class RtcEngine {
 
   /** 建 PC + 加本地轨道 + 挂事件（不负责协商方向） */
   private createPc(userId: number, tag: string): RTCPeerConnection {
+    const t = this.tag(userId)
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
     this.peers.set(userId, pc)
-    console.log(
-      `[RtcEngine] [${tag}] user=` + userId,
-      'ice=' + this.describeIce(),
-      'localTracks=' + this.localStream.getTracks().length
-    )
-    this.localStream.getTracks().forEach((track) => {
+    this.peerDiag.set(userId, { localCands: [], remoteCands: [], created: Date.now() })
+
+    const tracks = this.localStream.getTracks()
+    log(t, `新建 PC（角色=${tag}）ice=${this.describeIce()} 本地流 ${describeStream(this.localStream)}`)
+    if (tracks.length === 0) {
+      loge(t, '本地流没有任何轨道！对方只会看到黑屏/无声')
+    }
+    tracks.forEach((track) => {
       const sender = pc.addTrack(track, this.localStream)
-      // 只处理视频轨道：带宽不足时降帧率、保清晰度
+      log(t, `addTrack kind=${track.kind} id=${track.id} enabled=${track.enabled} state=${track.readyState}`)
       if (track.kind === 'video') {
-        configureVideoSender(sender).catch((err) => {
-          console.error('配置视频发送参数失败:', err)
-        })
+        void configureVideoSender(sender, t)
       }
     })
+    log(t, `addTrack 完成 senders=${pc.getSenders().length}`)
     this.bindPeerEvents(pc, userId)
     return pc
   }
@@ -171,22 +284,31 @@ class RtcEngine {
    * ice    → 加到该用户的 PC；PC 还没建就【先缓存】，等建好补加
    */
   handleSignal(fromUserId: number, signal: RtcSignalPayload): void {
-    console.log(
-      '[RtcEngine] [signal] from=' + fromUserId,
-      'type=' + signal.type,
-      'hasPc=' + this.peers.has(fromUserId)
-    )
+    const t = this.tag(fromUserId)
+    const hasPc = this.peers.has(fromUserId)
+    const sigState = this.peers.get(fromUserId)?.signalingState ?? '(无PC)'
+
+    if (signal.type === 'ice') {
+      log(t, `收到信令 ice ${describeCandidate(signal.candidate)} hasPc=${hasPc} sig=${sigState}`)
+    } else {
+      log(t, `收到信令 ${signal.type} sdpLen=${signal.sdp?.length ?? 0} hasPc=${hasPc} sig=${sigState}`)
+      log(t, `${signal.type} SDP 概要：${describeSdp(signal.sdp ?? '')}`)
+    }
+    this.diag(fromUserId).lastSignal = `${signal.type}@${new Date().toLocaleTimeString()}`
 
     let pc = this.peers.get(fromUserId)
     if (!pc && signal.type === 'offer') {
       // 后进房间的人走这条：来一个 offer 就为这个 userId 建一个独立 PC
+      log(t, '本端尚无该对端 PC → 作为【应答方】新建 PC（被叫路径）')
       pc = this.createPc(fromUserId, 'answer')
     }
     if (!pc) {
       // answer / ice 比 offer 先到（后进房间的人偶发）→ 缓存 ICE，其余丢弃
       if (signal.type === 'ice') {
         this.pendingIce(fromUserId).push(this.toIceInit(signal))
-        console.log(`[RtcEngine] [收到ICE] user=${fromUserId} 尚无 PC，先缓存`)
+        logw(t, `尚无 PC，ICE 先缓存（缓存数=${this.pendingIce(fromUserId).length}），等 PC 建好补加`)
+      } else {
+        logw(t, `尚无 PC 却收到 ${signal.type} → 丢弃（对不上任何连接）`)
       }
       return
     }
@@ -198,22 +320,38 @@ class RtcEngine {
 
   // ─── 关闭 ─────────────────────────────────────────────
 
-  closePeer(userId: number): void {
+  closePeer(userId: number, reason = '主动关闭'): void {
     const pc = this.peers.get(userId)
     if (pc) {
+      log(this.tag(userId), `关闭 PC（${reason}）此前 conn=${pc.connectionState} ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
       pc.close()
       this.peers.delete(userId)
     }
   }
 
   closeAll(): void {
+    log('room=' + this.roomId, `closeAll：关闭全部 ${this.peers.size} 个 PC`)
+    this.peers.forEach((_pc, userId) => this.logPeerSummary(userId))
     this.peers.forEach((pc) => pc.close())
     this.peers.clear()
+    this.peerDiag.clear()
   }
 
   /** 是否已有该对端的 PC（上层判断"要不要发起/重建"用） */
   hasPeer(userId: number): boolean {
     return this.peers.has(userId)
+  }
+
+  /** 当前所有 peer 的状态快照（排查用；DevTools 里可 window.__RTC_PEERS__() 或直接读日志） */
+  dumpPeers(): string {
+    if (this.peers.size === 0) return '(无 peer)'
+    const lines: string[] = []
+    this.peers.forEach((pc, userId) => {
+      lines.push(
+        `user=${userId} conn=${pc.connectionState} ice=${pc.iceConnectionState} gather=${pc.iceGatheringState} sig=${pc.signalingState} senders=${pc.getSenders().length} receivers=${pc.getReceivers().length}`
+      )
+    })
+    return lines.join('\n')
   }
 
   // ─── 轨道替换（对齐网页版 replaceTrack）───────────────
@@ -224,46 +362,55 @@ class RtcEngine {
    * 否则双方一换设备就同时进 have-local-offer，这正是 glare 的来源。
    */
   replaceTrack(track: MediaStreamTrack | null, kind: 'audio' | 'video'): void {
+    log('room=' + this.roomId,
+      `replaceTrack kind=${kind} track=${track ? `${track.id}(${track.readyState})` : 'null（关闭该轨道）'} 作用于 ${this.peers.size} 个 PC（不重新协商）`)
     this.peers.forEach((pc, userId) => {
-      console.log(
-        '[RtcEngine] [replaceTrack] user=' + userId,
-        'kind=' + kind,
-        'track=' + (track ? track.id : 'null'),
-        'senders=' + pc.getSenders().length,
-        'sig=' + pc.signalingState
-      )
+      const t = this.tag(userId)
       let replaced = 0
+      let matched = 0
       for (const sender of pc.getSenders()) {
         if (sender.track?.kind === kind) {
-          void sender.replaceTrack(track).catch((e) => {
-            console.error(`[RtcEngine] [replaceTrack] user=${userId} kind=${kind} 失败:`, e)
-          })
+          matched++
           replaced++
+          void sender.replaceTrack(track)
+            .then(() => log(t, `replaceTrack kind=${kind} 成功`))
+            .catch((e) => loge(t, `replaceTrack kind=${kind} 失败：${e instanceof Error ? e.message : String(e)}`, e))
         }
       }
-      console.log(`[RtcEngine] [replaceTrack] user=${userId} replaced=${replaced}（不重新协商）`)
+      if (matched === 0) {
+        logw(t, `该 PC 上没有 kind=${kind} 的 sender → 换轨无效（现有 senders=${pc.getSenders().map((s) => s.track?.kind ?? 'null').join(',') || '空'}）`)
+      } else {
+        log(t, `replaceTrack kind=${kind} 已提交 replaced=${replaced} sig=${pc.signalingState}`)
+      }
     })
   }
 
   // ─── 内部：绑定 peer 事件（对齐网页版 _bind）───────────
 
   private bindPeerEvents(pc: RTCPeerConnection, userId: number): void {
+    const t = this.tag(userId)
+
     pc.ontrack = (event) => {
+      log(t, `★ ontrack 收到远端轨道 kind=${event.track.kind} id=${event.track.id} state=${event.track.readyState} streams=${event.streams.length}`)
       // event.streams[0] 绑定远程流；无 streams 时忽略
-      if (event.streams.length === 0) return
-      console.log(
-        `[RtcEngine] [ontrack] user=${userId} kind=${event.track.kind} stream=${event.streams[0].id} ${event.track.readyState}`
-      )
-      this.onRemoteStream(userId, event.streams[0])
+      if (event.streams.length === 0) {
+        logw(t, 'ontrack 事件不含 streams（无法绑定到 video 元素）→ 忽略')
+        return
+      }
+      const stream = event.streams[0]
+      log(t, `远端流 ${describeStream(stream)}`)
+      try {
+        log(t, `轨道参数 ${JSON.stringify(event.track.getSettings())}`)
+      } catch { /* getSettings 个别环境不支持，忽略 */ }
+      this.onRemoteStream(userId, stream)
     }
 
     pc.onicecandidate = (event) => {
       const c = event.candidate
       if (c) {
-        // 本端收集到候选：host/srflx/relay 类型、协议、传输地址（内网排查用）
-        console.log(
-          `[RtcEngine] [ice:local] user=${userId} ${describeCandidate(c.candidate)} (gather=${pc.iceGatheringState})`
-        )
+        const parsed = parseCandidate(c.candidate)
+        this.diag(userId).localCands.push({ type: parsed.type, addr: `${parsed.address}:${parsed.port}` })
+        log(t, `本端候选 → ${describeCandidate(c.candidate)}`)
         this.onSignal({
           type: 'ice',
           candidate: c.candidate,
@@ -271,91 +418,206 @@ class RtcEngine {
           sdpMLineIndex: c.sdpMLineIndex
         })
       } else {
-        console.log(`[RtcEngine] [ice:local] user=${userId} end-of-candidates`)
+        log(t, `本端候选采集结束（end-of-candidates）gather=${pc.iceGatheringState}`)
       }
     }
 
+    // STUN/TURN 故障就藏在这里 —— 连不上时这条几乎必看
+    pc.onicecandidateerror = (event) => {
+      const e = event as RTCPeerConnectionIceErrorEvent
+      const why =
+        e.errorCode === 701 ? 'STUN/TURN 服务器连不上（检查地址/端口/防火墙）'
+        : e.errorCode === 401 ? 'TURN 鉴权失败（用户名或密码错）'
+        : e.errorCode === 403 ? 'TURN 拒绝（配额或权限不足）'
+        : e.errorCode === 300 ? 'TURN 重定向'
+        : '见 errorText'
+      loge(t, `ICE 候选采集错误 code=${e.errorCode} text=${e.errorText} url=${e.url || '(未知)'} address=${e.address || '?'}:${e.port || '?'} —— ${why}`)
+    }
+
     pc.oniceconnectionstatechange = () => {
-      console.log(`[RtcEngine] [ice-state] user=${userId} ${pc.iceConnectionState}`)
+      const s = pc.iceConnectionState
+      const extra =
+        s === 'failed' ? '（ICE 失败：候选对打不通，通常是 NAT/防火墙/缺 TURN）'
+        : s === 'disconnected' ? '（暂时中断，可能在自愈）'
+        : s === 'checking' ? '（正在试探候选对）'
+        : ''
+      if (s === 'failed') loge(t, `ICE 连接状态 → ${s}${extra}`)
+      else if (s === 'disconnected') logw(t, `ICE 连接状态 → ${s}${extra}`)
+      else log(t, `ICE 连接状态 → ${s}${extra}`)
+      if (s === 'failed') void this.logPeerInfo(userId, pc)
     }
 
     pc.onicegatheringstatechange = () => {
-      console.log(`[RtcEngine] [ice-gather] user=${userId} ${pc.iceGatheringState}`)
+      log(t, `ICE 采集状态 → ${pc.iceGatheringState}`)
     }
 
     pc.onsignalingstatechange = () => {
-      console.log(`[RtcEngine] [sig-state] user=${userId} ${pc.signalingState}`)
+      log(t, `信令状态 → ${pc.signalingState}`)
+    }
+
+    pc.onnegotiationneeded = () => {
+      log(t, `negotiationneeded（本端想重新协商；本引擎不自动发 offer）sig=${pc.signalingState}`)
     }
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
-      console.log(
-        `[RtcEngine] [conn-state] user=${userId} ${state} ice=${pc.iceConnectionState} sig=${pc.signalingState}`
-      )
       if (state === 'connected') {
+        log(t, `★★ 连接已建立（connected）ice=${pc.iceConnectionState} sig=${pc.signalingState}`)
         // 连接建立 → 读取选中的候选对，报告直连 or 中转；并通知上层「这次成功了」
         void this.logPeerInfo(userId, pc)
         this.onPeerConnected?.(userId)
         return
       }
+      if (state === 'connecting') {
+        log(t, `连接状态 → connecting ice=${pc.iceConnectionState}`)
+        return
+      }
+      if (state === 'disconnected') logw(t, '连接状态 → disconnected（媒体可能已中断，等待自愈或重连）')
+      else if (state === 'failed') loge(t, '连接状态 → failed（建连失败：见上面 ICE 日志与下方诊断）')
+      else if (state === 'closed') log(t, '连接状态 → closed')
+
       // 对齐网页版：disconnected / failed / closed 一律清理并通知上层，不自己造秒数、不自己重连。
       // 唯一的加固：只有「当前登记的还是这个 PC」才处理 ——
       // 老 PC 被主动关掉后它的异步事件不能误伤刚建好的新 PC。
       if (state === 'disconnected' || state === 'failed' || state === 'closed') {
-        if (this.peers.get(userId) !== pc) return
-        this.closePeer(userId)
+        if (this.peers.get(userId) !== pc) {
+          log(t, '该 PC 已不是当前登记的连接（已被替换）→ 不触发掉线回调')
+          return
+        }
+        void this.logPeerInfo(userId, pc)
+        this.logPeerSummary(userId)
+        this.closePeer(userId, `连接状态=${state}`)
         this.onPeerDisconnected(userId)
       }
     }
   }
 
-  /** 连接建立后：用 getStats 找出成功候选对，判定直连/中转，并输出候选与中心服务器(TURN)地址 */
+  /** 一条完整的对端诊断：候选类型/地址、失败原因 */
+  private logPeerSummary(userId: number): void {
+    const d = this.peerDiag.get(userId)
+    if (!d) return
+    const t = this.tag(userId)
+    const l = d.localCands.map((c) => `${c.type}(${c.addr})`)
+    const r = d.remoteCands.map((c) => `${c.type}(${c.addr})`)
+    log(t, `── 对端诊断 ── 本端候选=[${l.join(', ') || '无'}] 远端候选=[${r.join(', ') || '无'}]`)
+    if (d.localCands.length === 0) {
+      loge(t, '本端一个 ICE 候选都没采集到！检查网卡/防火墙/ICE 服务器配置')
+    }
+    if (d.remoteCands.length === 0) {
+      loge(t, '没收到对端任何 ICE 候选！信令可能没送达（检查房间/服务端转发）')
+    }
+    log(t, `首个 PC 建于 ${new Date(d.created).toLocaleTimeString()}，最后一次信令=${d.lastSignal ?? '无'}，存活=${Date.now() - d.created}ms`)
+  }
+
+  /**
+   * 用 getStats 找出成功候选对，判定【直连(P2P) / 中转(relay)】并打印双方 IP。
+   * 「到底走直连还是中转、对方 IP 是多少、TURN 地址是多少」全在这里。
+   */
   private async logPeerInfo(userId: number, pc: RTCPeerConnection): Promise<void> {
+    const t = this.tag(userId)
     try {
       const stats = await pc.getStats()
-      const cands = new Map<
-        string,
-        { candidateType?: string; address?: string; port?: number; relayProtocol?: string }
-      >()
-      let succeeded: { localCandidateId: string; remoteCandidateId: string } | null = null
+      const cands = new Map<string, {
+        candidateType?: string; address?: string; port?: number
+        protocol?: string; relayProtocol?: string; url?: string
+      }>()
+      const pairs: {
+        id: string
+        localCandidateId: string
+        remoteCandidateId: string
+        state: string
+        nominated?: boolean
+        bytesSent?: number
+        bytesReceived?: number
+        currentRoundTripTime?: number
+      }[] = []
+      // 用数组收集 transport 信息：TS 不追踪回调里的赋值，
+      // 若用 `let x = null` 会被收窄成 never；push 进数组则不受影响。
+      const transportLines: string[] = []
+
       stats.forEach((s) => {
         const r = s as unknown as Record<string, unknown>
         if (r.type === 'candidate') {
-          cands.set(s.id, {
+          const c = {
             candidateType: String(r.candidateType ?? ''),
             address: String(r.address ?? ''),
             port: Number(r.port ?? 0),
-            relayProtocol: r.relayProtocol ? String(r.relayProtocol) : undefined
-          })
-        } else if (r.type === 'candidate-pair' && r.state === 'succeeded' && !succeeded) {
-          succeeded = {
-            localCandidateId: String(r.localCandidateId ?? ''),
-            remoteCandidateId: String(r.remoteCandidateId ?? '')
+            protocol: r.protocol ? String(r.protocol) : undefined,
+            relayProtocol: r.relayProtocol ? String(r.relayProtocol) : undefined,
+            url: r.url ? String(r.url) : undefined
           }
+          cands.set(s.id, c)
+          // 累积到诊断（用于「没收到候选」判断）
+          const d = this.diag(userId)
+          const addr = `${c.address}:${c.port}`
+          if (!d.remoteCands.some((x) => x.addr === addr)) {
+            d.remoteCands.push({ type: c.candidateType ?? '?', addr })
+          }
+        } else if (r.type === 'candidate-pair') {
+          pairs.push({
+            id: s.id,
+            localCandidateId: String(r.localCandidateId ?? ''),
+            remoteCandidateId: String(r.remoteCandidateId ?? ''),
+            state: String(r.state ?? ''),
+            nominated: r.nominated === true,
+            bytesSent: Number(r.bytesSent ?? 0),
+            bytesReceived: Number(r.bytesReceived ?? 0),
+            currentRoundTripTime: r.currentRoundTripTime !== undefined ? Number(r.currentRoundTripTime) : undefined
+          })
+        } else if (r.type === 'transport') {
+          transportLines.push(
+            `DTLS=${r.dtlsState ? String(r.dtlsState) : '?'} ICE角色=${r.iceRole ? String(r.iceRole) : '?'}`
+          )
         }
       })
-      if (!succeeded) {
-        console.log(`[RtcEngine] [peer-info] user=${userId} 尚未选出可用候选对（可能仍在中转协商中）`)
+
+      transportLines.forEach((line) => log(t, line))
+
+      const succeeded = pairs.filter((p) => p.state === 'succeeded')
+      const pair =
+        pairs.find((p) => p.state === 'succeeded' && p.nominated) ??
+        succeeded.find((p) => (p.bytesSent ?? 0) > 0 || (p.bytesReceived ?? 0) > 0) ??
+        succeeded[0]
+
+      if (!pair) {
+        logw(t, `尚未选出可用候选对（共 ${pairs.length} 对，succeeded=${succeeded.length}）——连接可能仍在协商或已失败`)
+        pairs.forEach((p) => log(t, `  候选对 state=${p.state} nominated=${!!p.nominated}`))
         return
       }
-      const sp: { localCandidateId: string; remoteCandidateId: string } = succeeded
-      const lc = cands.get(sp.localCandidateId)
-      const rc = cands.get(sp.remoteCandidateId)
-      const fmt = (c?: { candidateType?: string; address?: string; port?: number }): string =>
-        c && c.address ? `${c.candidateType} ${c.address}:${c.port}` : '?'
+
+      const lc = cands.get(pair.localCandidateId)
+      const rc = cands.get(pair.remoteCandidateId)
+      const fmt = (c?: { candidateType?: string; address?: string; port?: number; protocol?: string }): string =>
+        c && c.address ? `${c.candidateType} ${c.address}:${c.port}${c.protocol ? '/' + c.protocol : ''}` : '(未知)'
+
       const viaRelay = lc?.candidateType === 'relay' || rc?.candidateType === 'relay'
-      console.log(`[RtcEngine] [peer-info] user=${userId} 连接方式=${viaRelay ? '中转(relay)' : '直连(P2P)'}`)
-      console.log(`[RtcEngine] [peer-info] user=${userId} 本地候选=${fmt(lc)}`)
-      console.log(`[RtcEngine] [peer-info] user=${userId} 远端候选=${fmt(rc)}`)
-      if (lc?.candidateType === 'relay') {
-        console.log(
-          `[RtcEngine] [peer-info] user=${userId} 中心服务器(TURN)中转地址=${lc.address}:${lc.port}${lc.relayProtocol ? ` (${lc.relayProtocol})` : ''}`
-        )
+      const rtt = pair.currentRoundTripTime !== undefined ? `${(pair.currentRoundTripTime * 1000).toFixed(0)}ms` : '?'
+
+      log(t, '════════ 连接方式 ════════')
+      log(t, `方式=${viaRelay ? '中转(relay/TURN)' : '直连(P2P)'}  RTT=${rtt}  已发送=${pair.bytesSent ?? 0}B 已接收=${pair.bytesReceived ?? 0}B`)
+      log(t, `本端地址=${fmt(lc)}`)
+      log(t, `远端地址=${fmt(rc)}`)
+      if (viaRelay) {
+        log(t, `★ 对端经中转（未打洞成功）`)
+      } else if (rc?.address) {
+        log(t, `★ 直连：对方 IP=${rc.address} 端口=${rc.port}`)
       }
+      if (lc?.candidateType === 'relay') {
+        log(t, `★ 中转服务器(TURN)地址 = ${lc.address}:${lc.port}${lc.relayProtocol ? ` (${lc.relayProtocol})` : ''}${lc.url ? ` url=${lc.url}` : ''}`)
+      }
+      if (rc?.candidateType === 'relay') {
+        logw(t, '对端侧也是 relay（全程走 TURN，未打洞成功）')
+      }
+
+      // 候选对全貌：判断「为什么没走直连」用
+      log(t, `候选对明细（共 ${pairs.length}）：`)
+      pairs.forEach((p, i) => {
+        const a = cands.get(p.localCandidateId)
+        const b = cands.get(p.remoteCandidateId)
+        log(t, `  [${i}] ${p.state}${p.nominated ? ' nominated' : ''} 本端=${fmt(a)} ↔ 远端=${fmt(b)}`)
+      })
     } catch (err) {
-      console.log(
-        `[RtcEngine] [peer-info] user=${userId} getStats失败 ${err instanceof Error ? err.message : String(err)}`
-      )
+      loge(t, `getStats 失败：${err instanceof Error ? err.message : String(err)}`, err)
     }
   }
 
@@ -363,18 +625,17 @@ class RtcEngine {
 
   /** createOffer → setLocalDescription → onSignal（先到的人给新人发起） */
   private async sendOffer(pc: RTCPeerConnection, userId: number): Promise<void> {
+    const t = this.tag(userId)
     try {
+      log(t, 'createOffer 开始…')
       const offer = await pc.createOffer()
       offer.sdp = EnforceStereo(offer.sdp ?? '')
+      log(t, `offer SDP 概要：${describeSdp(offer.sdp ?? '')}`)
       await pc.setLocalDescription(offer)
-      console.log(
-        '[RtcEngine] [发送offer] user=' + userId,
-        'sdpLen=' + (offer.sdp?.length ?? 0),
-        'sig=' + pc.signalingState
-      )
+      log(t, `★ 发送 offer sdpLen=${offer.sdp?.length ?? 0} sig=${pc.signalingState} SDP内候选数=${countCandidates(offer.sdp ?? '')}`)
       this.onSignal({ type: 'offer', sdp: offer.sdp ?? '' })
     } catch (err) {
-      console.error('[RtcEngine] createOffer failed:', err)
+      loge(t, `createOffer/setLocalDescription 失败：${err instanceof Error ? err.message : String(err)}`, err)
     }
   }
 
@@ -403,11 +664,12 @@ class RtcEngine {
     const arr = this.pendingIceMap.get(userId)
     if (!arr || arr.length === 0) return
     this.pendingIceMap.delete(userId)
+    log(this.tag(userId), `补加先前缓存的 ICE 候选，共 ${arr.length} 条`)
     for (const c of arr) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(c))
       } catch (err) {
-        console.error('[RtcEngine] flushIce failed:', err)
+        logw(this.tag(userId), `补加候选失败：${err instanceof Error ? err.message : String(err)}`)
       }
     }
   }
@@ -425,32 +687,37 @@ class RtcEngine {
    *   - closed 等 → 这个 PC 已废，直接忽略（等上层重建）。
    */
   private async applyOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
+    const t = this.tag(userId)
     const sig = pc.signalingState
-    console.log('[RtcEngine] [收到offer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + sig)
+    log(t, `处理 offer 开始 sig=${sig} sdpLen=${sdp.length} SDP内候选数=${countCandidates(sdp)}`)
+    log(t, `offer SDP 概要：${describeSdp(sdp)}`)
 
     // ① stable：本端协商已完成 → 这个 offer 多余，跳过（连接保持好的）
     if (sig === 'stable') {
-      console.log(`[RtcEngine] [收到offer] user=${userId} 跳过：本端已 stable（应答反而会把它弄坏）`)
+      logw(t, '跳过：本端已 stable（该 offer 重复/迟到，应答反而会破坏现有连接）')
       return
     }
     // ② closed：PC 已关闭
     if (sig === 'closed') {
-      console.log(`[RtcEngine] [收到offer] user=${userId} 跳过：PC 已关闭`)
+      logw(t, '跳过：PC 已关闭（等上层重建）')
       return
     }
 
     try {
       // ③ 双方同时发 offer：rollback 本端的 offer，改应答对方
       if (sig === 'have-local-offer') {
-        console.warn(`[RtcEngine] [收到offer] user=${userId} 双方同时发起 → rollback 本端 offer，改为应答对方`)
+        logw(t, '检测到双方同时发起（glare）→ rollback 本端 offer，改为应答对方')
         await pc.setRemoteDescription({ type: 'rollback' })
+        log(t, `rollback 完成 sig=${pc.signalingState}`)
       }
       // ④ 上一个 remote offer 还没答完：先回滚
       if (pc.signalingState === 'have-remote-offer') {
+        log(t, '上一个远端 offer 未答完 → 先 rollback')
         try {
           await pc.setRemoteDescription({ type: 'rollback' })
-        } catch {
-          /* 状态已变，交由下面 setRemoteDescription 决定 */
+          log(t, `rollback 完成 sig=${pc.signalingState}`)
+        } catch (e) {
+          logw(t, `rollback 失败（状态已变，继续尝试）：${e instanceof Error ? e.message : String(e)}`)
         }
       }
       // 走到这里 signalingState 必为 stable（上面已经把 have-local-offer 与
@@ -458,47 +725,43 @@ class RtcEngine {
       // 注意：signalingState 是实时 getter，await 之后不能靠此前的窄化判断，
       // 每次都要重新读，否则会把「已经变成 have-remote-offer」误判成 stable。
       await pc.setRemoteDescription({ type: 'offer', sdp })
+      log(t, `setRemoteDescription(offer) 成功 sig=${pc.signalingState}`)
       await this.flushIce(userId, pc)
       const answer = await pc.createAnswer()
       answer.sdp = EnforceStereo(answer.sdp ?? '')
+      log(t, `answer SDP 概要：${describeSdp(answer.sdp ?? '')}`)
       await pc.setLocalDescription(answer)
-      console.log(
-        '[RtcEngine] [发送answer] user=' + userId,
-        'sdpLen=' + (answer.sdp?.length ?? 0),
-        'sig=' + pc.signalingState
-      )
+      log(t, `★ 发送 answer sdpLen=${answer.sdp?.length ?? 0} sig=${pc.signalingState} SDP内候选数=${countCandidates(answer.sdp ?? '')}`)
       this.onSignal({ type: 'answer', sdp: answer.sdp ?? '' })
     } catch (err) {
-      console.warn(
-        `[RtcEngine] [收到offer] user=${userId} 处理失败（本轮不应答，连接状态未破坏）：`,
-        err instanceof Error ? err.message : err
-      )
+      loge(t, `处理 offer 失败（本轮不应答，连接状态未破坏）：${err instanceof Error ? err.message : String(err)}`, err)
     }
   }
 
   /** 收到 answer（对齐网页版 _handleAnswer）：只有本端等着对方回 answer 时才收 */
   private async applyAnswer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
+    const t = this.tag(userId)
     const sig = pc.signalingState
-    console.log('[RtcEngine] [收到answer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + sig)
+    log(t, `处理 answer 开始 sig=${sig} sdpLen=${sdp.length} SDP内候选数=${countCandidates(sdp)}`)
     // 只有 have-local-offer 时才是「本端等着对方回 answer」：
     //  - stable → 这个 answer 对应的是本端已作废的 offer（双方同时发 offer 后本端那个被丢了/
     //    已被别的 answer 答完）。此时绝不能硬 set —— 会抛 wrong state: stable，
     //    更糟的是把当前正常的连接毁掉。答案很简单：忽略，本端手里的连接是好的。
     if (sig !== 'have-local-offer') {
-      console.log(
-        `[RtcEngine] [收到answer] user=${userId} 忽略：本端不处于 have-local-offer（${sig}），该 answer 对应的 offer 已作废`
-      )
+      logw(t, `忽略 answer：本端不处于 have-local-offer（当前 ${sig}），该 answer 对应的 offer 已作废`)
       return
     }
     try {
       await pc.setRemoteDescription({ type: 'answer', sdp })
+      log(t, `setRemoteDescription(answer) 成功 sig=${pc.signalingState}`)
       await this.flushIce(userId, pc)
     } catch (err) {
       // 真的失败了（比如 SDP 角色冲突）→ 这个连接救不回来，丢掉它让上层重连，
       // 但只动这一个 peer，绝不波及其它人。
-      console.error(`[RtcEngine] [收到answer] user=${userId} 应用失败，重建该连接：`, err)
+      loge(t, `应用 answer 失败，重建该连接：${err instanceof Error ? err.message : String(err)}`, err)
       if (this.peers.get(userId) === pc) {
-        this.closePeer(userId)
+        this.logPeerSummary(userId)
+        this.closePeer(userId, 'answer应用失败')
         this.onPeerDisconnected(userId)
       }
     }
@@ -510,25 +773,26 @@ class RtcEngine {
     userId: number,
     signal: Extract<RtcSignalPayload, { type: 'ice' }>
   ): Promise<void> {
+    const t = this.tag(userId)
     // 这个 candidate 属于被换掉的旧连接（对端已重建）→ 直接丢，不要塞进新 PC。
     // 老 candidate 配新 ufrag 一定会被 addIceCandidate 拒绝，还会刷一堆报错。
     if (this.peers.get(userId) !== pc) {
-      console.log(`[RtcEngine] [收到ICE] user=${userId} 丢弃：该候选属于已被替换的旧连接`)
+      logw(t, `丢弃远端候选（属于已被替换的旧连接）：${describeCandidate(signal.candidate)}`)
       return
     }
-    console.log(
-      `[RtcEngine] [收到ICE] user=${userId} ${describeCandidate(signal.candidate)} remoteDesc=${pc.remoteDescription === null ? 'null' : 'set'} sig=${pc.signalingState}`
-    )
+    const parsed = parseCandidate(signal.candidate)
+    this.diag(userId).remoteCands.push({ type: parsed.type, addr: `${parsed.address}:${parsed.port}` })
+
     if (!pc.remoteDescription) {
       this.pendingIce(userId).push(this.toIceInit(signal))
+      log(t, `远端描述尚未 set，先缓存候选 ${describeCandidate(signal.candidate)}（缓存数=${this.pendingIce(userId).length}）`)
       return
     }
     try {
       await pc.addIceCandidate(new RTCIceCandidate(this.toIceInit(signal)))
+      log(t, `加入远端候选成功 ${describeCandidate(signal.candidate)} sig=${pc.signalingState}`)
     } catch (err) {
-      console.warn(
-        `[RtcEngine] [收到ICE] user=${userId} 添加失败（通常是旧连接的候选）：${err instanceof Error ? err.message : err}`
-      )
+      logw(t, `加入远端候选失败（通常是旧连接残留）：${describeCandidate(signal.candidate)} —— ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -547,7 +811,10 @@ class RtcEngine {
 
   /** 开始录制：合成本地音视频 + 所有对端接收音视频 */
   startRecording(): void {
-    if (this.recording) return
+    if (this.recording) {
+      logw('record', '已在录制中，忽略重复开始')
+      return
+    }
     this.recordChunks = []
 
     const tracks: MediaStreamTrack[] = []
@@ -559,7 +826,11 @@ class RtcEngine {
         if (r.track && r.track.readyState === 'live') tracks.push(r.track)
       })
     })
-    if (tracks.length === 0) return
+    log('record', `开始录制，待合成轨道数=${tracks.length}（本地 ${this.localStream.getTracks().length} + 远端 ${tracks.length - this.localStream.getTracks().length}）`)
+    if (tracks.length === 0) {
+      loge('record', '没有任何可用轨道 → 录制无法开始')
+      return
+    }
 
     const hasVideo = tracks.some((t) => t.kind === 'video')
     const mixed = new MediaStream(tracks)
@@ -576,10 +847,12 @@ class RtcEngine {
     let rec: MediaRecorder | null = null
     try {
       rec = mime ? new MediaRecorder(mixed, { mimeType: mime }) : new MediaRecorder(mixed)
-    } catch {
+    } catch (e) {
+      logw('record', `首选 MIME 失败（${mime || '默认'}），回退默认：${e instanceof Error ? e.message : String(e)}`)
       try {
         rec = new MediaRecorder(mixed)
-      } catch {
+      } catch (e2) {
+        loge('record', `创建 MediaRecorder 失败：${e2 instanceof Error ? e2.message : String(e2)}`)
         rec = null
       }
     }
@@ -588,7 +861,8 @@ class RtcEngine {
     rec.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) this.recordChunks.push(e.data)
     }
-    rec.onerror = () => {
+    rec.onerror = (e) => {
+      loge('record', `录制出错：${(e as unknown as { error?: Error })?.error?.message ?? '未知错误'}`)
       this.recording = false
       this.recorder = null
     }
@@ -598,6 +872,7 @@ class RtcEngine {
     // 不能靠 recordChunks 长度猜（那和有没有视频毫无关系）。
     this.recordHasVideo = hasVideo
     this.recording = true
+    log('record', `录制已启动 mime=${rec.mimeType} 含视频=${hasVideo}`)
   }
 
   /** 停止录制，返回 {blob, kind}；未在录制返回 null */
@@ -605,6 +880,7 @@ class RtcEngine {
     return new Promise((resolve) => {
       const rec = this.recorder
       if (!rec || !this.recording) {
+        logw('record', '未在录制中，stopRecording 无操作')
         resolve(null)
         return
       }
@@ -616,12 +892,14 @@ class RtcEngine {
 
       const finish = (): void => {
         const blob = new Blob(chunks, { type: hasVideo ? 'video/webm' : 'audio/webm' })
+        log('record', `录制结束 分片=${chunks.length} 大小=${blob.size}B 类型=${hasVideo ? 'video' : 'audio'}`)
         resolve(blob.size > 0 ? { blob, kind: hasVideo ? 'video' : 'audio' } : null)
       }
       rec.onstop = finish
       try {
         rec.stop()
-      } catch {
+      } catch (e) {
+        logw('record', `rec.stop() 抛错，直接收尾：${e instanceof Error ? e.message : String(e)}`)
         finish()
       }
     })

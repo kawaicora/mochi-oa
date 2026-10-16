@@ -11,7 +11,8 @@ import type {
   RtcIceServer,
   RtcKind,
   RtcPeer,
-  RtcRoom
+  RtcRoom,
+  RtcSignalPayload
 } from '@shared/server-types'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent } from '@renderer/utils/notify-manager'
@@ -412,6 +413,26 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   room.value = roomInfo
   peers.value = [...roomPeers]
 
+  // 0. 抢在采集媒体之前就监听信令。
+  //
+  // 【为什么必须这样】先到的对端在 rtcJoin 返回的瞬间就发 offer 了，而本地
+  // getUserMedia + 频谱 canvas 要几百毫秒。如果等到引擎建好才订阅，
+  // 这段时间到达的 offer/ICE 会因为 engine 仍是 null 被静默丢掉——
+  // 现象就是「PC 永远建不起来，只有后来的 ICE 在缓存」（实测丢了 430ms 内的 offer）。
+  // 所以先把信令收进 pendingSignals，引擎一建好立刻按序补投。
+  const pendingSignals: Array<{ userId: number; signal: RtcSignalPayload }> = []
+  let engineReady = false
+
+  const onSignalSub = window.pantry.onRtcSignal((d) => {
+    if (d.room !== roomInfo.id) return
+    if (engineReady && engine) {
+      engine.handleSignal(d.from.userId, d.signal)
+    } else {
+      pendingSignals.push({ userId: d.from.userId, signal: d.signal })
+      console.log(`[RTC] 引擎尚未就绪，先缓冲信令 ${d.signal.type} from=${d.from.userId}（缓冲数=${pendingSignals.length}）`)
+    }
+  })
+
   // 1. 本地媒体：默认只开麦克风（高清），摄像头默认关闭，需要时手动开启
   let mic: MediaStream
   try {
@@ -453,6 +474,18 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     }
   })
 
+  // 2.1 引擎就绪 → 把缓冲期间到达的信令按原始顺序补投（offer 通常就在里面）
+  engineReady = true
+  if (pendingSignals.length > 0) {
+    console.log(`[RTC] 引擎就绪，补投缓冲信令 ${pendingSignals.length} 条`)
+    const drained = pendingSignals.splice(0, pendingSignals.length)
+    for (const p of drained) {
+      engine.handleSignal(p.userId, p.signal)
+    }
+  }
+  // 这个订阅器全程有效（不再需要在下面重复订阅 onRtcSignal）
+  unsubscribers.push(onSignalSub)
+
   // 3. 房间已有对端：【什么都不做，等他们给我发 offer】。
   //    规则是——先到的人负责对每个新来的人发 offer；我是后进房间的，只负责应答。
   //    一个 offer 配一个新建的 PC（引擎内部处理），本地视频轨在 createPc 里统一塞进去。
@@ -484,10 +517,8 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
         peers.value = peers.value.filter((p) => p.socketId !== d.peerId)
       }
     }),
-    window.pantry.onRtcSignal((d) => {
-      if (d.room !== roomInfo.id) return
-      engine?.handleSignal(d.from.userId, d.signal)
-    }),
+    // 注意：onRtcSignal 已在 enterRoom 开头（媒体采集之前）订阅并 push 进 unsubscribers，
+    // 这里不能再订阅一次——那会让每条信令被 handleSignal 处理两遍。
     window.pantry.onRtcEnded((d) => {
       if (d.room !== roomInfo.id) return
       void stopRecordingAndSave().then(() => {
