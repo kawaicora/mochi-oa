@@ -98,12 +98,12 @@ class RtcEngine {
   // _handleIce / _flushIce / _renegotiate 与【服务端网页版 RtcEngine】逐条对齐：
   // 那边是确认可用的实现，逻辑简单且不会互相回敬 offer。
 
-  /** 建 PC + 加本地轨道 + 挂事件（不发 offer） */
-  private newPc(userId: number): RTCPeerConnection {
+  /** 建 PC + 加本地轨道 + 挂事件（不发 offer）。每个远端用户一个独立 PC，绝不复用 */
+  private newPc(userId: number, tag: string): RTCPeerConnection {
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
     this.peers.set(userId, pc)
     console.log(
-      '[RtcEngine] [newPc] user=' + userId,
+      `[RtcEngine] [${tag}] user=` + userId,
       'ice=' +
         (this.iceServers.map((s) => (Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls)) + (s.username && s.credential ? '(@auth)' : '')).join(' | ') || '(none)'),
       'localTracks=' + this.localStream.getTracks().length
@@ -121,38 +121,76 @@ class RtcEngine {
     return pc
   }
 
-  /** 为新 peer 创建 PC 并发起 offer（与网页版一致：已有稳定连接就跳过） */
+  /** 为新 peer 创建 PC 并发起 offer（先到的人对每个新来的人调用一次） */
   addPeer(userId: number): void {
+    // 已经连好（stable）就绝不重复发第二个 offer —— 那必然 "wrong state: stable"
     const ex = this.peers.get(userId)
-    if (ex) {
-      if (ex.signalingState !== 'stable') {
-        console.log(`[RtcEngine] [addPeer] user=${userId} 旧 PC 卡在 ${ex.signalingState} → 关掉重建`)
-        ex.close()
-        this.peers.delete(userId)
-      } else {
-        return // 已存在且稳定：绝不动它
-      }
+    if (ex && ex.signalingState === 'stable') {
+      console.log(`[RtcEngine] [addPeer] user=${userId} 已有 stable 连接，跳过`)
+      return
     }
-    const pc = this.newPc(userId)
+    if (ex) {
+      console.log(`[RtcEngine] [addPeer] user=${userId} 旧 PC 停在 ${ex.signalingState} → 丢掉重来`)
+      this.closePeer(userId)
+    }
+    const pc = this.newPc(userId, 'offer')
     void this._createOffer(userId, pc)
   }
 
-  // ─── 处理对端信令 ─────────────────────────────────────
+  /**
+   * 收到 offer → 应答方（后进房间的人走这条）。
+   * 一个 PC 只能答一个 offer：答完就进 stable，再来 offer 就是新的一轮。
+   *   - 没有 PC            → 新建 PC 来答（正常路径）
+   *   - PC 在 have-remote-offer → 同一个 offer 重发，直接再答一次
+   *   - PC 已 stable       → 连接是好的，重复 offer 直接忽略（不拆连接、不重置）
+   *   - PC 在 have-local-offer  → 双方同时发起，交给 _handleOffer 裁决（rollback 后应答）
+   *   - 其它（closed 等）   → 旧 PC 作废，新建一个答
+   */
+  private answerPeer(userId: number, sdp: string): void {
+    const pc = this.peers.get(userId)
+    if (pc) {
+      if (pc.signalingState === 'stable') {
+        console.log(`[RtcEngine] [answerPeer] user=${userId} 已 stable → 忽略重复 offer（连接是好的）`)
+        return
+      }
+      if (pc.signalingState === 'closed') {
+        console.log(`[RtcEngine] [answerPeer] user=${userId} 旧 PC 已关闭 → 新建 PC 应答`)
+        this.closePeer(userId)
+      } else {
+        void this._handleOffer(pc, userId, sdp)
+        return
+      }
+    }
+    const fresh = this.newPc(userId, 'answer')
+    void this._handleOffer(fresh, userId, sdp)
+  }
 
+  /**
+   * 收到信令。角色分工只有两种：
+   *   - 收到 offer（我是后进房间的）→ 给这个用户【新建一个 PC】应答；
+   *   - 收到 answer（我是先到的，之前给他发过 offer）→ 应用到自己那个 PC 上；
+   *   - 收到 ice → 加到该用户的 PC 上（PC 还没建就先缓存，等建好补加）。
+   */
   handleSignal(fromUserId: number, signal: RtcSignalPayload): void {
     console.log('[RtcEngine] [signal] from=' + fromUserId, 'type=' + signal.type, 'hasPc=' + this.peers.has(fromUserId))
-    let pc = this.peers.get(fromUserId)
-
-    // 对端发来 offer 但本地还没有 PC（说明对端先发起），先创建一个（只应答，不发 offer）
-    if (!pc && signal.type === 'offer') {
-      pc = this.newPc(fromUserId)
+    if (signal.type === 'offer') {
+      this.answerPeer(fromUserId, signal.sdp)
+      return
     }
-    if (!pc) return
-
+    const pc = this.peers.get(fromUserId)
+    if (!pc) {
+      // answer/ice 比 offer 先到（后进房间的人偶尔会遇到）→ 先缓存，等 PC 建好后补加
+      if (signal.type === 'ice') {
+        this._pendingIceArr(fromUserId).push({
+          candidate: signal.candidate,
+          sdpMid: signal.sdpMid ?? undefined,
+          sdpMLineIndex: signal.sdpMLineIndex ?? undefined
+        })
+        console.log(`[RtcEngine] [收到ICE] user=${fromUserId} 尚无 PC，先缓存`)
+      }
+      return
+    }
     switch (signal.type) {
-      case 'offer':
-        void this._handleOffer(pc, fromUserId, signal.sdp)
-        break
       case 'answer':
         void this._handleAnswer(pc, fromUserId, signal.sdp)
         break
@@ -341,28 +379,63 @@ class RtcEngine {
     }
   }
 
+  /**
+   * 收到 offer（每个远端一个独立 PC，绝不复用）。
+   *
+   * 状态判断顺序（顺序不能变，这是标准流程）：
+   *   stable            → 本端已经协商完成、手里连接是好的，这个 offer 是重入房间时对方补发/迟到的：
+   *                       【跳过应答】。绝不能应答——应答会动到已经 stable 的连接，
+   *                       就是 "Failed to set local answer sdp: Called in wrong state: stable"。
+   *   have-local-offer  → 双方同时发起（glare）：本端也还没收到 answer。此时 rollback 掉本端
+   *                       自己的 offer，改应答对方这一个，双方就都进 stable。
+   *   have-remote-offer → 上一个 offer 还没答完，先 rollback 掉再接受新的。
+   *   其余（closed 等） → 这个 PC 已废，直接忽略（等上层重建）。
+   */
   private async _handleOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
-    console.log('[RtcEngine] [收到offer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + pc.signalingState)
+    const sig = pc.signalingState
+    console.log('[RtcEngine] [收到offer] user=' + userId, 'sdpLen=' + sdp.length, 'sig=' + sig)
+
+    // ① stable：本端协商已完成 → 这个 offer 多余，跳过。什么都不做，连接保持好的。
+    if (sig === 'stable') {
+      console.log(`[RtcEngine] [收到offer] user=${userId} 跳过：本端已 stable（连接是好的，应答反而会把它弄坏）`)
+      return
+    }
+    // ② closed：PC 已关闭
+    if (sig === 'closed') {
+      console.log(`[RtcEngine] [收到offer] user=${userId} 跳过：PC 已关闭`)
+      return
+    }
+
     try {
-      // 与网页版逐条对齐：
-      //  - have-remote-offer（上一个对端 offer 还没答完）→ 先回滚再接受新的；
-      //  - have-local-offer（双方同时发起 = glare）→ 下面的 setRemoteDescription 会抛
-      //    InvalidStateError，被 catch 吞掉 = 本端不接这个 offer，等对端回我自己的 answer。
-      //    这样两边不会互相回敬 offer，不会出现"有人进来所有人都掉线"。
+      // ③ 双方同时发 offer：rollback 本端的 offer，改应答对方
+      if (sig === 'have-local-offer') {
+        console.warn(`[RtcEngine] [收到offer] user=${userId} 双方同时发起 → rollback 本端 offer，改为应答对方`)
+        await pc.setRemoteDescription({ type: 'rollback' })
+      }
+      // ④ 上一个 remote offer 还没答完：先回滚
       if (pc.signalingState === 'have-remote-offer') {
         try {
           await pc.setRemoteDescription({ type: 'rollback' })
         } catch { /* 状态已变，交由下面 setRemoteDescription 决定 */ }
       }
+      // 只有处于 have-remote-offer 才能 createAnswer；再兜一次状态判断
+      if (pc.signalingState !== 'have-remote-offer') {
+        console.log(`[RtcEngine] [收到offer] user=${userId} setRemoteDescription 后状态为 ${pc.signalingState}，不应答`)
+        return
+      }
       await pc.setRemoteDescription({ type: 'offer', sdp })
       await this._flushPendingIce(userId, pc)
+      if (pc.signalingState !== 'have-remote-offer') {
+        console.log(`[RtcEngine] [收到offer] user=${userId} 应用 offer 后状态为 ${pc.signalingState}，跳过应答`)
+        return
+      }
       const answer = await pc.createAnswer()
       answer.sdp = EnforceStereo(answer.sdp ?? '')
       await pc.setLocalDescription(answer)
       console.log('[RtcEngine] [发送answer] user=' + userId, 'sdpLen=' + (answer.sdp?.length ?? 0), 'sig=' + pc.signalingState)
       this.onSignal({ type: 'answer', sdp: answer.sdp ?? '' })
     } catch (err) {
-      console.warn(`[RtcEngine] [收到offer] user=${userId} 未能处理（多为双方同时发 offer，等对端回 answer 即可）：`, err instanceof Error ? err.message : err)
+      console.warn(`[RtcEngine] [收到offer] user=${userId} 处理失败（本轮不应答，连接状态未破坏）：`, err instanceof Error ? err.message : err)
     }
   }
 

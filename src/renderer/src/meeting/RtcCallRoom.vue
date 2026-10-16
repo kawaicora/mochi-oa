@@ -136,44 +136,42 @@ function quitFromDialog(): void {
 const peerFailStreak = new Map<number, number>()
 /** 正在重连的对端，避免同一对端并发重连 */
 const recoveringPeers = new Set<number>()
+/** 我对哪些人是"发起方"（我先到 / 我先给他发过 offer）——决定掉线后谁负责重连 */
+const initiatedByMe = new Set<number>()
 
 function nickOfPeer(userId: number): string {
   return peers.value.find((p) => p.userId === userId)?.nick || `用户 ${userId}`
 }
 
 /**
- * 会中某对端连不上 → 走 WebRTC 自己的恢复手段（ICE 重启），不自己造超时。
- *
- * 这里【不设任何等待超时】：成功与失败都由 WebRTC 的状态机说了算 ——
- *   - onPeerConnected（connectionState=connected）→ 这次成功了，计数清零；
- *   - 引擎再次上报 onPeerDisconnected（connectionState=failed，说明它自己已经重试到头）→ 算一次失败。
- * 之前我在这里用 12 秒"连接超时"判定失败并 closePeer+addPeer 重建，纯属替浏览器瞎猜数字：
- * 走 TURN 中转时 12 秒根本不够，连接还在 negotiating 就被我掐了；两端同时掐还造成 SDP glare
- * （have-local-offer 里收到对端 offer → PC 永久卡死），于是"必然连不上"。
+ * 对端连接断了（引擎已把它那条 PC 关掉并从 map 删除）。
+ * 重连规则与首次建连完全一致：
+ *   - 我是这一对的发起方（他进来时我发的 offer）→ 我重新建 PC + 发 offer；
+ *   - 我是应答方（当初是他发给我、我回的 answer）→ 我等他重新发 offer。
+ * 这样任何时刻只有一端动手，永远不会两边同时发 offer 造成 glare。
  */
 async function recoverPeer(userId: number): Promise<void> {
   if (recoveringPeers.has(userId) || !engine) return
-  // 双方都掉线时只让一端发起，避免同时重连造成 glare
-  if (myUserId.value > 0 && userId > 0 && myUserId.value > userId) {
-    console.log(`[RTC] 对端 ${userId} 掉线：由 userId 较小的一方（对端）负责重连，本端等待`)
+  if (!initiatedByMe.has(userId)) {
+    console.log(`[RTC] 对端 ${userId} 掉线：本端是应答方 → 等对方重新发 offer`)
     return
   }
+  recoveringPeers.add(userId)
   const name = nickOfPeer(userId)
   const streak = (peerFailStreak.get(userId) ?? 0) + 1
   peerFailStreak.set(userId, streak)
   lastRetryAction = () => recoverPeer(userId)
   if (streak >= MAX_RTC_RETRY) {
-    // 连续失败到上限：这个对端确实回不来了，移除并弹窗（不再无限重试）
     rtcFatal.value = `与「${name}」的连接失败（已连续重试 ${MAX_RTC_RETRY} 次）`
     delete remoteStreams[userId]
     peers.value = peers.value.filter((p) => p.userId !== userId)
+    initiatedByMe.delete(userId)
+    recoveringPeers.delete(userId)
     return
   }
-  recoveringPeers.add(userId)
   try {
     rtcRetrying.value = `与「${name}」的连接中断，正在重连（${streak}/${MAX_RTC_RETRY}）…`
-    console.log(`[RTC] 对端 ${userId} 掉线，第 ${streak}/${MAX_RTC_RETRY} 次重建连接`)
-    // 与网页版一致：重建连接（addPeer 内部已有稳定连接就跳过，不会乱拆）
+    console.log(`[RTC] 对端 ${userId} 掉线，第 ${streak}/${MAX_RTC_RETRY} 次重新建 PC 并发 offer`)
     engine.addPeer(userId)
   } finally {
     recoveringPeers.delete(userId)
@@ -445,19 +443,21 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
     onRemoteStream: (userId, stream) => { remoteStreams[userId] = stream },
     onPeerConnected: (userId) => {
-      // 连接（或重连）成功 → 清掉该对端的连续失败计数（上层的计数也一并清零）
+      // 连接成功 → 清掉该对端的连续失败计数
       onPeerRecovered(userId)
     },
     onPeerDisconnected: (userId) => {
       delete remoteStreams[userId]
-      // 会中意外掉线（WebRTC 判定 failed）：不把人踢出会议，先 ICE 重启恢复；连续 3 次失败才弹窗
+      // 连接真的断了（引擎已关掉那条 PC）：按"谁是发起方"决定谁重连
       void recoverPeer(userId)
     }
   })
 
-  // 3. 已有对端逐个建连
-  for (const p of roomPeers) {
-    engine.addPeer(p.userId)
+  // 3. 房间已有对端：【什么都不做，等他们给我发 offer】。
+  //    规则是——先到的人负责对每个新来的人发 offer；我是后进房间的，只负责应答。
+  //    一个 offer 配一个新建的 PC（引擎内部处理），本地视频轨在 newPc 里统一塞进去。
+  if (roomPeers.length > 0) {
+    console.log(`[RTC] 我是后加入的，房间已有 ${roomPeers.length} 人 → 等他们的 offer，逐个新建 PC 应答`)
   }
 
   connectionState.value = 'connected'
@@ -466,9 +466,13 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   unsubscribers.push(
     window.pantry.onRtcPeerJoined((d) => {
       if (d.room !== roomInfo.id) return
+      if (d.peer.userId === myUserId.value) return // 自己
       const idx = peers.value.findIndex((p) => p.userId === d.peer.userId)
       if (idx >= 0) peers.value[idx] = d.peer
       else peers.value.push(d.peer)
+      // 我比他先到 → 我来发起：给他建 PC + 发 offer
+      console.log(`[RTC] 新对端 ${d.peer.userId}(${d.peer.nick ?? ''}) 进入 → 本端发起 offer`)
+      initiatedByMe.add(d.peer.userId)
       engine?.addPeer(d.peer.userId)
     }),
     window.pantry.onRtcPeerLeft((d) => {
