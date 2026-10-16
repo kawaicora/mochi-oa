@@ -11,8 +11,7 @@ import type {
   RtcIceServer,
   RtcKind,
   RtcPeer,
-  RtcRoom,
-  RtcSignalPayload
+  RtcRoom
 } from '@shared/server-types'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent } from '@renderer/utils/notify-manager'
@@ -56,20 +55,16 @@ const showDevices = ref(false)
 const callDuration = ref(0)
 // ─── RTC 连接重试 ──────────────────────────────────────────
 /**
- * 重试策略：
- *   - 最多连续 3 次失败；
+ * 会议 RTC 连接失败的重试策略（进入会议 + 会中对端掉线重连共用）：
+ *   - 失败自动重试，最多连续 3 次；
  *   - 任何一次成功都把「连续失败」计数清零（偶发抖动不会攒到弹窗）；
  *   - 连续 3 次仍失败 → 弹窗告知，窗口保持打开，用户可点「重试」再来，绝不直接退出。
- *
- * 计数的依据只有一个：谁真正判定失败了。
- *  - 进入会议（rtcJoin/rtcCreateMeeting）失败：服务端明确回了错误 → 重试（这里的退避延迟有意义）；
- *  - 会中对端连接失败：只认 WebRTC 状态机给的 connectionState=failed，
- *    绝不自己造"等了 N 秒算超时"这种数字（12 秒掐死在协商中的连接，就是之前必失败的根因）。
  */
 const MAX_RTC_RETRY = 3
-/** 进入会议失败时的重试退避（ms）：服务端明确报错才走这里，不是连接状态猜测 */
+/** 第 1/2 次重试前的等待（ms）；第 3 次退避到 4s，给网络/服务端一点恢复时间 */
 const RTC_RETRY_DELAYS = [1200, 2500]
 const RTC_RETRY_MAX_DELAY = 4000
+const PEER_CONNECT_TIMEOUT_MS = 12000
 let rtcFailStreak = 0
 /** 非空 → 弹窗告知（连续 3 次失败） */
 const rtcFatal = ref('')
@@ -133,61 +128,56 @@ function quitFromDialog(): void {
 }
 
 // ─── 会中对端掉线重连 ───
+const peerWaiters = new Map<number, () => void>()
 /** 每个对端各自的连续失败次数（用于判断该对端是否已放弃） */
 const peerFailStreak = new Map<number, number>()
 /** 正在重连的对端，避免同一对端并发重连 */
 const recoveringPeers = new Set<number>()
-/** 我对哪些人是"发起方"（我先到 / 我先给他发过 offer）——决定掉线后谁负责重连 */
-const initiatedByMe = new Set<number>()
 
 function nickOfPeer(userId: number): string {
   return peers.value.find((p) => p.userId === userId)?.nick || `用户 ${userId}`
 }
 
+/** 等对端 PC 连上（超时抛错，交给 withRtcRetry 重试） */
+function waitPeerConnected(userId: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      peerWaiters.delete(userId)
+      reject(new Error('连接超时'))
+    }, PEER_CONNECT_TIMEOUT_MS)
+    peerWaiters.set(userId, () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
 /**
- * 对端连接断了（引擎已把它那条 PC 关掉并从 map 删除）。
- * 重连规则与首次建连完全一致：
- *   - 我是这一对的发起方（他进来时我发的 offer）→ 我重新建 PC + 发 offer；
- *   - 我是应答方（当初是他发给我、我回的 answer）→ 我等他重新发 offer。
- * 这样任何时刻只有一端动手，永远不会两边同时发 offer 造成 glare。
+ * 会中某对端掉线 → 重建到他的连接。
+ * 不直接把人从会议列表里删掉（那等于「掉线即退出」），重连失败 3 次才移除并弹窗。
  */
 async function recoverPeer(userId: number): Promise<void> {
   if (recoveringPeers.has(userId) || !engine) return
-  if (!initiatedByMe.has(userId)) {
-    console.log(`[RTC] 对端 ${userId} 掉线：本端是应答方 → 等对方重新发 offer`)
-    return
-  }
   recoveringPeers.add(userId)
   const name = nickOfPeer(userId)
-  const streak = (peerFailStreak.get(userId) ?? 0) + 1
-  peerFailStreak.set(userId, streak)
   lastRetryAction = () => recoverPeer(userId)
-  if (streak >= MAX_RTC_RETRY) {
-    rtcFatal.value = `与「${name}」的连接失败（已连续重试 ${MAX_RTC_RETRY} 次）`
-    delete remoteStreams[userId]
-    peers.value = peers.value.filter((p) => p.userId !== userId)
-    initiatedByMe.delete(userId)
-    recoveringPeers.delete(userId)
-    return
-  }
   try {
-    rtcRetrying.value = `与「${name}」的连接中断，正在重连（${streak}/${MAX_RTC_RETRY}）…`
-    console.log(`[RTC] 对端 ${userId} 掉线，第 ${streak}/${MAX_RTC_RETRY} 次重新建 PC 并发 offer`)
-    engine.addPeer(userId)
+    const ok = await withRtcRetry(`与「${name}」的连接`, async () => {
+      engine?.closePeer(userId) // 主动关闭，不会再次触发掉线回调
+      engine?.addPeer(userId)
+      await waitPeerConnected(userId)
+    })
+    if (ok) {
+      peerFailStreak.delete(userId)
+      showToast(`已重新连接「${name}」`)
+    } else {
+      // 连续 3 次失败：这个对端确实回不来了，从列表移除（弹窗已给出原因）
+      peerFailStreak.set(userId, MAX_RTC_RETRY)
+      delete remoteStreams[userId]
+      peers.value = peers.value.filter((p) => p.userId !== userId)
+    }
   } finally {
     recoveringPeers.delete(userId)
-  }
-}
-
-/** 对端连接成功（含重连成功）：清掉它的连续失败计数 */
-function onPeerRecovered(userId: number): void {
-  const had = peerFailStreak.get(userId)
-  peerFailStreak.delete(userId)
-  rtcRetrying.value = ''
-  rtcFailStreak = 0
-  if (had) {
-    console.log(`[RTC] 对端 ${userId} 已恢复连接`)
-    showToast(`已重新连接「${nickOfPeer(userId)}」`)
   }
 }
 const myNick = ref('我')
@@ -413,26 +403,6 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   room.value = roomInfo
   peers.value = [...roomPeers]
 
-  // 0. 抢在采集媒体之前就监听信令。
-  //
-  // 【为什么必须这样】先到的对端在 rtcJoin 返回的瞬间就发 offer 了，而本地
-  // getUserMedia + 频谱 canvas 要几百毫秒。如果等到引擎建好才订阅，
-  // 这段时间到达的 offer/ICE 会因为 engine 仍是 null 被静默丢掉——
-  // 现象就是「PC 永远建不起来，只有后来的 ICE 在缓存」（实测丢了 430ms 内的 offer）。
-  // 所以先把信令收进 pendingSignals，引擎一建好立刻按序补投。
-  const pendingSignals: Array<{ userId: number; signal: RtcSignalPayload }> = []
-  let engineReady = false
-
-  const onSignalSub = window.pantry.onRtcSignal((d) => {
-    if (d.room !== roomInfo.id) return
-    if (engineReady && engine) {
-      engine.handleSignal(d.from.userId, d.signal)
-    } else {
-      pendingSignals.push({ userId: d.from.userId, signal: d.signal })
-      console.log(`[RTC] 引擎尚未就绪，先缓冲信令 ${d.signal.type} from=${d.from.userId}（缓冲数=${pendingSignals.length}）`)
-    }
-  })
-
   // 1. 本地媒体：默认只开麦克风（高清），摄像头默认关闭，需要时手动开启
   let mic: MediaStream
   try {
@@ -464,39 +434,21 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
     onRemoteStream: (userId, stream) => { remoteStreams[userId] = stream },
     onPeerConnected: (userId) => {
-      // 连接成功 → 清掉该对端的连续失败计数
-      onPeerRecovered(userId)
+      // 连接（或重连）成功 → 清了这个对端的连续失败计数，并把上层的连续失败也清零
+      peerFailStreak.delete(userId)
+      rtcFailStreak = 0
+      peerWaiters.get(userId)?.()
+      peerWaiters.delete(userId)
     },
     onPeerDisconnected: (userId) => {
       delete remoteStreams[userId]
-      // 连接真的断了（引擎已关掉那条 PC）：按"谁是发起方"决定谁重连
+      // 会中意外掉线：不把人踢出会议，先自动重连；连续 3 次失败才弹窗
       void recoverPeer(userId)
     }
   })
 
-  // 2.1 引擎就绪 → 把缓冲期间到达的信令按原始顺序补投（offer 通常就在里面）
-  engineReady = true
-  if (pendingSignals.length > 0) {
-    console.log(`[RTC] 引擎就绪，补投缓冲信令 ${pendingSignals.length} 条`)
-    const drained = pendingSignals.splice(0, pendingSignals.length)
-    for (const p of drained) {
-      engine.handleSignal(p.userId, p.signal)
-    }
-  }
-  // 这个订阅器全程有效（不再需要在下面重复订阅 onRtcSignal）
-  unsubscribers.push(onSignalSub)
-
-  // 3. 房间里已有的人：【每一个都直接创建 PC】。
-  //
-  //    规则（用户明确定死）：
-  //      - 进房间就对 roomPeers 里每个人 addPeer：建 PC + 塞本地轨道 + 发 offer；
-  //      - 绝不"什么都不做等对方发 offer"——那会造成双方互等，谁也建不起来；
-  //      - 双方同时发 offer 也不会卡死：收到的 offer 若撞上本端状态，
-  //        引擎会直接 close + delete + 新建，保证一定能 setRemoteDescription。
+  // 3. 已有对端逐个建连
   for (const p of roomPeers) {
-    if (p.userId === myUserId.value) continue // 自己
-    console.log(`[RTC] 进房即为已有对端 ${p.userId}(${p.nick ?? ''}) 创建 PC 并发起 offer`)
-    initiatedByMe.add(p.userId)
     engine.addPeer(p.userId)
   }
 
@@ -506,13 +458,9 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   unsubscribers.push(
     window.pantry.onRtcPeerJoined((d) => {
       if (d.room !== roomInfo.id) return
-      if (d.peer.userId === myUserId.value) return // 自己
       const idx = peers.value.findIndex((p) => p.userId === d.peer.userId)
       if (idx >= 0) peers.value[idx] = d.peer
       else peers.value.push(d.peer)
-      // 我比他先到 → 我来发起：给他建 PC + 发 offer
-      console.log(`[RTC] 新对端 ${d.peer.userId}(${d.peer.nick ?? ''}) 进入 → 本端发起 offer`)
-      initiatedByMe.add(d.peer.userId)
       engine?.addPeer(d.peer.userId)
     }),
     window.pantry.onRtcPeerLeft((d) => {
@@ -524,8 +472,10 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
         peers.value = peers.value.filter((p) => p.socketId !== d.peerId)
       }
     }),
-    // 注意：onRtcSignal 已在 enterRoom 开头（媒体采集之前）订阅并 push 进 unsubscribers，
-    // 这里不能再订阅一次——那会让每条信令被 handleSignal 处理两遍。
+    window.pantry.onRtcSignal((d) => {
+      if (d.room !== roomInfo.id) return
+      engine?.handleSignal(d.from.userId, d.signal)
+    }),
     window.pantry.onRtcEnded((d) => {
       if (d.room !== roomInfo.id) return
       void stopRecordingAndSave().then(() => {
