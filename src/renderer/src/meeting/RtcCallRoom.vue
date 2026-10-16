@@ -455,7 +455,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
 
   // 3. 房间已有对端：【什么都不做，等他们给我发 offer】。
   //    规则是——先到的人负责对每个新来的人发 offer；我是后进房间的，只负责应答。
-  //    一个 offer 配一个新建的 PC（引擎内部处理），本地视频轨在 newPc 里统一塞进去。
+  //    一个 offer 配一个新建的 PC（引擎内部处理），本地视频轨在 createPc 里统一塞进去。
   if (roomPeers.length > 0) {
     console.log(`[RTC] 我是后加入的，房间已有 ${roomPeers.length} 人 → 等他们的 offer，逐个新建 PC 应答`)
   }
