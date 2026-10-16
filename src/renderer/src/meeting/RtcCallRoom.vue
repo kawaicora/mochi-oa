@@ -11,7 +11,8 @@ import type {
   RtcIceServer,
   RtcKind,
   RtcPeer,
-  RtcRoom
+  RtcRoom,
+  RtcSignalPayload
 } from '@shared/server-types'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent } from '@renderer/utils/notify-manager'
@@ -155,6 +156,14 @@ function waitPeerConnected(userId: number): Promise<void> {
 /**
  * 会中某对端掉线 → 重建到他的连接。
  * 不直接把人从会议列表里删掉（那等于「掉线即退出」），重连失败 3 次才移除并弹窗。
+ *
+ * 【为什么不能无脑 closePeer + addPeer】
+ * closePeer 会让对端收到掉线事件；如果对端也走 recoverPeer，两端就同时
+ * 「关掉 + 重建」，互相把对方刚建好的 PC 打掉，然后各自等超时再重试 ——
+ * 多人场景下会演变成 A 断 B 断 C 断的循环重连风暴，永远收敛不了。
+ *
+ * 所以这里只做「重新发起」：不主动 closePeer（旧 PC 由引擎在 addPeer 里
+ * 按 signalingState 决定复用或替换），并且只有本端是这一对的发起方时才动手。
  */
 async function recoverPeer(userId: number): Promise<void> {
   if (recoveringPeers.has(userId) || !engine) return
@@ -162,8 +171,18 @@ async function recoverPeer(userId: number): Promise<void> {
   const name = nickOfPeer(userId)
   lastRetryAction = () => recoverPeer(userId)
   try {
+    // 本端是不是这一对的发起方？引擎按 userId 定死了角色（小的一方发起）。
+    const iAmOfferer = engine.isOffererFor(userId)
+    if (!iAmOfferer) {
+      // 本端只负责应答：把 PC 重建好、等对方的 offer 过来即可。
+      // 这里【不能】去走「等连接成功」的失败计数 —— 本端本来就没法主动发起，
+      // 等不到就记 3 次失败会把这个对端误判成「回不来了」并从会议里踢掉。
+      engine.addPeer(userId)
+      console.log(`[RTC] 对端 ${userId} 掉线，但本端是应答方 → 重建 PC 等服务端对端的 offer（不计失败）`)
+      return
+    }
     const ok = await withRtcRetry(`与「${name}」的连接`, async () => {
-      engine?.closePeer(userId) // 主动关闭，不会再次触发掉线回调
+      // 只重新发起，不先 closePeer：避免通知对端也跟着重连（循环风暴的根源）
       engine?.addPeer(userId)
       await waitPeerConnected(userId)
     })
@@ -403,6 +422,28 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   room.value = roomInfo
   peers.value = [...roomPeers]
 
+  // 0. 【抢在采集媒体之前就订阅信令】
+  //
+  //    服务端 rtc:join 的顺序是：先广播 peerJoined 给房间里的人，再返回 ack 给我。
+  //    也就是说老成员收到 peerJoined 后会【立刻】给我发 offer，
+  //    而此刻我还在 await getUserMedia（几百毫秒），engine 尚未创建、
+  //    onRtcSignal 尚未订阅 —— 那个 offer 会被静默丢掉。
+  //    丢掉之后：我预建的 PC 永远收不到 offer，对方也等不到 answer，
+  //    只能靠超时重连，多人时就是循环掉线。
+  //
+  //    所以先把信令收进 pendingSignals，engine 一建好立刻按序补投。
+  const pendingSignals: Array<{ userId: number; signal: RtcSignalPayload }> = []
+  let engineReady = false
+  const onSignalSub = window.pantry.onRtcSignal((d) => {
+    if (d.room !== roomInfo.id) return
+    if (engineReady && engine) {
+      engine.handleSignal(d.from.userId, d.signal)
+    } else {
+      pendingSignals.push({ userId: d.from.userId, signal: d.signal })
+      console.log(`[RTC] 引擎尚未就绪，先缓冲信令 ${d.signal.type} from=${d.from.userId}（缓冲数=${pendingSignals.length}）`)
+    }
+  })
+
   // 1. 本地媒体：默认只开麦克风（高清），摄像头默认关闭，需要时手动开启
   let mic: MediaStream
   try {
@@ -429,6 +470,9 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   // 2. WebRTC 引擎
   engine = new RtcEngine({
     roomId: roomInfo.id,
+    // 本端 userId：引擎用它和信令里的 to 做收件人过滤，
+    // 并用 myUserId < 对端 userId 确定性地决定每对 peer 谁发 offer（避免两端同时发起）
+    myUserId: myUserId.value,
     iceServers,
     localStream,
     onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
@@ -447,8 +491,31 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     }
   })
 
-  // 3. 已有对端逐个建连
+  // 2.1 引擎就绪 → 把采集媒体期间到达的信令按原始顺序补投。
+  //     老成员的 offer 通常就在缓冲里，补投之后 PC 才能进入 have-remote-offer。
+  engineReady = true
+  if (pendingSignals.length > 0) {
+    console.log(`[RTC] 引擎就绪，补投缓冲信令 ${pendingSignals.length} 条`)
+    const drained = pendingSignals.splice(0, pendingSignals.length)
+    for (const p of drained) {
+      engine.handleSignal(p.userId, p.signal)
+    }
+  }
+  // 订阅器从进入 enterRoom 起就生效，这里只是登记以便退出时清理。
+  // 注意：下面的 onRtcSignal 不能再订阅一次，否则每条信令会被处理两遍。
+  unsubscribers.push(onSignalSub)
+
+  // 3. 已有对端：为每个已在对端建 PC。
+  //
+  //    【谁发 offer】不在这里决定，交给引擎按 userId 定死（小的一方发起）。
+  //    服务端 rtc:signal 是房间广播、无 target，两端对「谁发起」必须有完全一致的判断。
+  //    若按「谁先到」定：先到的人收到 peerJoined 就发 offer，后加入的人也对老成员发 offer，
+  //    同一对 peer 两端同时 createOffer → 双方都进 have-local-offer，谁的 offer 都接不了，
+  //    只能互相删掉重来；多人时每个 pair 都这样撞，就是 A 断 B 断 C 断的循环重连。
+  //    按 userId 比较则是双向自洽的，且重连时依然成立（重连后角色不会翻转）。
   for (const p of roomPeers) {
+    if (p.userId === myUserId.value) continue // 自己
+    console.log(`[RTC] 为已有对端 ${p.userId}(${p.nick ?? ''}) 建立 PC；是否发起由引擎按 userId 判定`)
     engine.addPeer(p.userId)
   }
 
@@ -461,6 +528,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
       const idx = peers.value.findIndex((p) => p.userId === d.peer.userId)
       if (idx >= 0) peers.value[idx] = d.peer
       else peers.value.push(d.peer)
+      // 他后进来，我先到 → 本端是这一对的发起方，发 offer
       engine?.addPeer(d.peer.userId)
     }),
     window.pantry.onRtcPeerLeft((d) => {

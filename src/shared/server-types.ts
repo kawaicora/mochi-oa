@@ -333,12 +333,28 @@ export interface RtcIceServer {
   credential?: string
 }
 
-export interface RtcSignalSdp {
+/**
+ * 信令里的目标对端 userId。
+ *
+ * 【为什么必须有】
+ * 服务端 rtc:signal 是「房间广播、无 target」：user1 发给 user2 的 offer，
+ * user3、user4 同样会收到。信令本身不自带收件人，接收端就无法判断这封 offer
+ * 是不是写给自己的 —— 会把它套到「自己与 user1」的那条 PC 上，导致协商错位、
+ * DTLS 建不起来，表现就是「进了房间但一个画面都没有」。
+ * 服务端把 signal 原样透传，所以把收件人写在 signal 里即可，无需改服务端。
+ * 缺省（老客户端不发）时按广播处理，保持兼容。
+ */
+export interface RtcSignalTarget {
+  /** 收件人 userId；等于本端才处理 */
+  to?: number
+}
+
+export interface RtcSignalSdp extends RtcSignalTarget {
   type: 'offer' | 'answer'
   sdp: string
 }
 
-export interface RtcSignalIce {
+export interface RtcSignalIce extends RtcSignalTarget {
   type: 'ice'
   candidate: string
   sdpMid?: string | null
