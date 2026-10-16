@@ -591,13 +591,43 @@ class RtcEngine {
       return
     }
 
-    // ① 状态不是 stable（接不了这个 offer）→ close + delete，重建后再应答
+    // ① 状态不是 stable（接不了这个 offer）
     if (pc.signalingState !== 'stable') {
-      console.log('[RtcEngine] [收到offer] user=' + userId, '状态=' + pc.signalingState + ' → 删掉重建')
-      if (this.peers.get(userId) === pc) this.peers.delete(userId)
-      try { pc.close() } catch { /* 已关闭，忽略 */ }
-      // 被动应答：重建时【不】主动发 offer，避免与对方撞车
-      pc = this._createPeerConnection(userId, false)
+      if (pc.signalingState === 'have-local-offer') {
+        // ── 撞车(glare)：本端也发过 offer 还没收到 answer，对端此刻也发来 offer。
+        // 处理必须严格按 userId 规则（本端 userId 更小 = 发起方），否则双方会同时都
+        // 「回滚后应答」→ 出现两个 answer、没有发起方，协商不完整。
+        const iAmOfferer = this.myUserId < userId
+        if (iAmOfferer) {
+          // 本端是发起方，对端（应答方）不该主动发 offer。保持本端已发出的 offer，
+          // 忽略对端这份 offer，继续等对端的 answer —— 若回滚/重建会打断本端已发起的
+          // 协商，导致双方互等（死锁），也可能关掉 DTLS 让对端看到掉线。
+          console.log('[RtcEngine] [收到offer] user=' + userId, '撞车，本端是发起方 → 忽略对端offer，等待其answer')
+          return
+        }
+        // 本端是应答方，对端才是发起方：回滚本端误发的 offer 后应答对端 —— 【绝不删 PC】。
+        // 删 PC 会关掉 DTLS，对端立即看到掉线(failed)、画面黑，且对端也重建，
+        // 双方互相拆 → 循环掉线（实测 replaceTrack 触发 renegotiate 发 offer，
+        // 对端恰好也发 offer 即撞车，旧代码直接删 PC，表现就是「画面出来又黑、
+        // 一直红色断线重连」）。回滚后应答则 DTLS 不断、连接保持。
+        console.log('[RtcEngine] [收到offer] user=' + userId, '撞车，本端是应答方 → 回滚本端offer后应答（不重建）')
+        try {
+          await pc.setLocalDescription({ type: 'rollback' })
+        } catch (err) {
+          // rollback 极罕见失败时才退化为删掉重建（保底）
+          console.warn('[RtcEngine] [收到offer] user=' + userId, 'rollback失败，退化为删掉重建:', err instanceof Error ? err.message : String(err))
+          if (this.peers.get(userId) === pc) this.peers.delete(userId)
+          try { pc.close() } catch { /* 已关闭，忽略 */ }
+          pc = this._createPeerConnection(userId, false)
+        }
+      } else {
+        // 其他非 stable（have-remote-offer / closed）→ 删掉重建后再应答
+        console.log('[RtcEngine] [收到offer] user=' + userId, '状态=' + pc.signalingState + ' → 删掉重建')
+        if (this.peers.get(userId) === pc) this.peers.delete(userId)
+        try { pc.close() } catch { /* 已关闭，忽略 */ }
+        // 被动应答：重建时【不】主动发 offer，避免与对方撞车
+        pc = this._createPeerConnection(userId, false)
+      }
     }
 
     try {
