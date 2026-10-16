@@ -486,11 +486,18 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   // 这个订阅器全程有效（不再需要在下面重复订阅 onRtcSignal）
   unsubscribers.push(onSignalSub)
 
-  // 3. 房间已有对端：【什么都不做，等他们给我发 offer】。
-  //    规则是——先到的人负责对每个新来的人发 offer；我是后进房间的，只负责应答。
-  //    一个 offer 配一个新建的 PC（引擎内部处理），本地视频轨在 createPc 里统一塞进去。
-  if (roomPeers.length > 0) {
-    console.log(`[RTC] 我是后加入的，房间已有 ${roomPeers.length} 人 → 等他们的 offer，逐个新建 PC 应答`)
+  // 3. 房间里已有的人：【每一个都直接创建 PC】。
+  //
+  //    规则（用户明确定死）：
+  //      - 进房间就对 roomPeers 里每个人 addPeer：建 PC + 塞本地轨道 + 发 offer；
+  //      - 绝不"什么都不做等对方发 offer"——那会造成双方互等，谁也建不起来；
+  //      - 双方同时发 offer 也不会卡死：收到的 offer 若撞上本端状态，
+  //        引擎会直接 close + delete + 新建，保证一定能 setRemoteDescription。
+  for (const p of roomPeers) {
+    if (p.userId === myUserId.value) continue // 自己
+    console.log(`[RTC] 进房即为已有对端 ${p.userId}(${p.nick ?? ''}) 创建 PC 并发起 offer`)
+    initiatedByMe.add(p.userId)
+    engine.addPeer(p.userId)
   }
 
   connectionState.value = 'connected'

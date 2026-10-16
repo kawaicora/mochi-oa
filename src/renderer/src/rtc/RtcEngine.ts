@@ -231,20 +231,26 @@ class RtcEngine {
   // ─── 建立连接（对齐网页版 addPeer）─────────────────────
 
   /**
-   * 为某对端建 PC 并发起 offer。
-   *   已有 stable 连接 → 直接返回（绝不发第二个 offer，那必然 wrong state）
-   *   已有但非 stable → 丢掉重来
-   *   没有           → 新建 + 塞本地轨道 + 挂事件 + createOffer → onSignal
+   * 为某对端建 PC 并发起 offer（对齐参考实现 CreatePeerConnection + AddTrack）。
+   *
+   * 规则（严格照抄参考实现）：
+   *   已有 PC 且信令状态不是 stable → close + delete，然后建新的
+   *   已有 PC 且是 stable           → 复用，不再重复发 offer
+   *   没有 PC                       → 新建 + 塞本地轨道 + 挂事件 + createOffer → onSignal
+   *
+   * 注意：这里【绝不】因为「本端 stable」就提前 return 掉整个流程。
+   * 上层（进房 / peerJoined / 重连）调用 addPeer 的语义就是「我要连他」；
+   * 只有当本端确实已经握有一条可用的稳定连接时才复用。
    */
   addPeer(userId: number): void {
     const ex = this.peers.get(userId)
     if (ex) {
       if (ex.signalingState !== 'stable') {
-        logw(this.tag(userId), `旧 PC 停在 ${ex.signalingState}（接不了新 offer）→ 关闭重来`)
+        logw(this.tag(userId), `旧 PC 停在 ${ex.signalingState} → close + delete，重建`)
         ex.close()
         this.peers.delete(userId)
       } else {
-        log(this.tag(userId), '已有 stable 连接 → 跳过（绝不发第二个 offer）')
+        log(this.tag(userId), '已有 stable 连接 → 复用，不重复发 offer')
         return
       }
     }
@@ -675,55 +681,46 @@ class RtcEngine {
   }
 
   /**
-   * 收到 offer → 应答（对齐网页版 _handleOffer）。
+   * 收到 offer → 应答（严格对齐参考实现 HandleOffer）。
    *
-   * 关键规则：一个 PC 只能答一个 offer，答完就进 stable。
-   *   - 本端还有没被应答的 offer（have-local-offer，双方同时发起）→ rollback 本端的，改应答对方；
-   *   - 上一个远端 offer 还没答完（have-remote-offer）→ 先 rollback 掉；
-   *   - stable → 本端协商已完成、手里的连接是好的：
-   *     这个 offer 是重入房间时对方补发/迟到的，【跳过应答】。
-   *     绝不能应答——那会动到已经 stable 的连接，就是
-   *     "Failed to set local answer sdp: Called in wrong state: stable"。
-   *   - closed 等 → 这个 PC 已废，直接忽略（等上层重建）。
+   * 参考实现的原话逻辑：
+   *   let pc = peerConnections[from]
+   *   if (pc && pc.signalingState !== 'stable') { pc.close(); delete; pc = null }
+   *   if (!pc) { pc = await CreatePeerConnection(from) }
+   *   if (pc.signalingState === 'have-remote-offer') { await rollback }
+   *   await pc.setRemoteDescription(offer) → createAnswer → setLocalDescription → 发送
+   *
+   * 关键点：**状态不对就整条 PC 删掉重来，绝不硬 set**。
+   *   - 走到这里 pc 若不是 stable，说明它接不了这个 offer；
+   *     close + delete + 新建 是唯一能保证「一定设置成功」的做法。
+   *   - 新建出来的 PC 必然是 stable，直接 setRemoteDescription(offer) 即可。
+   *   - 唯一保留的 rollback：同一个 PC 上前一个远端 offer 还没答完
+   *     （同一次 offer 的重复投递），回滚后重新应答。
    */
   private async applyOffer(pc: RTCPeerConnection, userId: number, sdp: string): Promise<void> {
     const t = this.tag(userId)
-    const sig = pc.signalingState
+    let sig = pc.signalingState
     log(t, `处理 offer 开始 sig=${sig} sdpLen=${sdp.length} SDP内候选数=${countCandidates(sdp)}`)
     log(t, `offer SDP 概要：${describeSdp(sdp)}`)
 
-    // ① stable：本端协商已完成 → 这个 offer 多余，跳过（连接保持好的）
-    if (sig === 'stable') {
-      logw(t, '跳过：本端已 stable（该 offer 重复/迟到，应答反而会破坏现有连接）')
-      return
-    }
-    // ② closed：PC 已关闭
-    if (sig === 'closed') {
-      logw(t, '跳过：PC 已关闭（等上层重建）')
+    // ① 状态不对（不是 stable）→ 整条删掉重来。
+    //    这正是「绝不可能出现无法设置」的保证：不赌状态能不能转，直接换一条新的。
+    if (sig !== 'stable') {
+      logw(t, `PC 停在 ${sig}（接不了这个 offer）→ close + delete，重建后应答`)
+      if (this.peers.get(userId) === pc) this.peers.delete(userId)
+      try { pc.close() } catch { /* 已关闭，忽略 */ }
+      const fresh = this.createPc(userId, 'answer')
+      await this.applyOffer(fresh, userId, sdp)
       return
     }
 
     try {
-      // ③ 双方同时发 offer：rollback 本端的 offer，改应答对方
-      if (sig === 'have-local-offer') {
-        logw(t, '检测到双方同时发起（glare）→ rollback 本端 offer，改为应答对方')
-        await pc.setRemoteDescription({ type: 'rollback' })
-        log(t, `rollback 完成 sig=${pc.signalingState}`)
-      }
-      // ④ 上一个 remote offer 还没答完：先回滚
+      // ② 走到这里必为 stable；但 await 之后状态会变，每次重新读。
+      //    同一个 offer 被重复投递时，前一个还挂在 have-remote-offer → 回滚后重答。
       if (pc.signalingState === 'have-remote-offer') {
-        log(t, '上一个远端 offer 未答完 → 先 rollback')
-        try {
-          await pc.setRemoteDescription({ type: 'rollback' })
-          log(t, `rollback 完成 sig=${pc.signalingState}`)
-        } catch (e) {
-          logw(t, `rollback 失败（状态已变，继续尝试）：${e instanceof Error ? e.message : String(e)}`)
-        }
+        log(t, '同一 offer 重复投递（have-remote-offer）→ rollback 后重新应答')
+        await pc.setRemoteDescription({ type: 'rollback' })
       }
-      // 走到这里 signalingState 必为 stable（上面已经把 have-local-offer 与
-      // have-remote-offer 都 rollback 掉了），可以直接 setRemoteDescription(offer)。
-      // 注意：signalingState 是实时 getter，await 之后不能靠此前的窄化判断，
-      // 每次都要重新读，否则会把「已经变成 have-remote-offer」误判成 stable。
       await pc.setRemoteDescription({ type: 'offer', sdp })
       log(t, `setRemoteDescription(offer) 成功 sig=${pc.signalingState}`)
       await this.flushIce(userId, pc)
@@ -734,7 +731,14 @@ class RtcEngine {
       log(t, `★ 发送 answer sdpLen=${answer.sdp?.length ?? 0} sig=${pc.signalingState} SDP内候选数=${countCandidates(answer.sdp ?? '')}`)
       this.onSignal({ type: 'answer', sdp: answer.sdp ?? '' })
     } catch (err) {
-      loge(t, `处理 offer 失败（本轮不应答，连接状态未破坏）：${err instanceof Error ? err.message : String(err)}`, err)
+      // 兜底：连新建的 PC 都设置失败 → 再删一次重来，绝不把坏连接留在表里。
+      loge(t, `处理 offer 失败 → 删掉该 PC 重来：${err instanceof Error ? err.message : String(err)}`, err)
+      if (this.peers.get(userId) === pc) {
+        this.logPeerSummary(userId)
+        this.peers.delete(userId)
+        try { pc.close() } catch { /* 忽略 */ }
+        this.onPeerDisconnected(userId)
+      }
     }
   }
 
