@@ -714,7 +714,7 @@ watch(view, (v) => {
           <div v-for="c in [...detail.comments].reverse()" :key="c.id" class="tv-comment">
             <span class="tv-log-user">{{ who(c.username, c.nick) }}</span>
             <span class="tv-log-time">{{ fmt(c.createdAt) }}</span>
-            <div v-if="c.content" class="tv-comment-text" v-html="c.content"></div>
+            <RichTextEditor v-if="c.content" :model-value="c.content" readonly class="tv-comment-text" />
             <div v-if="c.attachments && c.attachments.length" class="tv-comment-imgs">
               <template v-for="(at, i) in c.attachments" :key="i">
                 <a v-if="at.kind === 'image'" :href="server.absFileUrl(at.url)" target="_blank"><img :src="server.absFileUrl(at.url)" /></a>

@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import RichTextEditor from './RichTextEditor.vue'
+import MemberPicker from './MemberPicker.vue'
 
 // ── 类型（与服务端冻结协议对齐，content 存 HTML）──
 type ReportType = 'daily' | 'weekly'
@@ -90,23 +91,11 @@ const templateId = ref<number>(0)
 const templates = ref<ReportTemplate[]>([])
 // 「发送给」接收人多选（提交时作为 recipients 传给服务端）
 const recipients = ref<number[]>([])
-const recipientDrop = ref(false) // 下拉多选面板开关
 const saving = ref(false)
 const submitting = ref(false)
 const err = ref('')
 const okMsg = ref('')
 const submittedFlash = ref(false)
-
-// 「发送给」多选：切换某成员
-function toggleRecipient(userId: number): void {
-  const i = recipients.value.indexOf(userId)
-  if (i >= 0) recipients.value.splice(i, 1)
-  else recipients.value.push(userId)
-}
-// 已选接收人显示名
-const recipientNames = computed(() =>
-  recipients.value.map((id) => app.members.find((m) => m.userId === id)).filter(Boolean).map((m) => m!.nick || m!.username)
-)
 
 // ── 草稿缓存（照 ReqView 的 localStorage 写法，记住内容/标题/模板/接收人）──
 const DRAFT_KEY = 'mochi:oa:report:draft'
@@ -404,24 +393,10 @@ onUnmounted(() => { offReminder?.() })
       <label class="rp-lab">内容</label>
       <RichTextEditor v-model="contentHtml" :placeholder="type === 'daily' ? '今天做了什么 / 遇到什么问题 / 明天计划…' : '本周总结 / 下周计划…'" />
 
-      <!-- 发送给（接收人多选，仅已加入公司显示） -->
+      <!-- 发送给（接收人多选，仅已加入公司显示；通用 MemberPicker） -->
       <div v-if="hasCompany" class="rp-recv">
         <label class="rp-lab">发送给</label>
-        <div class="rp-recv-box">
-          <button class="dt-btn sm" @click="recipientDrop = !recipientDrop">
-            <i class="fas fa-user-check"></i> 选择人员 <span v-if="recipients.length">({{ recipients.length }})</span>
-          </button>
-          <div v-if="recipientDrop" class="rp-recv-panel">
-            <label v-for="m in app.members" :key="m.userId" class="rp-recv-item">
-              <input type="checkbox" :checked="recipients.includes(m.userId)" @change="toggleRecipient(m.userId)" />
-              <span>{{ m.nick || m.username }}</span>
-            </label>
-            <div v-if="!app.members.length" class="rp-empty">暂无成员</div>
-          </div>
-        </div>
-        <div v-if="recipientNames.length" class="rp-recv-tags">
-          <span v-for="n in recipientNames" :key="n" class="rp-tag">{{ n }}</span>
-        </div>
+        <MemberPicker v-model="recipients" placeholder="选择接收人" />
       </div>
 
       <div class="rp-actions">
@@ -541,7 +516,7 @@ onUnmounted(() => { offReminder?.() })
             周期：{{ detail.periodDate }}　提交时间：{{ fmtDateTime(detail.submittedAt) }}
             <span v-if="detail.nick || detail.username">　发送人：{{ detail.nick || detail.username }}</span>
           </div>
-          <div class="rp-content" v-html="detail.content"></div>
+          <RichTextEditor :model-value="detail.content" readonly />
         </div>
         <div class="modal-foot">
           <button class="dt-btn" @click="detail = null">关闭</button>

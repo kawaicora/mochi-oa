@@ -294,6 +294,16 @@ const api = {
   serverReportTemplateDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateDelete, companyId, id),
   serverReportStats: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportStats, payload),
 
+  // 考勤申请
+  serverAttendanceCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAttendanceCreate, payload),
+  serverAttendanceList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAttendanceList, payload),
+  serverAttendanceApprove: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAttendanceApprove, companyId, id),
+  serverAttendanceReject: (companyId: number, id: number, note?: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAttendanceReject, companyId, id, note ?? ''),
+  // 审批流程配置
+  serverApprovalFlowGet: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowGet, payload),
+  serverApprovalFlowSave: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowSave, payload),
+  serverApprovalFlowList: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowList, companyId),
+
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverUpload, filePath, companyId ?? 0),

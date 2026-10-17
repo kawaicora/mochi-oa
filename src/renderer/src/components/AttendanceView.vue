@@ -1,0 +1,413 @@
+<script setup lang="ts">
+import { ref, computed, watch, onMounted } from 'vue'
+import { useAppStore } from '../stores/app'
+import { useServerStore } from '../stores/server'
+import DateTimeInput from './DateTimeInput.vue'
+import RichTextEditor from './RichTextEditor.vue'
+import MemberPicker from './MemberPicker.vue'
+
+// ── 类型（与服务端冻结协议对齐）──
+type AttType = 'make_up' | 'leave' | 'comp_time'
+type AttStatus = 'pending' | 'approved' | 'rejected'
+interface AttendanceRequest {
+  id: number
+  companyId: number
+  userId: number
+  type: AttType
+  status: AttStatus
+  punchTime: string | null
+  leaveType: string | null
+  compType: string | null
+  startTime: string | null
+  endTime: string | null
+  durationHours: number | null
+  reason: string
+  approverIds: number[]
+  ccIds: number[]
+  approverId: number | null
+  approvalNote: string | null
+  approvedAt: string | null
+  createdAt: string
+  updatedAt: string
+  nick?: string
+  username?: string
+}
+interface ApprovalFlow {
+  type: AttType
+  approverIds: number[]
+  ccIds: number[]
+}
+
+const app = useAppStore()
+const server = useServerStore()
+const companyId = computed(() => app.activeCompanyId)
+const isAdmin = computed(() => app.isAdmin)
+const meId = computed(() => server.state.userId ?? 0)
+
+const TYPE_LABEL: Record<AttType, string> = { make_up: '补卡', leave: '请假', comp_time: '调休' }
+const STATUS_LABEL: Record<AttStatus, string> = { pending: '待审批', approved: '已通过', rejected: '已驳回' }
+const LEAVE_TYPES = ['事假', '病假', '年假', '婚假', '产假', '其他']
+const COMP_TYPES = ['加班调休', '其他']
+
+// ── 顶部 tab：申请类型 ──
+const tab = ref<AttType>('make_up')
+
+// ── 表单 ──
+const punchTime = ref('')
+const leaveType = ref(LEAVE_TYPES[0])
+const compType = ref(COMP_TYPES[0])
+const startTime = ref('')
+const endTime = ref('')
+const durationHours = ref<number | null>(null)
+const reason = ref('')
+const submitting = ref(false)
+const err = ref('')
+const okMsg = ref('')
+
+// 选完开始/结束时间后自动算时长（小时）
+watch([startTime, endTime], () => {
+  if (startTime.value && endTime.value) {
+    const s = new Date(startTime.value).getTime()
+    const e = new Date(endTime.value).getTime()
+    if (e > s) durationHours.value = Math.round(((e - s) / 3600000) * 10) / 10
+  }
+})
+
+// ── 审批流程配置（管理员）──
+const flows = ref<Record<AttType, ApprovalFlow>>({
+  make_up: { type: 'make_up', approverIds: [], ccIds: [] },
+  leave: { type: 'leave', approverIds: [], ccIds: [] },
+  comp_time: { type: 'comp_time', approverIds: [], ccIds: [] }
+})
+/** 当前类型已配置的审批人/抄送人（只读提示） */
+const curFlow = computed(() => flows.value[tab.value])
+
+async function loadFlows(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverApprovalFlowList(companyId.value)
+    if (!ack.ok) { console.error('[考勤] 流程列表失败', ack.error); return }
+    const list = (ack.data as { flows?: ApprovalFlow[] })?.flows ?? []
+    for (const f of list) {
+      if (flows.value[f.type]) {
+        flows.value[f.type] = { type: f.type, approverIds: f.approverIds ?? [], ccIds: f.ccIds ?? [] }
+      }
+    }
+  } catch (e) { console.error('[考勤] 流程列表异常', e) }
+}
+async function saveFlow(type: AttType): Promise<void> {
+  if (!companyId.value) { err.value = '尚未加入公司'; return }
+  err.value = ''
+  try {
+    const f = flows.value[type]
+    const ack = await window.pantry.serverApprovalFlowSave({
+      companyId: companyId.value, type, approverIds: f.approverIds, ccIds: f.ccIds
+    })
+    if (!ack.ok) { console.error('[考勤] 流程保存失败', ack.error); err.value = ack.error || '流程保存失败'; return }
+    okMsg.value = '流程已保存'
+  } catch (e) { console.error('[考勤] 流程保存异常', e); err.value = '流程保存异常' }
+}
+
+/** userId 数组 → 名字（用于只读提示与详情） */
+function namesOf(ids: number[]): string {
+  if (!ids || !ids.length) return '—'
+  return ids.map((id) => app.members.find((m) => m.userId === id)?.nick || app.members.find((m) => m.userId === id)?.username || `#${id}`).join('、')
+}
+
+// ── 提交申请 ──
+async function submit(): Promise<void> {
+  if (!companyId.value) { err.value = '尚未加入公司'; return }
+  err.value = ''
+  okMsg.value = ''
+  // 字段校验
+  if (tab.value === 'make_up' && !punchTime.value) { err.value = '请选择补卡时间'; return }
+  if (tab.value !== 'make_up' && (!startTime.value || !endTime.value)) { err.value = '请选择开始与结束时间'; return }
+  if (!reason.value.trim()) { err.value = '请填写事由'; return }
+  submitting.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      companyId: companyId.value,
+      type: tab.value,
+      reason: reason.value
+    }
+    if (tab.value === 'make_up') payload.punchTime = punchTime.value
+    else {
+      payload.startTime = startTime.value
+      payload.endTime = endTime.value
+      payload.durationHours = durationHours.value
+      if (tab.value === 'leave') payload.leaveType = leaveType.value
+      else payload.compType = compType.value
+    }
+    const ack = await window.pantry.serverAttendanceCreate(payload)
+    if (!ack.ok) { console.error('[考勤] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
+    okMsg.value = '已提交'
+    // 清空表单
+    punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
+    await loadList()
+  } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
+  submitting.value = false
+}
+
+// ── 历史记录（本人）──
+const list = ref<AttendanceRequest[]>([])
+const histPage = ref(1)
+const histTotal = ref(0)
+const pageSize = 10
+const listType = ref<AttType | ''>('')
+const detail = ref<AttendanceRequest | null>(null)
+const rejectNote = ref('')
+async function loadList(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverAttendanceList({
+      companyId: companyId.value,
+      type: listType.value || undefined,
+      page: histPage.value, pageSize
+    })
+    if (!ack.ok) { console.error('[考勤] 历史列表失败', ack.error); return }
+    list.value = (ack.data as { requests?: AttendanceRequest[]; total?: number })?.requests ?? []
+    histTotal.value = (ack.data as { total?: number })?.total ?? 0
+  } catch (e) { console.error('[考勤] 历史列表异常', e) }
+}
+const histPages = computed(() => Math.max(1, Math.ceil(histTotal.value / pageSize)))
+
+// 审批操作按钮可见：待审批 且（管理员 或 我在审批人名单里）
+function canAct(r: AttendanceRequest): boolean {
+  if (r.status !== 'pending') return false
+  return isAdmin.value || (r.approverIds ?? []).includes(meId.value)
+}
+async function approve(r: AttendanceRequest): Promise<void> {
+  try {
+    const ack = await window.pantry.serverAttendanceApprove(companyId.value, r.id)
+    if (!ack.ok) { console.error('[考勤] 通过失败', ack.error); err.value = ack.error || '操作失败'; return }
+    detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
+    await loadList()
+  } catch (e) { console.error('[考勤] 通过异常', e); err.value = '操作异常' }
+}
+async function reject(r: AttendanceRequest): Promise<void> {
+  try {
+    const ack = await window.pantry.serverAttendanceReject(companyId.value, r.id, rejectNote.value)
+    if (!ack.ok) { console.error('[考勤] 驳回失败', ack.error); err.value = ack.error || '操作失败'; return }
+    detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
+    rejectNote.value = ''
+    await loadList()
+  } catch (e) { console.error('[考勤] 驳回异常', e); err.value = '操作异常' }
+}
+
+function fmt(s: string | null): string {
+  if (!s) return '—'
+  const d = new Date(s)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+watch(tab, () => { okMsg.value = '' })
+watch(companyId, async () => {
+  if (!companyId.value) return
+  histPage.value = 1
+  await Promise.all([loadList(), loadFlows()])
+})
+onMounted(async () => {
+  await Promise.all([loadList(), loadFlows()])
+})
+</script>
+
+<template>
+  <div class="at">
+    <div class="at-bar">
+      <span class="at-title"><i class="fas fa-user-clock"></i> 考勤申请</span>
+    </div>
+
+    <div v-if="err" class="at-err">{{ err }}</div>
+    <div v-if="okMsg" class="at-ok">{{ okMsg }}</div>
+
+    <!-- 上：申请表单 -->
+    <div class="at-form">
+      <div class="at-seg">
+        <button :class="{ on: tab === 'make_up' }" @click="tab = 'make_up'">补卡</button>
+        <button :class="{ on: tab === 'leave' }" @click="tab = 'leave'">请假</button>
+        <button :class="{ on: tab === 'comp_time' }" @click="tab = 'comp_time'">调休</button>
+      </div>
+
+      <!-- 补卡 -->
+      <template v-if="tab === 'make_up'">
+        <label class="at-lab">补卡时间 <i class="req">*</i></label>
+        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" />
+      </template>
+
+      <!-- 请假 / 调休 -->
+      <template v-else>
+        <div class="at-row">
+          <div v-if="tab === 'leave'">
+            <label class="at-lab">请假类型 <i class="req">*</i></label>
+            <select v-model="leaveType" class="srv-select">
+              <option v-for="t in LEAVE_TYPES" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </div>
+          <div v-else>
+            <label class="at-lab">调休类型 <i class="req">*</i></label>
+            <select v-model="compType" class="srv-select">
+              <option v-for="t in COMP_TYPES" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="at-row">
+          <div><label class="at-lab">开始时间 <i class="req">*</i></label><DateTimeInput v-model="startTime" time /></div>
+          <div><label class="at-lab">结束时间 <i class="req">*</i></label><DateTimeInput v-model="endTime" time /></div>
+          <div><label class="at-lab">时长（小时）</label><input v-model.number="durationHours" type="number" step="0.5" class="srv-input" /></div>
+        </div>
+      </template>
+
+      <label class="at-lab">事由 <i class="req">*</i></label>
+      <RichTextEditor v-model="reason" placeholder="请填写事由…（可附图/视频/附件）" />
+
+      <!-- 当前类型审批流程只读提示 -->
+      <div class="at-flow-hint">
+        审批人：{{ namesOf(curFlow.approverIds) }}　抄送人：{{ namesOf(curFlow.ccIds) }}
+      </div>
+
+      <div class="at-actions">
+        <button class="dt-btn dt-btn-primary" :disabled="submitting" @click="submit">
+          <i class="fas fa-paper-plane"></i> {{ submitting ? '提交中…' : '提交申请' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 下：历史记录 -->
+    <div class="at-records">
+      <div class="at-rec-head">
+        <span class="at-sec-title">我的申请</span>
+        <select v-model="listType" class="srv-select sm" @change="histPage = 1; loadList()">
+          <option value="">全部类型</option>
+          <option value="make_up">补卡</option>
+          <option value="leave">请假</option>
+          <option value="comp_time">调休</option>
+        </select>
+      </div>
+      <div class="at-table-wrap">
+        <div v-if="!list.length" class="at-empty">暂无申请记录</div>
+        <table v-else class="at-table">
+          <thead><tr><th>类型</th><th>时间/时长</th><th>状态</th><th>提交时间</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="r in list" :key="r.id" @click="detail = r" class="at-row">
+              <td>{{ TYPE_LABEL[r.type] }}</td>
+              <td>
+                <span v-if="r.type === 'make_up'">{{ r.punchTime ? fmt(r.punchTime) : '—' }}</span>
+                <span v-else>{{ r.startTime ? fmt(r.startTime) : '—' }} ~ {{ r.endTime ? fmt(r.endTime) : '—' }}（{{ r.durationHours ?? '—' }}h）</span>
+              </td>
+              <td>
+                <span class="at-badge" :class="r.status">{{ STATUS_LABEL[r.status] }}</span>
+              </td>
+              <td>{{ fmt(r.createdAt) }}</td>
+              <td class="at-ops">
+                <button v-if="canAct(r)" class="at-op ok" @click.stop="approve(r)"><i class="fas fa-check"></i> 通过</button>
+                <button v-if="canAct(r)" class="at-op danger" @click.stop="detail = r; rejectNote = ''"><i class="fas fa-times"></i> 驳回</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="at-pager">
+        <button class="dt-btn" :disabled="histPage <= 1" @click="histPage--; loadList()">上一页</button>
+        <span>{{ histPage }} / {{ histPages }}</span>
+        <button class="dt-btn" :disabled="histPage >= histPages" @click="histPage++; loadList()">下一页</button>
+      </div>
+
+      <!-- 管理员：审批流程设置 -->
+      <template v-if="isAdmin">
+        <div class="at-sec-title admin">审批流程设置</div>
+        <div class="at-flow-cfg">
+          <div v-for="t in (['make_up','leave','comp_time'] as AttType[])" :key="t" class="at-flow-row">
+            <div class="at-flow-type">{{ TYPE_LABEL[t] }}</div>
+            <div class="at-flow-field">
+              <label class="at-lab">审批人</label>
+              <MemberPicker v-model="flows[t].approverIds" placeholder="选择审批人" />
+            </div>
+            <div class="at-flow-field">
+              <label class="at-lab">抄送人</label>
+              <MemberPicker v-model="flows[t].ccIds" placeholder="选择抄送人" />
+            </div>
+            <button class="dt-btn sm" @click="saveFlow(t)"><i class="fas fa-save"></i> 保存</button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div v-if="detail" class="modal-mask" @click.self="detail = null">
+      <div class="modal at-modal">
+        <div class="modal-head">{{ TYPE_LABEL[detail.type] }} · {{ STATUS_LABEL[detail.status] }}</div>
+        <div class="modal-body">
+          <div class="at-meta">
+            提交人：{{ detail.nick || detail.username }}　提交时间：{{ fmt(detail.createdAt) }}
+          </div>
+          <div class="at-meta">
+            <span v-if="detail.type !== 'make_up'">时长：{{ detail.durationHours ?? '—' }} 小时　</span>
+            审批人：{{ namesOf(detail.approverIds) }}　抄送人：{{ namesOf(detail.ccIds) }}
+          </div>
+          <RichTextEditor :model-value="detail.reason" readonly />
+          <div v-if="detail.status === 'rejected' && detail.approvalNote" class="at-reject-note">驳回原因：{{ detail.approvalNote }}</div>
+          <!-- 驳回填 note -->
+          <div v-if="canAct(detail) && detail.status === 'pending'" class="at-reject-box">
+            <label class="at-lab">驳回原因</label>
+            <input v-model="rejectNote" class="srv-input" placeholder="驳回原因（可选）" />
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button v-if="canAct(detail)" class="dt-btn" @click="approve(detail)"><i class="fas fa-check"></i> 通过</button>
+          <button v-if="canAct(detail)" class="dt-btn danger" @click="reject(detail)"><i class="fas fa-times"></i> 驳回</button>
+          <button class="dt-btn" @click="detail = null">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.at { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.at-bar { padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
+.at-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.at-err { padding: 8px 18px; color: #d92b3a; font-size: 13px; }
+.at-ok { padding: 8px 18px; color: #2fbb6b; font-size: 13px; }
+.at-form { padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
+.at-seg { display: inline-flex; background: #f0f2f5; border-radius: 8px; padding: 2px; margin-bottom: 8px; }
+.at-seg button { border: none; background: transparent; padding: 4px 14px; font-size: 13px; cursor: pointer; border-radius: 6px; color: var(--dt-text-3); }
+.at-seg button.on { background: #fff; color: var(--dt-primary); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.at-row { display: flex; gap: 12px; margin-bottom: 4px; }
+.at-row > div { flex: 1; }
+.at-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; }
+.at-flow-hint { margin-top: 10px; font-size: 12px; color: var(--dt-text-3); background: #f6f8fb; padding: 6px 10px; border-radius: 6px; }
+.at-actions { display: flex; gap: 10px; margin-top: 12px; }
+.at-records { flex: 1; overflow: auto; padding: 12px 18px; }
+.at-rec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.at-sec-title { font-size: 14px; font-weight: 700; }
+.at-sec-title.admin { margin-top: 18px; }
+.at-table-wrap { overflow: auto; border: 1px solid var(--dt-border-light); border-radius: 8px; }
+.at-empty { color: var(--dt-text-4); text-align: center; padding: 24px 0; font-size: 13px; }
+.at-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+.at-table th, .at-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--dt-border-light); white-space: nowrap; }
+.at-table th { background: #fafbfc; font-weight: 600; color: var(--dt-text-3); font-size: 12px; }
+.at-row { cursor: pointer; }
+.at-row:hover { background: #f6f8fb; }
+.at-badge { padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.at-badge.pending { background: #fff3e0; color: #d46b08; }
+.at-badge.approved { background: #e8f9ef; color: #2fbb6b; }
+.at-badge.rejected { background: #ffe3e3; color: #d92b3a; }
+.at-ops { display: flex; gap: 6px; }
+.at-op { border: none; background: transparent; cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 6px; }
+.at-op.ok { color: #2fbb6b; }
+.at-op.danger { color: #d92b3a; }
+.at-pager { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; font-size: 12px; color: var(--dt-text-3); }
+.at-flow-cfg { border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px; }
+.at-flow-row { display: flex; align-items: flex-end; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--dt-border-light); }
+.at-flow-row:last-child { border-bottom: none; }
+.at-flow-type { width: 50px; font-weight: 700; font-size: 13px; }
+.at-flow-field { flex: 1; }
+.at-modal { width: 560px; }
+.at-meta { font-size: 12px; color: var(--dt-text-3); margin-bottom: 8px; }
+.at-reject-note { margin-top: 8px; color: #d92b3a; font-size: 13px; }
+.at-reject-box { margin-top: 10px; }
+.req { color: #e64545; font-style: normal; }
+.dt-btn.sm { padding: 3px 10px; font-size: 12px; }
+.srv-select.sm { padding: 3px 6px; font-size: 12px; }
+</style>
