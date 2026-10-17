@@ -513,6 +513,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverReportSubmit, (_e, companyId, id) => serverClient.reportSubmit(Number(companyId) || 0, Number(id) || 0))
   ipcMain.handle(IpcChannels.serverReportDelete, (_e, companyId, id) => serverClient.reportDelete(Number(companyId) || 0, Number(id) || 0))
   ipcMain.handle(IpcChannels.serverReportList, (_e, payload) => serverClient.reportList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportInbox, (_e, payload) => serverClient.reportInbox((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverReportTemplateList, (_e, companyId) => serverClient.reportTemplateList(Number(companyId) || 0))
   ipcMain.handle(IpcChannels.serverReportTemplateCreate, (_e, payload) => serverClient.reportTemplateCreate((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverReportTemplateUpdate, (_e, payload) => serverClient.reportTemplateUpdate((payload as Record<string, unknown>) ?? {}))

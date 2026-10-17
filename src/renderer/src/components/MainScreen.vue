@@ -252,7 +252,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="k !== 'report' || hasCompany"
+            v-show="(k !== 'report' && k !== 'todo') || hasCompany"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"

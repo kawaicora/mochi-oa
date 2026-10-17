@@ -1547,6 +1547,11 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'report:list', payload)
   }
+  /** 我收到的：别人发给我的报表（recipientIds 含本人），分页 */
+  async reportInbox(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'report:inbox', payload)
+  }
   async reportTemplateList(companyId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'report:template:list', { companyId })

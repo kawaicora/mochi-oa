@@ -19,6 +19,8 @@ interface ReportItem {
   updatedAt: string
   nick?: string
   username?: string
+  /** 接收人 userId 数组（发给了谁） */
+  recipientIds?: number[]
 }
 interface ReportTemplate {
   id: number
@@ -56,6 +58,8 @@ const app = useAppStore()
 // 公司隔离：所有接口都带当前公司 id
 const companyId = computed(() => app.activeCompanyId)
 const isAdmin = computed(() => app.isAdmin)
+// 公司隔离：与 MainScreen 同一门控（整页已被公司门控，发送人控件仍显式 v-if）
+const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
 
 // ── 周期工具：本地时区 YYYY-MM-DD ──
 function pad(n: number): string { return String(n).padStart(2, '0') }
@@ -84,6 +88,9 @@ const contentTextarea = ref('')
 const templateId = ref<number>(0)
 const templates = ref<ReportTemplate[]>([])
 const sectionContents = ref<string[]>([])
+// 「发送给」接收人多选（提交时作为 recipients 传给服务端）
+const recipients = ref<number[]>([])
+const recipientDrop = ref(false) // 下拉多选面板开关
 const saving = ref(false)
 const submitting = ref(false)
 const err = ref('')
@@ -139,14 +146,15 @@ function applyContentToSections(content: string): void {
 
 // ── 草稿缓存（照 ReqView 的 localStorage 写法）──
 const DRAFT_KEY = 'mochi:oa:report:draft'
-watch([title, contentTextarea, sectionContents, templateId, type], () => {
+watch([title, contentTextarea, sectionContents, templateId, type, recipients], () => {
   try {
     localStorage.setItem(DRAFT_KEY, JSON.stringify({
       type: type.value,
       title: title.value,
       contentTextarea: contentTextarea.value,
       sectionContents: sectionContents.value,
-      templateId: templateId.value
+      templateId: templateId.value,
+      recipients: recipients.value
     }))
   } catch (e) { console.error('[报表] 写草稿失败', e) }
 }, { deep: true })
@@ -154,16 +162,28 @@ function clearDraft(): void { try { localStorage.removeItem(DRAFT_KEY) } catch (
 function restoreDraft(): void {
   try {
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as {
-      type?: ReportType; title?: string; contentTextarea?: string; sectionContents?: string[]; templateId?: number
+      type?: ReportType; title?: string; contentTextarea?: string; sectionContents?: string[]; templateId?: number; recipients?: number[]
     } | null
     if (d) {
       title.value = d.title ?? ''
       contentTextarea.value = d.contentTextarea ?? ''
       sectionContents.value = Array.isArray(d.sectionContents) ? d.sectionContents : []
       templateId.value = d.templateId ?? 0
+      recipients.value = Array.isArray(d.recipients) ? d.recipients : []
     }
   } catch (e) { console.error('[报表] 读草稿失败', e) }
 }
+
+// 「发送给」多选：切换某成员
+function toggleRecipient(userId: number): void {
+  const i = recipients.value.indexOf(userId)
+  if (i >= 0) recipients.value.splice(i, 1)
+  else recipients.value.push(userId)
+}
+// 已选接收人显示名
+const recipientNames = computed(() =>
+  recipients.value.map((id) => app.members.find((m) => m.userId === id)).filter(Boolean).map((m) => m!.nick || m!.username)
+)
 
 // ── 加载：当前报表 / 模板 ──
 async function loadTemplates(): Promise<void> {
@@ -185,6 +205,8 @@ async function loadCurrent(): Promise<void> {
     title.value = rep?.title ?? ''
     templateId.value = rep?.templateId ?? 0
     sectionContents.value = []
+    // 已有报表的接收人回填到多选
+    recipients.value = Array.isArray(rep?.recipientIds) ? [...(rep!.recipientIds as number[])] : []
     // 等模板列表就绪后再按块回填
     applyContentToSections(rep?.content ?? '')
     if (!rep) restoreDraft() // 还没写过 → 恢复上次未提交草稿
@@ -202,17 +224,21 @@ async function doSave(): Promise<void> {
   okMsg.value = ''
   try {
     let ack
+    // 接收人：update 传了则全量替换；create 带上
+    const recipientsPayload = hasCompany.value ? recipients.value : []
     if (current.value && current.value.id > 0) {
       ack = await window.pantry.serverReportUpdate({
         companyId: companyId.value, id: current.value.id,
         title: title.value.trim(), content,
-        templateId: templateId.value > 0 ? templateId.value : null
+        templateId: templateId.value > 0 ? templateId.value : null,
+        recipients: recipientsPayload
       })
     } else {
       ack = await window.pantry.serverReportCreate({
         companyId: companyId.value, type: type.value, periodDate: periodDate(),
         title: title.value.trim(), content,
-        templateId: templateId.value > 0 ? templateId.value : null
+        templateId: templateId.value > 0 ? templateId.value : null,
+        recipients: recipientsPayload
       })
     }
     if (!ack.ok) { console.error('[报表] 保存失败', ack.error); err.value = ack.error || '保存失败'; return }
@@ -265,6 +291,24 @@ function fmtDateTime(s: string | null): string {
   if (!s) return '—'
   const d = new Date(s)
   return `${toStr(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// ── 我收到的（别人发给我的）──
+const sideTab = ref<'mine' | 'inbox'>('mine')
+const inbox = ref<ReportItem[]>([])
+const inboxPage = ref(1)
+const inboxTotal = ref(0)
+const inboxPages = computed(() => Math.max(1, Math.ceil(inboxTotal.value / pageSize)))
+async function loadInbox(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverReportInbox({
+      companyId: companyId.value, page: inboxPage.value, pageSize
+    })
+    if (!ack.ok) { console.error('[报表] 收件箱失败', ack.error); return }
+    inbox.value = (ack.data as { reports?: ReportItem[]; total?: number })?.reports ?? []
+    inboxTotal.value = (ack.data as { total?: number })?.total ?? 0
+  } catch (e) { console.error('[报表] 收件箱异常', e) }
 }
 
 // ── 管理区：模板管理 ──
@@ -354,13 +398,14 @@ watch(companyId, async () => {
   if (!companyId.value) return
   applyDefaultRange()
   histPage.value = 1
-  await Promise.all([loadTemplates(), loadCurrent(), loadHistory(), loadStats()])
+  inboxPage.value = 1
+  await Promise.all([loadTemplates(), loadCurrent(), loadHistory(), loadStats(), loadInbox()])
 })
 
 onMounted(async () => {
   offReminder = window.pantry.onReportReminder(onReminder)
   applyDefaultRange()
-  await Promise.all([loadTemplates(), loadCurrent(), loadHistory(), loadStats()])
+  await Promise.all([loadTemplates(), loadCurrent(), loadHistory(), loadStats(), loadInbox()])
 })
 onUnmounted(() => { offReminder?.() })
 </script>
@@ -416,6 +461,26 @@ onUnmounted(() => { offReminder?.() })
           <textarea v-model="contentTextarea" class="srv-input rp-area" rows="8" :placeholder="type === 'daily' ? '今天做了什么 / 遇到什么问题 / 明天计划…' : '本周总结 / 下周计划…'"></textarea>
         </template>
 
+        <!-- 发送给（接收人多选，仅已加入公司显示） -->
+        <div v-if="hasCompany" class="rp-recv">
+          <label class="rp-lab">发送给</label>
+          <div class="rp-recv-box">
+            <button class="dt-btn sm" @click="recipientDrop = !recipientDrop">
+              <i class="fas fa-user-check"></i> 选择人员 <span v-if="recipients.length">({{ recipients.length }})</span>
+            </button>
+            <div v-if="recipientDrop" class="rp-recv-panel">
+              <label v-for="m in app.members" :key="m.userId" class="rp-recv-item">
+                <input type="checkbox" :checked="recipients.includes(m.userId)" @change="toggleRecipient(m.userId)" />
+                <span>{{ m.nick || m.username }}</span>
+              </label>
+              <div v-if="!app.members.length" class="rp-empty">暂无成员</div>
+            </div>
+          </div>
+          <div v-if="recipientNames.length" class="rp-recv-tags">
+            <span v-for="n in recipientNames" :key="n" class="rp-tag">{{ n }}</span>
+          </div>
+        </div>
+
         <div class="rp-actions">
           <button class="dt-btn dt-btn-primary" :disabled="saving" @click="doSave">
             <i class="fas fa-save"></i> {{ saving ? '保存中…' : '保存' }}
@@ -426,32 +491,64 @@ onUnmounted(() => { offReminder?.() })
         </div>
       </div>
 
-      <!-- 右列：历史列表 + 管理区 -->
+      <!-- 右列：我的提交 / 我收到的 + 管理区 -->
       <div class="rp-side">
-        <!-- 历史 -->
-        <div class="rp-sec-head">历史提交</div>
-        <div class="rp-table-wrap">
-          <div v-if="!history.length" class="rp-empty">暂无提交记录</div>
-          <table v-else class="rp-table">
-            <thead><tr><th>周期</th><th>标题</th><th>状态</th><th>提交时间</th></tr></thead>
-            <tbody>
-              <tr v-for="r in history" :key="r.id" @click="detail = r" class="rp-row">
-                <td>{{ r.periodDate }}</td>
-                <td class="rp-cell-title">{{ r.title || '（无标题）' }}</td>
-                <td>
-                  <span v-if="r.submitted" class="rp-badge ok">已提交</span>
-                  <span v-else class="rp-badge warn">草稿</span>
-                </td>
-                <td>{{ fmtDateTime(r.submittedAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- 我的提交 / 我收到的 切换 -->
+        <div class="rp-sec-head">
+          <div class="rp-seg sm">
+            <button :class="{ on: sideTab === 'mine' }" @click="sideTab = 'mine'">我的提交</button>
+            <button :class="{ on: sideTab === 'inbox' }" @click="sideTab = 'inbox'">我收到的</button>
+          </div>
         </div>
-        <div class="rp-pager">
-          <button class="dt-btn" :disabled="histPage <= 1" @click="histPage--; loadHistory()">上一页</button>
-          <span>{{ histPage }} / {{ histPages }}</span>
-          <button class="dt-btn" :disabled="histPage >= histPages" @click="histPage++; loadHistory()">下一页</button>
-        </div>
+
+        <!-- 我的提交 -->
+        <template v-if="sideTab === 'mine'">
+          <div class="rp-table-wrap">
+            <div v-if="!history.length" class="rp-empty">暂无提交记录</div>
+            <table v-else class="rp-table">
+              <thead><tr><th>周期</th><th>标题</th><th>状态</th><th>提交时间</th></tr></thead>
+              <tbody>
+                <tr v-for="r in history" :key="r.id" @click="detail = r" class="rp-row">
+                  <td>{{ r.periodDate }}</td>
+                  <td class="rp-cell-title">{{ r.title || '（无标题）' }}</td>
+                  <td>
+                    <span v-if="r.submitted" class="rp-badge ok">已提交</span>
+                    <span v-else class="rp-badge warn">草稿</span>
+                  </td>
+                  <td>{{ fmtDateTime(r.submittedAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rp-pager">
+            <button class="dt-btn" :disabled="histPage <= 1" @click="histPage--; loadHistory()">上一页</button>
+            <span>{{ histPage }} / {{ histPages }}</span>
+            <button class="dt-btn" :disabled="histPage >= histPages" @click="histPage++; loadHistory()">下一页</button>
+          </div>
+        </template>
+
+        <!-- 我收到的 -->
+        <template v-else>
+          <div class="rp-table-wrap">
+            <div v-if="!inbox.length" class="rp-empty">还没有收到别人发给你的报表</div>
+            <table v-else class="rp-table">
+              <thead><tr><th>发送人</th><th>周期</th><th>标题</th><th>提交时间</th></tr></thead>
+              <tbody>
+                <tr v-for="r in inbox" :key="r.id" @click="detail = r" class="rp-row">
+                  <td>{{ r.nick || r.username }}</td>
+                  <td>{{ r.periodDate }}</td>
+                  <td class="rp-cell-title">{{ r.title || '（无标题）' }}</td>
+                  <td>{{ fmtDateTime(r.submittedAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="rp-pager">
+            <button class="dt-btn" :disabled="inboxPage <= 1" @click="inboxPage--; loadInbox()">上一页</button>
+            <span>{{ inboxPage }} / {{ inboxPages }}</span>
+            <button class="dt-btn" :disabled="inboxPage >= inboxPages" @click="inboxPage++; loadInbox()">下一页</button>
+          </div>
+        </template>
 
         <!-- 管理区（仅 owner/admin） -->
         <template v-if="isAdmin">
@@ -501,7 +598,10 @@ onUnmounted(() => { offReminder?.() })
       <div class="modal rp-modal">
         <div class="modal-head">{{ detail.title || `${detail.type === 'daily' ? '日报' : '周报'} · ${detail.periodDate}` }}</div>
         <div class="modal-body">
-          <div class="rp-meta">周期：{{ detail.periodDate }}　提交时间：{{ fmtDateTime(detail.submittedAt) }}</div>
+          <div class="rp-meta">
+            周期：{{ detail.periodDate }}　提交时间：{{ fmtDateTime(detail.submittedAt) }}
+            <span v-if="detail.nick || detail.username">　发送人：{{ detail.nick || detail.username }}</span>
+          </div>
           <pre class="rp-content">{{ detail.content }}</pre>
         </div>
         <div class="modal-foot">
@@ -550,6 +650,15 @@ onUnmounted(() => { offReminder?.() })
 .rp-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; }
 .rp-area { width: 100%; box-sizing: border-box; resize: vertical; }
 .rp-actions { display: flex; gap: 10px; margin-top: 14px; }
+/* 发送给：接收人多选下拉 */
+.rp-recv { margin-top: 4px; }
+.rp-recv-box { position: relative; display: inline-block; }
+.rp-recv-panel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 200px; max-height: 220px; overflow: auto; background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 6px; }
+.rp-recv-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 13px; cursor: pointer; border-radius: 6px; }
+.rp-recv-item:hover { background: #f6f8fb; }
+.rp-recv-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rp-tag { font-size: 12px; background: #eef4ff; color: var(--dt-primary); padding: 2px 8px; border-radius: 20px; }
+.rp-seg.sm button { padding: 3px 10px; font-size: 12px; }
 .rp-submitted-badge { font-size: 11px; background: #e8f9ef; color: #2fbb6b; padding: 2px 8px; border-radius: 20px; }
 .rp-draft-badge { font-size: 11px; background: #fff3e0; color: #d46b08; padding: 2px 8px; border-radius: 20px; }
 .rp-table-wrap { overflow: auto; border: 1px solid var(--dt-border-light); border-radius: 8px; }

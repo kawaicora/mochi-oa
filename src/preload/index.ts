@@ -287,6 +287,7 @@ const api = {
   serverReportSubmit: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportSubmit, companyId, id),
   serverReportDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportDelete, companyId, id),
   serverReportList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportList, payload),
+  serverReportInbox: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportInbox, payload),
   serverReportTemplateList: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateList, companyId),
   serverReportTemplateCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateCreate, payload),
   serverReportTemplateUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateUpdate, payload),

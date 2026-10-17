@@ -159,6 +159,8 @@ export const IpcChannels = {
   serverReportSubmit: 'server:report:submit',
   serverReportDelete: 'server:report:delete',
   serverReportList: 'server:report:list',
+  /** 我收到的（别人发给我的报表，按 recipientIds 匹配本人） */
+  serverReportInbox: 'server:report:inbox',
   serverReportTemplateList: 'server:report:template:list',
   serverReportTemplateCreate: 'server:report:template:create',
   serverReportTemplateUpdate: 'server:report:template:update',
