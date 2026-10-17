@@ -152,6 +152,19 @@ export const IpcChannels = {
   serverPmDashboard: 'server:pm:dashboard',
   serverPmMemberTracking: 'server:pm:memberTracking',
 
+  // 日报 / 周报（公司隔离，payload 均带 companyId）
+  serverReportCurrent: 'server:report:current',
+  serverReportCreate: 'server:report:create',
+  serverReportUpdate: 'server:report:update',
+  serverReportSubmit: 'server:report:submit',
+  serverReportDelete: 'server:report:delete',
+  serverReportList: 'server:report:list',
+  serverReportTemplateList: 'server:report:template:list',
+  serverReportTemplateCreate: 'server:report:template:create',
+  serverReportTemplateUpdate: 'server:report:template:update',
+  serverReportTemplateDelete: 'server:report:template:delete',
+  serverReportStats: 'server:report:stats',
+
   // 闹钟：到点执行用户程序/脚本（跨平台，main 进程 spawn）
   alarmRun: 'alarm:run',
 
@@ -350,6 +363,8 @@ export const IpcEvents = {
   tasksUpdated: 'server:event:tasks:updated',
   projectsUpdated: 'server:event:projects:updated',
   requirementsUpdated: 'server:event:requirements:updated',
+  /** 日报/周报：服务端到点提醒（{ companyId, type, periodDate, missingUsers }）→ 渲染层刷新统计并顶部提示 */
+  reportReminder: 'server:event:report:reminder',
   bugsUpdated: 'server:event:bugs:updated',
   plansUpdated: 'server:event:plans:updated',
   docsUpdated: 'server:event:docs:updated',

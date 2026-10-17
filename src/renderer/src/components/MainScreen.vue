@@ -11,6 +11,7 @@ import CalendarSide from './CalendarSide.vue'
 import AlarmView from './AlarmView.vue'
 import TaskView from './TaskView.vue'
 import TaskSide from './TaskSide.vue'
+import ReportView from './ReportView.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -20,15 +21,18 @@ import type { ServerSession } from '@shared/server-types'
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
   meeting: { label: '会议', icon: 'fas fa-video' },
   calendar: { label: '日历', icon: 'far fa-calendar-alt' },
   alarm: { label: '闹钟', icon: 'fas fa-bell' },
-  todo: { label: '任务', icon: 'fas fa-tasks' }
+  todo: { label: '任务', icon: 'fas fa-tasks' },
+  report: { label: '报表', icon: 'fas fa-file-alt' }
 }
+// 报表需公司上下文：未加入公司时不显示导航按钮
+const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
 const nav = ref<NavTab>('message')
 
 // 打开任意会话（私聊/群）→ 自动切到「消息」标签显示聊天窗口（通讯录里右键/点击成员不再无反应）
@@ -248,6 +252,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
+            v-show="k !== 'report' || hasCompany"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
@@ -284,6 +289,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'calendar'"><CalendarSide /></template>
         <template v-else-if="nav === 'alarm'"></template>
         <template v-else-if="nav === 'todo'"><TaskSide /></template>
+        <template v-else-if="nav === 'report'"></template>
       </div>
 
       <!-- 2.3 大内容区 -->
@@ -307,6 +313,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'calendar'"><CalendarView /></template>
         <template v-else-if="nav === 'alarm'"><AlarmView /></template>
         <template v-else-if="nav === 'todo'"><TaskView /></template>
+        <template v-else-if="nav === 'report'"><ReportView /></template>
       </div>
     </div>
 

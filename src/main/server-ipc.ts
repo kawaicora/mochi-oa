@@ -229,6 +229,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('plansUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.plansUpdated, d ?? {}))
   serverClient.on('docsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.docsUpdated, d ?? {}))
   serverClient.on('wikiUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.wikiUpdated, d ?? {}))
+  // 日报/周报：服务端到点提醒 → 广播渲染层
+  serverClient.on('reportReminder', (d: unknown) => broadcastToAllWindows(IpcEvents.reportReminder, d ?? {}))
   // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl）
   serverClient.on('devView', (d) => broadcastToAllWindows(IpcEvents.devView, d ?? {}))
   serverClient.on('devEnumerate', (d) => broadcastToAllWindows(IpcEvents.devEnumerate, d ?? {}))
@@ -503,6 +505,19 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverWikiDelete, (_e, id) => serverClient.wikiDelete(Number(id) || 0))
   ipcMain.handle(IpcChannels.serverPmDashboard, (_e, companyId, projectId) => serverClient.pmDashboard(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
   ipcMain.handle(IpcChannels.serverPmMemberTracking, (_e, companyId, projectId) => serverClient.pmMemberTracking(Number(companyId) || 0, projectId ? Number(projectId) : undefined))
+
+  // 日报/周报
+  ipcMain.handle(IpcChannels.serverReportCurrent, (_e, companyId, type) => serverClient.reportCurrent(Number(companyId) || 0, String(type ?? '')))
+  ipcMain.handle(IpcChannels.serverReportCreate, (_e, payload) => serverClient.reportCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportUpdate, (_e, payload) => serverClient.reportUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportSubmit, (_e, companyId, id) => serverClient.reportSubmit(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverReportDelete, (_e, companyId, id) => serverClient.reportDelete(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverReportList, (_e, payload) => serverClient.reportList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportTemplateList, (_e, companyId) => serverClient.reportTemplateList(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverReportTemplateCreate, (_e, payload) => serverClient.reportTemplateCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportTemplateUpdate, (_e, payload) => serverClient.reportTemplateUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverReportTemplateDelete, (_e, companyId, id) => serverClient.reportTemplateDelete(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverReportStats, (_e, payload) => serverClient.reportStats((payload as Record<string, unknown>) ?? {}))
 
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>

@@ -280,6 +280,19 @@ const api = {
   serverPmDashboard: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPmDashboard, companyId, projectId),
   serverPmMemberTracking: (companyId: number, projectId?: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverPmMemberTracking, companyId, projectId),
 
+  // 日报 / 周报（公司隔离）
+  serverReportCurrent: (companyId: number, type: string): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportCurrent, companyId, type),
+  serverReportCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportCreate, payload),
+  serverReportUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportUpdate, payload),
+  serverReportSubmit: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportSubmit, companyId, id),
+  serverReportDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportDelete, companyId, id),
+  serverReportList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportList, payload),
+  serverReportTemplateList: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateList, companyId),
+  serverReportTemplateCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateCreate, payload),
+  serverReportTemplateUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateUpdate, payload),
+  serverReportTemplateDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportTemplateDelete, companyId, id),
+  serverReportStats: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverReportStats, payload),
+
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
     ipcRenderer.invoke(IpcChannels.serverUpload, filePath, companyId ?? 0),
@@ -395,6 +408,9 @@ const api = {
   onTasksUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.tasksUpdated, l),
   onProjectsUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.projectsUpdated, l),
   onRequirementsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.requirementsUpdated, l),
+  /** 日报/周报到点提醒推送回调 */
+  onReportReminder: (l: (d: { companyId?: number; type?: string; periodDate?: string; missingUsers?: Array<{ userId: number; nick?: string; username?: string }> }) => void) =>
+    subscribe<{ companyId?: number; type?: string; periodDate?: string; missingUsers?: Array<{ userId: number; nick?: string; username?: string }> }>(IpcEvents.reportReminder, l),
   onBugsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.bugsUpdated, l),
   onPlansUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.plansUpdated, l),
   onDocsUpdated: (l: (d: { companyId?: number; projectId?: number | null }) => void) => subscribe<{ companyId?: number; projectId?: number | null }>(IpcEvents.docsUpdated, l),
