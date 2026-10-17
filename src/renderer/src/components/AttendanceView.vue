@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
-import DateTimeInput from './DateTimeInput.vue'
+import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
 import MemberPicker from './common/MemberPicker.vue'
 

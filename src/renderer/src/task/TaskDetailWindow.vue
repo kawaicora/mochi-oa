@@ -6,7 +6,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
-import DateTimeInput from '../components/DateTimeInput.vue'
+import DateTimeInput from '../components/common/DateTimePicker.vue'
 
 const app = useAppStore()
 const server = useServerStore()

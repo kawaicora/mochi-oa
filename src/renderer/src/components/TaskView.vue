@@ -9,7 +9,7 @@ import DocView from './DocView.vue'
 import WikiView from './WikiView.vue'
 import DashView from './DashView.vue'
 import MemberTrackView from './MemberTrackView.vue'
-import DateTimeInput from './DateTimeInput.vue'
+import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
 
 const app = useAppStore()

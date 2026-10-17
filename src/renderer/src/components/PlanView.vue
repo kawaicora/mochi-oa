@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
-import DateTimeInput from './DateTimeInput.vue'
+import DateTimeInput from './common/DateTimePicker.vue'
 
 const props = defineProps<{ projectId?: number }>()
 const app = useAppStore()
