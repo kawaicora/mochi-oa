@@ -195,8 +195,9 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
 .rte-btn.on { background: #e3edff; color: var(--dt-primary); }
 .rte-btn:disabled { opacity: .5; cursor: not-allowed; }
 .rte-sep { width: 1px; height: 16px; background: var(--dt-border-light); margin: 0 4px; }
-.rte-body-wrap { position: relative; }
-.rte-body { padding: 10px 12px; min-height: 80px; outline: none; font-size: 14px; line-height: 1.6; }
+.rte-body-wrap { position: relative; overflow-y: auto; max-height: 80vh; }
+/* 编辑区至少 800px 高，内容多时在 wrap 内滚动 */
+.rte-body { padding: 10px 12px; min-height: 800px; outline: none; font-size: 14px; line-height: 1.6; }
 .rte.readonly .rte-body { padding: 4px 0; min-height: 0; }
 .rte-body p { margin: 4px 0; }
 .rte-body img { max-width: 100%; border-radius: 6px; }
