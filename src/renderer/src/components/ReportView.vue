@@ -560,15 +560,15 @@ onUnmounted(() => { offReminder?.() })
 .rp-err { padding: 8px 18px; color: #d92b3a; font-size: 13px; }
 .rp-ok { padding: 8px 18px; color: #2fbb6b; font-size: 13px; }
 
-/* 上：编辑区（flex 占满剩余，固定行不收缩，RichTextEditor 填中间） */
-.rp-edit { padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex: 1 1 auto; min-height: 300px; display: flex; flex-direction: column; overflow: hidden; }
-.rp-sec-head { font-size: 14px; font-weight: 700; margin: 2px 0 10px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.rp-sec-head.admin { margin-top: 18px; }
-.rp-edit-row { display: flex; gap: 12px; flex-shrink: 0; }
-.rp-tpl-col { width: 220px; }
+/* 上：编辑区（flex 占满剩余，固定行压缩，RichTextEditor 填中间） */
+.rp-edit { padding: 8px 18px; border-bottom: 1px solid var(--dt-border-light); flex: 1 1 auto; min-height: 280px; display: flex; flex-direction: column; overflow: hidden; }
+.rp-sec-head { font-size: 13px; font-weight: 700; margin: 0 0 6px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rp-sec-head.admin { margin-top: 12px; }
+.rp-edit-row { display: flex; gap: 12px; flex-shrink: 0; align-items: flex-end; }
+.rp-tpl-col { width: 180px; }
 .rp-title-col { flex: 1; }
-.rp-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; flex-shrink: 0; }
-.rp-actions { display: flex; gap: 10px; margin-top: 12px; flex-shrink: 0; }
+.rp-lab { display: block; font-size: 11px; color: var(--dt-text-3); margin: 6px 0 2px; font-weight: 600; flex-shrink: 0; }
+.rp-actions { display: flex; gap: 10px; margin-top: 8px; flex-shrink: 0; }
 .rp-submitted-badge { font-size: 11px; background: #e8f9ef; color: #2fbb6b; padding: 2px 8px; border-radius: 20px; }
 .rp-draft-badge { font-size: 11px; background: #fff3e0; color: #d46b08; padding: 2px 8px; border-radius: 20px; }
 
@@ -582,7 +582,7 @@ onUnmounted(() => { offReminder?.() })
 .rp-tag { font-size: 12px; background: #eef4ff; color: var(--dt-primary); padding: 2px 8px; border-radius: 20px; }
 
 /* 下：记录区（固定 ~220px 高，内部滚动，不抢编辑区空间） */
-.rp-records { flex: 0 0 220px; min-height: 180px; overflow: auto; padding: 12px 18px; }
+.rp-records { flex: 0 0 190px; min-height: 150px; overflow: auto; padding: 8px 18px; }
 .rp-table-wrap { overflow: auto; border: 1px solid var(--dt-border-light); border-radius: 8px; margin-top: 8px; }
 .rp-empty { color: var(--dt-text-4); text-align: center; padding: 24px 0; font-size: 13px; }
 .rp-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
