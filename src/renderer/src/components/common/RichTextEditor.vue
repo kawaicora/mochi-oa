@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Node, mergeAttributes } from '@tiptap/core'
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useAppStore } from '../../stores/app'
 import { useServerStore } from '../../stores/server'
 
@@ -23,6 +23,11 @@ const Video = Node.create({
         parseHTML: (el) => (el as HTMLElement).getAttribute('src'),
         renderHTML: (attrs) => ({ src: attrs.src })
       },
+      width: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).getAttribute('width') || (el as HTMLElement).style.width || null,
+        renderHTML: (attrs) => (attrs.width ? { style: `width:${attrs.width}px` } : {})
+      },
       controls: {
         default: 'controls',
         parseHTML: () => 'controls',
@@ -40,7 +45,6 @@ const Video = Node.create({
 
 /**
  * 自定义附件节点：文档/文件上传后插入一个可点击下载的链接块。
- * 序列化输出 <a href target=_blank download>文件名</a>（与聊天附件展示一致）。
  */
 const Attachment = Node.create({
   name: 'attachment',
@@ -65,7 +69,6 @@ const Attachment = Node.create({
     return [{ tag: 'a[data-rte-attach]' }]
   },
   renderHTML({ HTMLAttributes, node }) {
-    // 锚点 + 下载属性，文本为文件名
     return ['a', mergeAttributes({ 'data-rte-attach': '', class: 'rte-attach', target: '_blank', download: '' }, HTMLAttributes), node.attrs.name || '附件']
   }
 })
@@ -83,10 +86,25 @@ const server = useServerStore()
 const uploading = ref(false)
 const err = ref('')
 
+// 点击图片/视频 → 弹窗看原图（全尺寸，懒加载）
+const lightbox = ref<{ src: string; kind: 'image' | 'video' } | null>(null)
+
 const editor = useEditor({
   extensions: [
     StarterKit,
-    Image.configure({ inline: false, allowBase64: false }),
+    // 图片节点扩展：加 width 属性（持久化进 HTML，保存/重进/预览保持尺寸）
+    Image.configure({ inline: false, allowBase64: false }).extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          width: {
+            default: null,
+            parseHTML: (el) => (el as HTMLElement).getAttribute('width') || (el as HTMLElement).style.width || null,
+            renderHTML: (attrs) => (attrs.width ? { style: `width:${attrs.width}px` } : {})
+          }
+        }
+      }
+    }),
     Video,
     Attachment
   ],
@@ -96,16 +114,26 @@ const editor = useEditor({
     attributes: {
       class: 'rte-body',
       'data-placeholder': props.placeholder || '请输入内容…'
+    },
+    // 点击图片/视频 → 弹窗看原图（编辑态需先选中，点击空白处再触发查看；这里用 clickOnOverlayCaptured）
+    handleClickOn(view, pos, node) {
+      if (node.type.name === 'image' && node.attrs.src) {
+        lightbox.value = { src: node.attrs.src as string, kind: 'image' }
+        return true
+      }
+      if (node.type.name === 'video' && node.attrs.src) {
+        lightbox.value = { src: node.attrs.src as string, kind: 'video' }
+        return true
+      }
+      return false
     }
   },
   onUpdate: ({ editor }) => {
     if (props.readonly) return
-    // 内容变化 → 对外 emit HTML 字符串
     emit('update:modelValue', editor.getHTML())
   }
 })
 
-// 外部值变化（编辑回填 / 只读预览换内容）时同步进编辑器
 watch(
   () => props.modelValue,
   (v) => {
@@ -113,24 +141,32 @@ watch(
     if (ed && v !== ed.getHTML()) ed.commands.setContent(v || '', { emitUpdate: false })
   }
 )
-// 只读/编辑切换时切 editable
 watch(
   () => props.readonly,
   (ro) => { editor.value?.setEditable(!ro) }
 )
 
-/** 选文件 → 复用聊天同一套分块上传 → 拿 url → 插入图片/视频/附件节点。
- *  入口与图标对齐 ChatWindow：图片 far fa-image、视频 far fa-file-video、附件 fas fa-paperclip。 */
+/** 选中图片后调宽度：缩小 / 还原 */
+function shrinkImage(): void {
+  const ed = editor.value
+  if (!ed) return
+  const attrs = ed.getAttributes('image')
+  const cur = attrs.width ? parseInt(attrs.width, 10) : 0
+  ed.chain().focus().updateAttributes('image', { width: Math.max(120, Math.round((cur || 480) * 0.8)) }).run()
+}
+function resetImageWidth(): void {
+  editor.value?.chain().focus().updateAttributes('image', { width: null }).run()
+}
+
+/** 选文件 → 复用聊天同一套分块上传 → 拿 url → 插入图片/视频/附件节点。 */
 async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
   const ed = editor.value
   if (!ed || props.readonly) return
-  // 与 ChatWindow 一致：图片/视频按类型过滤，附件不限类型
   const filePath = kind === 'doc' ? await window.pantry.pickFile() : await window.pantry.pickFile(kind)
   if (!filePath) return
   uploading.value = true
   err.value = ''
   try {
-    // clientId：时间戳+随机串；companyId 取当前公司；第4参 relativePath 空
     const clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const up = await window.pantry.serverUploadChunked(filePath, clientId, app.activeCompanyId || 0, '')
     if (!up.ok || !up.url) {
@@ -138,8 +174,7 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
       err.value = up.error || '上传失败'
       return
     }
-    // 上传返回的可能是相对路径（/files/xxx），必须拼上服务端 base URL 成绝对地址后再插入——
-    // 否则 <img>/<video> 会按 renderer origin 解析而破图。与聊天图片同一套 absFileUrl。
+    // 相对路径拼绝对 URL（与聊天图片一致），否则按 renderer origin 解析会破图
     const fileUrl = server.absFileUrl(up.url)
     ed.chain().focus()
     if (kind === 'image') ed.chain().focus().setImage({ src: fileUrl }).run()
@@ -151,6 +186,17 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
   }
   uploading.value = false
 }
+
+// 只读预览模式下：内容区点击图片/视频 → 弹窗看原图（用事件委托）
+function onBodyClick(e: MouseEvent): void {
+  const t = e.target as HTMLElement
+  if (t.tagName === 'IMG' && t.getAttribute('src')) {
+    lightbox.value = { src: t.getAttribute('src') as string, kind: 'image' }
+  } else if (t.tagName === 'VIDEO' && t.getAttribute('src')) {
+    lightbox.value = { src: t.getAttribute('src') as string, kind: 'video' }
+  }
+}
+void nextTick
 </script>
 
 <template>
@@ -165,7 +211,9 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
       <button class="rte-btn" :class="{ on: editor?.isActive('bulletList') }" title="无序列表" @click="editor?.chain().focus().toggleBulletList().run()"><i class="fas fa-list-ul"></i></button>
       <button class="rte-btn" :class="{ on: editor?.isActive('orderedList') }" title="有序列表" @click="editor?.chain().focus().toggleOrderedList().run()"><i class="fas fa-list-ol"></i></button>
       <span class="rte-sep"></span>
-      <!-- 上传入口对齐 ChatWindow：图片 far fa-image / 视频 far fa-file-video / 附件 fas fa-paperclip -->
+      <button class="rte-btn" title="图片缩小" :disabled="!editor?.isActive('image')" @click="shrinkImage"><i class="fas fa-compress-arrows-alt"></i></button>
+      <button class="rte-btn" title="图片原尺寸" :disabled="!editor?.isActive('image')" @click="resetImageWidth"><i class="fas fa-expand"></i></button>
+      <span class="rte-sep"></span>
       <button class="rte-btn" :disabled="uploading" title="插入图片" @click="insertMedia('image')">
         <i :class="uploading ? 'fas fa-spinner fa-spin' : 'far fa-image'"></i>
       </button>
@@ -178,11 +226,23 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
       <button class="rte-btn" title="清除格式" @click="editor?.chain().focus().unsetAllMarks().clearNodes().run()"><i class="fas fa-eraser"></i></button>
     </div>
     <!-- 编辑/预览内容区 -->
-    <div class="rte-body-wrap">
+    <div class="rte-body-wrap" @click="onBodyClick">
       <EditorContent :editor="editor" />
       <div v-if="uploading" class="rte-loading"><i class="fas fa-spinner fa-spin"></i>&nbsp;上传中…</div>
     </div>
     <div v-if="err && !readonly" class="rte-err">{{ err }}</div>
+
+    <!-- 点击图片/视频 → 全尺寸查看弹窗 -->
+    <div v-if="lightbox" class="rte-lightbox" @click="lightbox = null">
+      <div class="rte-lightbox-inner" @click.stop>
+        <img v-if="lightbox.kind === 'image'" :src="lightbox.src" alt="" loading="lazy" />
+        <video v-else :src="lightbox.src" controls autoplay />
+        <div class="rte-lightbox-bar">
+          <a :href="lightbox.src" target="_blank" download class="rte-lightbox-dl"><i class="fas fa-download"></i> 打开原图</a>
+          <button class="rte-lightbox-close" @click="lightbox = null"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -195,12 +255,14 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
 .rte-btn.on { background: #e3edff; color: var(--dt-primary); }
 .rte-btn:disabled { opacity: .5; cursor: not-allowed; }
 .rte-sep { width: 1px; height: 16px; background: var(--dt-border-light); margin: 0 4px; }
-.rte-body-wrap { position: relative; overflow-y: auto; max-height: 80vh; }
-/* 编辑区至少 800px 高，内容多时在 wrap 内滚动 */
+/* 编辑区确定高度：至少 800px，内容多时在 wrap 内滚动；可占满可用高度 */
+.rte-body-wrap { position: relative; overflow-y: auto; min-height: 800px; max-height: 80vh; }
 .rte-body { padding: 10px 12px; min-height: 800px; outline: none; font-size: 14px; line-height: 1.6; }
+.rte.readonly .rte-body-wrap { min-height: 0; max-height: none; overflow: visible; }
 .rte.readonly .rte-body { padding: 4px 0; min-height: 0; }
 .rte-body p { margin: 4px 0; }
-.rte-body img { max-width: 100%; border-radius: 6px; }
+/* 图片/视频：超宽等比缩到可用宽度，小图不强制压缩 */
+.rte-body img { max-width: 100%; border-radius: 6px; cursor: zoom-in; }
 .rte-body video { max-width: 100%; border-radius: 6px; }
 .rte-body h2 { font-size: 16px; font-weight: 700; margin: 8px 0; }
 .rte-body ul, .rte-body ol { padding-left: 22px; margin: 4px 0; }
@@ -209,4 +271,12 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
 .rte-body p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--dt-text-4); float: left; height: 0; pointer-events: none; }
 .rte-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.75); color: var(--dt-text-3); font-size: 13px; }
 .rte-err { padding: 4px 10px; color: #d92b3a; font-size: 12px; }
+
+/* 原图查看弹窗 */
+.rte-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.rte-lightbox-inner { position: relative; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; }
+.rte-lightbox-inner img, .rte-lightbox-inner video { max-width: 96vw; max-height: 86vh; border-radius: 6px; }
+.rte-lightbox-bar { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+.rte-lightbox-dl { color: #fff; background: rgba(255,255,255,.15); padding: 6px 14px; border-radius: 6px; font-size: 13px; text-decoration: none; }
+.rte-lightbox-close { background: rgba(255,255,255,.15); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; }
 </style>
