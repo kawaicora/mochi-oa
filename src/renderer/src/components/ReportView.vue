@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
-import RichTextEditor from './RichTextEditor.vue'
-import MemberPicker from './MemberPicker.vue'
+import RichTextEditor from './common/RichTextEditor.vue'
+import MemberPicker from './common/MemberPicker.vue'
 
 // ── 类型（与服务端冻结协议对齐，content 存 HTML）──
 type ReportType = 'daily' | 'weekly'
@@ -546,7 +546,7 @@ onUnmounted(() => { offReminder?.() })
 </template>
 
 <style scoped>
-.rp { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.rp { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .rp-bar { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
 .rp-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .rp-seg { display: inline-flex; background: #f0f2f5; border-radius: 8px; padding: 2px; }

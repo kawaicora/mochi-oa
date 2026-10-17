@@ -1605,6 +1605,26 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'approval:flow:list', { companyId })
   }
+
+  // ─── 打卡（公司隔离）─────────
+  /** 打卡：payload 带 companyId + 可选 mac；服务端用连接 IP 校验白名单 */
+  async checkinCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:create', payload)
+  }
+  /** 按月拉打卡记录：{companyId, month:'YYYY-MM'} → data.days */
+  async checkinList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:list', payload)
+  }
+  async checkinSettingsGet(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:settings:get', { companyId })
+  }
+  async checkinSettingsSave(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:settings:save', payload)
+  }
 }
 
 export const serverClient = new ServerClient()

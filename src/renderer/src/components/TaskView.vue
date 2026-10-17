@@ -10,7 +10,7 @@ import WikiView from './WikiView.vue'
 import DashView from './DashView.vue'
 import MemberTrackView from './MemberTrackView.vue'
 import DateTimeInput from './DateTimeInput.vue'
-import RichTextEditor from './RichTextEditor.vue'
+import RichTextEditor from './common/RichTextEditor.vue'
 
 const app = useAppStore()
 const server = useServerStore()

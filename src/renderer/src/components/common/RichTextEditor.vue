@@ -4,8 +4,8 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ref, watch } from 'vue'
-import { useAppStore } from '../stores/app'
-import { useServerStore } from '../stores/server'
+import { useAppStore } from '../../stores/app'
+import { useServerStore } from '../../stores/server'
 
 /**
  * 自定义 video 节点：官方无扩展，自写一个块级原子节点。

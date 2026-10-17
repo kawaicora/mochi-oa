@@ -12,7 +12,7 @@ import AlarmView from './AlarmView.vue'
 import TaskView from './TaskView.vue'
 import TaskSide from './TaskSide.vue'
 import ReportView from './ReportView.vue'
-import AttendanceView from './AttendanceView.vue'
+import AttendanceHome from './AttendanceHome.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -317,7 +317,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'alarm'"><AlarmView /></template>
         <template v-else-if="nav === 'todo'"><TaskView /></template>
         <template v-else-if="nav === 'report'"><ReportView /></template>
-        <template v-else-if="nav === 'attendance'"><AttendanceView /></template>
+        <template v-else-if="nav === 'attendance'"><AttendanceHome /></template>
       </div>
     </div>
 

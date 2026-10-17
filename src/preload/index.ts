@@ -303,6 +303,13 @@ const api = {
   serverApprovalFlowGet: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowGet, payload),
   serverApprovalFlowSave: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowSave, payload),
   serverApprovalFlowList: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverApprovalFlowList, companyId),
+  // 打卡
+  serverCheckinCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverCheckinCreate, payload),
+  serverCheckinList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverCheckinList, payload),
+  serverCheckinSettingsGet: (companyId: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverCheckinSettingsGet, companyId),
+  serverCheckinSettingsSave: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverCheckinSettingsSave, payload),
+  // 取本机 MAC（返回大写无冒号字符串）
+  getMac: (): Promise<string> => ipcRenderer.invoke(IpcChannels.getMac),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>

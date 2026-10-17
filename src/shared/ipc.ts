@@ -177,6 +177,14 @@ export const IpcChannels = {
   serverApprovalFlowSave: 'server:approval:flow:save',
   serverApprovalFlowList: 'server:approval:flow:list',
 
+  // 打卡（公司隔离）
+  serverCheckinCreate: 'server:checkin:create',
+  serverCheckinList: 'server:checkin:list',
+  serverCheckinSettingsGet: 'server:checkin:settings:get',
+  serverCheckinSettingsSave: 'server:checkin:settings:save',
+  // 取本机 MAC（main 进程 os.networkInterfaces）
+  getMac: 'get:mac',
+
   // 闹钟：到点执行用户程序/脚本（跨平台，main 进程 spawn）
   alarmRun: 'alarm:run',
 

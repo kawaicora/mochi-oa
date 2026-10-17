@@ -5,7 +5,7 @@
  */
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron'
 import { join, basename } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, networkInterfaces } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
 import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
@@ -529,6 +529,29 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverApprovalFlowGet, (_e, payload) => serverClient.approvalFlowGet((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverApprovalFlowSave, (_e, payload) => serverClient.approvalFlowSave((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverApprovalFlowList, (_e, companyId) => serverClient.approvalFlowList(Number(companyId) || 0))
+
+  // ─── 打卡（公司隔离）───
+  ipcMain.handle(IpcChannels.serverCheckinCreate, (_e, payload) => serverClient.checkinCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverCheckinList, (_e, payload) => serverClient.checkinList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverCheckinSettingsGet, (_e, companyId) => serverClient.checkinSettingsGet(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverCheckinSettingsSave, (_e, payload) => serverClient.checkinSettingsSave((payload as Record<string, unknown>) ?? {}))
+  // 取本机 MAC：遍历非 internal 接口取第一个 mac，全大写去冒号；异常回退空串
+  ipcMain.handle(IpcChannels.getMac, () => {
+    try {
+      const nets = networkInterfaces()
+      for (const name of Object.keys(nets)) {
+        for (const n of nets[name] || []) {
+          if (n && !n.internal && n.mac && n.mac !== '00:00:00:00:00:00') {
+            return n.mac.toUpperCase().replace(/:/g, '')
+          }
+        }
+      }
+      return ''
+    } catch (e) {
+      console.error('[getMac] 取本机 MAC 失败', e)
+      return ''
+    }
+  })
 
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>
