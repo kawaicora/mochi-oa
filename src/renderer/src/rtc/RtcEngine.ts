@@ -141,17 +141,20 @@ class RtcEngine {
     this.clearGrace(userId)
     const existing = this.peers.get(userId)
     if (existing) {
-      // have-local-offer = 本端发过 offer 还没收到 answer（对端也发了 offer 才会这样）。
-      // 这是唯一真正「状态不对」的情况，删掉重建。
-      if (existing.signalingState === 'have-local-offer') {
-        console.log('[RtcEngine] [addPeer] user=' + userId + ' 撞车(have-local-offer) → 删掉重建')
+      // 任何已有 PC 都【绝不能】在这里删掉重建 —— 重建会关掉 DTLS，对端立刻看到掉线、
+      // 画面黑掉，而对端也会重建并发来新 offer，两边互相拆，就是循环掉线（撞车根因）。
+      // 特别是 have-local-offer（撞车中：本端发过 offer 还没收到 answer，对端也发了 offer）——
+      // 这正是 _handleOffer ① 分支该处理的场景：本端是发起方则保持自己 offer 等 answer，
+      // 本端是应答方则由 _handleOffer 回滚后应答。保持现状等待即可，绝不删 PC。
+      // 只有 connectionState 明确 failed（PC 真坏、彻底断）才删掉重建。
+      if (existing.connectionState === 'failed') {
+        console.log('[RtcEngine] [addPeer] user=' + userId + ' connectionState=failed → 删掉重建')
         existing.close()
         this.peers.delete(userId)
       } else {
-        // stable：已经建好了；have-remote-offer：正在应答中。
-        // 两种都绝不能重建 —— 重建会关掉 DTLS，对端立刻看到掉线、画面黑掉，
-        // 而对端也会重建并发来新 offer，两边互相拆，就是循环掉线。
-        console.log('[RtcEngine] [addPeer] user=' + userId + ' 已有 PC(sig=' + existing.signalingState + ') → 复用，不重建')
+        // stable：已经建好；have-remote-offer：正在应答中；have-local-offer：撞车中等 answer。
+        // 全部复用、不重建。
+        console.log('[RtcEngine] [addPeer] user=' + userId + ' 已有 PC(sig=' + existing.signalingState + ',conn=' + existing.connectionState + ') → 复用，不重建')
         return
       }
     }
