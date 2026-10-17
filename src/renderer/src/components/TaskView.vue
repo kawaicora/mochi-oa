@@ -10,6 +10,7 @@ import WikiView from './WikiView.vue'
 import DashView from './DashView.vue'
 import MemberTrackView from './MemberTrackView.vue'
 import DateTimeInput from './DateTimeInput.vue'
+import RichTextEditor from './RichTextEditor.vue'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -275,9 +276,11 @@ async function onPickFolder(): Promise<void> {
 }
 async function addComment(): Promise<void> {
   if (!detail.value) return
-  const text = commentText.value.trim()
+  // 富文本：空编辑器会产出 <p></p>，去掉标签判断是否真的为空
+  const text = commentText.value
+  const plain = text.replace(/<[^>]*>/g, '').trim()
   const atts = commentAtts.value
-  if (!text && atts.length === 0) return
+  if (!plain && atts.length === 0) return
   try {
     const r = await app.addTaskComment(detail.value.task.id, text, atts)
     commentText.value = ''
@@ -691,7 +694,8 @@ watch(view, (v) => {
         <!-- 留言 -->
         <div v-if="detailTab === 'comments'" class="tv-tab">
           <div class="tv-comment-box">
-            <textarea v-model="commentText" class="srv-input" rows="2" placeholder="输入留言…（可附图）" @keydown.ctrl.enter="addComment"></textarea>
+            <!-- 富文本留言（图片/视频可在编辑器内插入） -->
+            <RichTextEditor v-model="commentText" placeholder="输入留言…（可附图/视频）" />
             <div v-if="commentAtts.length" class="tv-comment-pre">
               <div v-for="(at, i) in commentAtts" :key="i" class="tv-pre-item" @click="commentAtts.splice(i, 1)">
                 <img v-if="at.kind === 'image'" :src="server.absFileUrl(at.url)" />
@@ -710,7 +714,7 @@ watch(view, (v) => {
           <div v-for="c in [...detail.comments].reverse()" :key="c.id" class="tv-comment">
             <span class="tv-log-user">{{ who(c.username, c.nick) }}</span>
             <span class="tv-log-time">{{ fmt(c.createdAt) }}</span>
-            <div v-if="c.content" class="tv-comment-text">{{ c.content }}</div>
+            <div v-if="c.content" class="tv-comment-text" v-html="c.content"></div>
             <div v-if="c.attachments && c.attachments.length" class="tv-comment-imgs">
               <template v-for="(at, i) in c.attachments" :key="i">
                 <a v-if="at.kind === 'image'" :href="server.absFileUrl(at.url)" target="_blank"><img :src="server.absFileUrl(at.url)" /></a>
@@ -1002,6 +1006,8 @@ watch(view, (v) => {
 .tv-pre-item i { font-size: 20px; color: var(--dt-text-3); }
 .tv-comment { font-size: 13px; padding: 6px 0; border-bottom: 1px dashed var(--dt-border-light); display: flex; gap: 8px; flex-wrap: wrap; }
 .tv-comment-text { width: 100%; color: var(--dt-text-2); }
+.tv-comment-text :deep(img) { max-width: 220px; max-height: 160px; border-radius: 8px; margin: 4px 0; }
+.tv-comment-text :deep(video) { max-width: 320px; max-height: 200px; border-radius: 8px; margin: 4px 0; }
 .tv-issue-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .tv-issue { border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .tv-issue.resolved { opacity: 0.6; }

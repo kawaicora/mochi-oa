@@ -520,6 +520,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverReportTemplateDelete, (_e, companyId, id) => serverClient.reportTemplateDelete(Number(companyId) || 0, Number(id) || 0))
   ipcMain.handle(IpcChannels.serverReportStats, (_e, payload) => serverClient.reportStats((payload as Record<string, unknown>) ?? {}))
 
+  // 考勤申请
+  ipcMain.handle(IpcChannels.serverAttendanceCreate, (_e, payload) => serverClient.attendanceCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceList, (_e, payload) => serverClient.attendanceList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceApprove, (_e, companyId, id) => serverClient.attendanceApprove(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverAttendanceReject, (_e, companyId, id, note) => serverClient.attendanceReject(Number(companyId) || 0, Number(id) || 0, typeof note === 'string' ? note : ''))
+  // 审批流程配置
+  ipcMain.handle(IpcChannels.serverApprovalFlowGet, (_e, payload) => serverClient.approvalFlowGet((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverApprovalFlowSave, (_e, payload) => serverClient.approvalFlowSave((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverApprovalFlowList, (_e, companyId) => serverClient.approvalFlowList(Number(companyId) || 0))
+
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)

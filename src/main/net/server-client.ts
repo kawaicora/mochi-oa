@@ -1572,6 +1572,39 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'report:stats', payload)
   }
+
+  // ─── 考勤申请（补卡/请假/调休，公司隔离）─────────
+  async attendanceCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:create', payload)
+  }
+  async attendanceList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:list', payload)
+  }
+  async attendanceApprove(companyId: number, id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:approve', { companyId, id })
+  }
+  async attendanceReject(companyId: number, id: number, note?: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:reject', { companyId, id, note: note ?? '' })
+  }
+
+  // ─── 审批流程配置 ─────────
+  /** 取某类型（或全部）审批流程配置 */
+  async approvalFlowGet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'approval:flow:get', payload)
+  }
+  async approvalFlowSave(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'approval:flow:save', payload)
+  }
+  async approvalFlowList(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'approval:flow:list', { companyId })
+  }
 }
 
 export const serverClient = new ServerClient()

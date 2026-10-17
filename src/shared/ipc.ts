@@ -167,6 +167,16 @@ export const IpcChannels = {
   serverReportTemplateDelete: 'server:report:template:delete',
   serverReportStats: 'server:report:stats',
 
+  // 考勤申请（补卡/请假/调休，公司隔离）
+  serverAttendanceCreate: 'server:attendance:create',
+  serverAttendanceList: 'server:attendance:list',
+  serverAttendanceApprove: 'server:attendance:approve',
+  serverAttendanceReject: 'server:attendance:reject',
+  // 审批流程配置（按类型配审批人/抄送人）
+  serverApprovalFlowGet: 'server:approval:flow:get',
+  serverApprovalFlowSave: 'server:approval:flow:save',
+  serverApprovalFlowList: 'server:approval:flow:list',
+
   // 闹钟：到点执行用户程序/脚本（跨平台，main 进程 spawn）
   alarmRun: 'alarm:run',
 
