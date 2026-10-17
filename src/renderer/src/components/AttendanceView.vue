@@ -32,12 +32,7 @@ interface AttendanceRequest {
   nick?: string
   username?: string
 }
-interface ApprovalFlow {
-  type: AttType
-  approverIds: number[]
-  ccIds: number[]
-}
-// 草稿结构（按类型存 localStorage）
+// 草稿结构（按类型存 localStorage；含审批人/抄送人选择）
 interface Draft {
   punchTime: string
   leaveType: string
@@ -46,6 +41,8 @@ interface Draft {
   endTime: string
   durationHours: number | null
   reason: string
+  approverIds: number[]
+  ccIds: number[]
 }
 
 const app = useAppStore()
@@ -72,6 +69,9 @@ const startTime = ref('')
 const endTime = ref('')
 const durationHours = ref<number | null>(null)
 const reason = ref('')
+// 发起时动态选择的审批人/抄送人（不再走预设审批流程配置）
+const approverIds = ref<number[]>([])
+const ccIds = ref<number[]>([])
 const submitting = ref(false)
 const err = ref('')
 const okMsg = ref('')
@@ -81,7 +81,8 @@ const draftKey = (t: AttType) => `mochi:oa:att:draft:${t}`
 function currentDraft(): Draft {
   return {
     punchTime: punchTime.value, leaveType: leaveType.value, compType: compType.value,
-    startTime: startTime.value, endTime: endTime.value, durationHours: durationHours.value, reason: reason.value
+    startTime: startTime.value, endTime: endTime.value, durationHours: durationHours.value, reason: reason.value,
+    approverIds: [...approverIds.value], ccIds: [...ccIds.value]
   }
 }
 function applyDraft(d: Draft): void {
@@ -92,16 +93,18 @@ function applyDraft(d: Draft): void {
   endTime.value = d.endTime || ''
   durationHours.value = d.durationHours ?? null
   reason.value = d.reason || ''
+  approverIds.value = d.approverIds ?? []
+  ccIds.value = d.ccIds ?? []
 }
 // 切类型 → 载入该类型草稿
 function loadDraft(t: AttType): void {
   try {
     const raw = localStorage.getItem(draftKey(t))
     if (raw) applyDraft(JSON.parse(raw) as Draft)
-    else applyDraft({ punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '' })
+    else applyDraft({ punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] })
   } catch (e) { console.error('[考勤] 草稿读取失败', e) }
 }
-// 手动保存草稿（选人不参与草稿，审批人/抄送人属流程配置不在表单）
+// 手动保存草稿（含审批人/抄送人选择）
 function saveDraft(): void {
   try {
     localStorage.setItem(draftKey(tab.value), JSON.stringify(currentDraft()))
@@ -121,39 +124,7 @@ watch([startTime, endTime], () => {
   }
 })
 
-// ── 审批流程配置（管理员）──
-const flows = ref<Record<AttType, ApprovalFlow>>({
-  make_up: { type: 'make_up', approverIds: [], ccIds: [] },
-  leave: { type: 'leave', approverIds: [], ccIds: [] },
-  comp_time: { type: 'comp_time', approverIds: [], ccIds: [] }
-})
-const curFlow = computed(() => flows.value[tab.value])
-
-async function loadFlows(): Promise<void> {
-  if (!companyId.value) return
-  try {
-    const ack = await window.pantry.serverApprovalFlowList(companyId.value)
-    if (!ack.ok) { console.error('[考勤] 流程列表失败', ack.error); return }
-    const list = (ack.data as { flows?: ApprovalFlow[] })?.flows ?? []
-    for (const f of list) {
-      if (flows.value[f.type]) {
-        flows.value[f.type] = { type: f.type, approverIds: f.approverIds ?? [], ccIds: f.ccIds ?? [] }
-      }
-    }
-  } catch (e) { console.error('[考勤] 流程列表异常', e) }
-}
-async function saveFlow(type: AttType): Promise<void> {
-  if (!companyId.value) { err.value = '尚未加入公司'; return }
-  err.value = ''
-  try {
-    const f = flows.value[type]
-    const ack = await window.pantry.serverApprovalFlowSave({
-      companyId: companyId.value, type, approverIds: f.approverIds, ccIds: f.ccIds
-    })
-    if (!ack.ok) { console.error('[考勤] 流程保存失败', ack.error); err.value = ack.error || '流程保存失败'; return }
-    okMsg.value = '流程已保存'
-  } catch (e) { console.error('[考勤] 流程保存异常', e); err.value = '流程保存异常' }
-}
+// ── 审批人/抄送人由申请人发起时动态选择（不再有预设流程配置）──
 
 /** userId 数组 → 名字 */
 function namesOf(ids: number[]): string {
@@ -171,7 +142,10 @@ async function submit(): Promise<void> {
   if (!reason.value.trim()) { err.value = '请填写事由'; return }
   submitting.value = true
   try {
-    const payload: Record<string, unknown> = { companyId: companyId.value, type: tab.value, reason: reason.value }
+    const payload: Record<string, unknown> = {
+      companyId: companyId.value, type: tab.value, reason: reason.value,
+      approverIds: approverIds.value, ccIds: ccIds.value
+    }
     if (tab.value === 'make_up') payload.punchTime = punchTime.value
     else {
       payload.startTime = startTime.value
@@ -186,6 +160,7 @@ async function submit(): Promise<void> {
     // 提交成功 → 清空该类型草稿并重置表单
     clearDraft(tab.value)
     punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
+    approverIds.value = []; ccIds.value = []
     await loadList()
   } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
@@ -249,11 +224,11 @@ watch(tab, (t) => loadDraft(t))
 watch(historyType, () => { histPage.value = 1; loadList() })
 watch(companyId, async () => {
   if (!companyId.value) return
-  await Promise.all([loadList(), loadFlows()])
+  await loadList()
 })
 onMounted(async () => {
   loadDraft('make_up')
-  await Promise.all([loadList(), loadFlows()])
+  await loadList()
 })
 </script>
 
@@ -307,8 +282,16 @@ onMounted(async () => {
       <label class="at-lab">事由 <i class="req">*</i></label>
       <RichTextEditor v-model="reason" placeholder="请填写事由…（可附图/视频/附件）" />
 
-      <div class="at-flow-hint">
-        审批人：{{ namesOf(curFlow.approverIds) }}　抄送人：{{ namesOf(curFlow.ccIds) }}
+      <!-- 发起时动态选择审批人/抄送人（复用公共 MemberPicker，随草稿保存） -->
+      <div class="at-pick-row">
+        <div>
+          <label class="at-lab">审批人</label>
+          <MemberPicker v-model="approverIds" placeholder="选择审批人" />
+        </div>
+        <div>
+          <label class="at-lab">抄送人</label>
+          <MemberPicker v-model="ccIds" placeholder="选择抄送人" />
+        </div>
       </div>
 
       <div class="at-actions">
@@ -317,25 +300,6 @@ onMounted(async () => {
           <i class="fas fa-paper-plane"></i> {{ submitting ? '提交中…' : '提交申请' }}
         </button>
       </div>
-
-      <!-- 管理员：审批流程设置 -->
-      <template v-if="isAdmin">
-        <div class="at-sec-title admin">审批流程设置</div>
-        <div class="at-flow-cfg">
-          <div v-for="t in (['make_up','leave','comp_time'] as AttType[])" :key="t" class="at-flow-row">
-            <div class="at-flow-type">{{ TYPE_LABEL[t] }}</div>
-            <div class="at-flow-field">
-              <label class="at-lab">审批人</label>
-              <MemberPicker v-model="flows[t].approverIds" placeholder="选择审批人" />
-            </div>
-            <div class="at-flow-field">
-              <label class="at-lab">抄送人</label>
-              <MemberPicker v-model="flows[t].ccIds" placeholder="选择抄送人" />
-            </div>
-            <button class="dt-btn sm" @click="saveFlow(t)"><i class="fas fa-save"></i> 保存</button>
-          </div>
-        </div>
-      </template>
     </div>
 
     <!-- 下：历史记录 -->
@@ -420,6 +384,8 @@ onMounted(async () => {
 .at-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; }
 .at-flow-hint { margin-top: 10px; font-size: 12px; color: var(--dt-text-3); background: #f6f8fb; padding: 6px 10px; border-radius: 6px; }
 .at-actions { display: flex; gap: 10px; margin-top: 12px; }
+.at-pick-row { display: flex; gap: 16px; margin-top: 4px; }
+.at-pick-row > div { flex: 1; }
 .at-rec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .at-sec-title { font-size: 14px; font-weight: 700; }
 .at-sec-title.admin { margin-top: 18px; }
