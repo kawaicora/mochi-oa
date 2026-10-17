@@ -553,6 +553,15 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
   })
 
+  // ─── 资产管理（公司隔离）───
+  ipcMain.handle(IpcChannels.serverAssetCreate, (_e, payload) => serverClient.assetCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAssetList, (_e, payload) => serverClient.assetList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAssetGet, (_e, payload) => serverClient.assetGet((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAssetUpdate, (_e, payload) => serverClient.assetUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAssetDelete, (_e, companyId, id) => serverClient.assetDelete(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverAssetFlowCreate, (_e, payload) => serverClient.assetFlowCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAssetFlowList, (_e, payload) => serverClient.assetFlowList((payload as Record<string, unknown>) ?? {}))
+
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)

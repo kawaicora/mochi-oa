@@ -13,6 +13,7 @@ import TaskView from './TaskView.vue'
 import TaskSide from './TaskSide.vue'
 import ReportView from './ReportView.vue'
 import AttendanceHome from './AttendanceHome.vue'
+import AssetView from './AssetView.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -22,7 +23,7 @@ import type { ServerSession } from '@shared/server-types'
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'attendance'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'attendance' | 'asset'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
@@ -31,7 +32,8 @@ const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   alarm: { label: '闹钟', icon: 'fas fa-bell' },
   todo: { label: '任务', icon: 'fas fa-tasks' },
   report: { label: '报表', icon: 'fas fa-file-alt' },
-  attendance: { label: '考勤', icon: 'fas fa-user-clock' }
+  attendance: { label: '考勤', icon: 'fas fa-user-clock' },
+  asset: { label: '资产', icon: 'fas fa-box-open' }
 }
 // 报表需公司上下文：未加入公司时不显示导航按钮
 const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
@@ -254,7 +256,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="(k !== 'report' && k !== 'todo' && k !== 'attendance') || hasCompany"
+            v-show="(k !== 'report' && k !== 'todo' && k !== 'attendance' && k !== 'asset') || hasCompany"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
@@ -293,6 +295,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'todo'"><TaskSide /></template>
         <template v-else-if="nav === 'report'"></template>
         <template v-else-if="nav === 'attendance'"></template>
+        <template v-else-if="nav === 'asset'"></template>
       </div>
 
       <!-- 2.3 大内容区 -->
@@ -318,6 +321,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'todo'"><TaskView /></template>
         <template v-else-if="nav === 'report'"><ReportView /></template>
         <template v-else-if="nav === 'attendance'"><AttendanceHome /></template>
+        <template v-else-if="nav === 'asset'"><AssetView /></template>
       </div>
     </div>
 

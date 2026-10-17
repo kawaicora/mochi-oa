@@ -1625,6 +1625,36 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'checkin:settings:save', payload)
   }
+
+  // ─── 资产管理（公司隔离）─────────
+  async assetCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:create', payload)
+  }
+  async assetList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:list', payload)
+  }
+  async assetGet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:get', payload)
+  }
+  async assetUpdate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:update', payload)
+  }
+  async assetDelete(companyId: number, id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:delete', { companyId, id })
+  }
+  async assetFlowCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:flow:create', payload)
+  }
+  async assetFlowList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'asset:flow:list', payload)
+  }
 }
 
 export const serverClient = new ServerClient()

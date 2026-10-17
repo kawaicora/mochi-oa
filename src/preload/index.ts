@@ -310,6 +310,14 @@ const api = {
   serverCheckinSettingsSave: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverCheckinSettingsSave, payload),
   // 取本机 MAC（返回大写无冒号字符串）
   getMac: (): Promise<string> => ipcRenderer.invoke(IpcChannels.getMac),
+  // 资产管理
+  serverAssetCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetCreate, payload),
+  serverAssetList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetList, payload),
+  serverAssetGet: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetGet, payload),
+  serverAssetUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetUpdate, payload),
+  serverAssetDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetDelete, companyId, id),
+  serverAssetFlowCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetFlowCreate, payload),
+  serverAssetFlowList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetFlowList, payload),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>

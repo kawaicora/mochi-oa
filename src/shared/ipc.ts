@@ -182,6 +182,14 @@ export const IpcChannels = {
   serverCheckinList: 'server:checkin:list',
   serverCheckinSettingsGet: 'server:checkin:settings:get',
   serverCheckinSettingsSave: 'server:checkin:settings:save',
+  // 资产管理（企业资源，公司隔离；增删改/流转=admin，列表/详情=成员可读）
+  serverAssetCreate: 'server:asset:create',
+  serverAssetList: 'server:asset:list',
+  serverAssetGet: 'server:asset:get',
+  serverAssetUpdate: 'server:asset:update',
+  serverAssetDelete: 'server:asset:delete',
+  serverAssetFlowCreate: 'server:asset:flow:create',
+  serverAssetFlowList: 'server:asset:flow:list',
   // 取本机 MAC（main 进程 os.networkInterfaces）
   getMac: 'get:mac',
 
