@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "7.2.7",
+  "version": "7.2.8",
   "description": "麻薯-好用简洁的办公软件",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
@@ -24,7 +24,7 @@
     "win": {
       "icon": "resources\\mochi_256.png",
       "target": [
-        "nsis"
+        { "target": "nsis", "arch": ["x64", "arm64"] }
       ]
     },
     "mac": {
@@ -37,7 +37,7 @@
     "linux": {
       "icon": "resources\\mochi_256.png",
       "target": [
-        "AppImage"
+        { "target": "AppImage", "arch": ["x64", "arm64"] }
       ],
       "executableArgs": [
         "--no-sandbox"
