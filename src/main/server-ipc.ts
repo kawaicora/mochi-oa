@@ -562,6 +562,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverAssetFlowCreate, (_e, payload) => serverClient.assetFlowCreate((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAssetFlowList, (_e, payload) => serverClient.assetFlowList((payload as Record<string, unknown>) ?? {}))
 
+  // ─── 公司职位系统（公司隔离）───
+  ipcMain.handle(IpcChannels.serverJobCreate, (_e, payload) => serverClient.jobCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverJobUpdate, (_e, payload) => serverClient.jobUpdate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverJobDelete, (_e, companyId, id) => serverClient.jobDelete(Number(companyId) || 0, Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverJobList, (_e, payload) => serverClient.jobList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverJobBind, (_e, payload) => serverClient.jobBind((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverJobBindings, (_e, payload) => serverClient.jobBindings((payload as Record<string, unknown>) ?? {}))
+
   // 文件上传
   ipcMain.handle(IpcChannels.serverUpload, (_e, filePath, companyId) =>
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)

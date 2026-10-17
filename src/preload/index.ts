@@ -318,6 +318,13 @@ const api = {
   serverAssetDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetDelete, companyId, id),
   serverAssetFlowCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetFlowCreate, payload),
   serverAssetFlowList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverAssetFlowList, payload),
+  // 公司职位系统
+  serverJobCreate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobCreate, payload),
+  serverJobUpdate: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobUpdate, payload),
+  serverJobDelete: (companyId: number, id: number): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobDelete, companyId, id),
+  serverJobList: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobList, payload),
+  serverJobBind: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobBind, payload),
+  serverJobBindings: (payload: unknown): Promise<Ack> => ipcRenderer.invoke(IpcChannels.serverJobBindings, payload),
 
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>

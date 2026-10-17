@@ -190,6 +190,13 @@ export const IpcChannels = {
   serverAssetDelete: 'server:asset:delete',
   serverAssetFlowCreate: 'server:asset:flow:create',
   serverAssetFlowList: 'server:asset:flow:list',
+  // 公司职位系统（公司隔离；增删改/绑定=admin，列表/绑定查询=成员可读）
+  serverJobCreate: 'server:job:create',
+  serverJobUpdate: 'server:job:update',
+  serverJobDelete: 'server:job:delete',
+  serverJobList: 'server:job:list',
+  serverJobBind: 'server:job:bind',
+  serverJobBindings: 'server:job:bindings',
   // 取本机 MAC（main 进程 os.networkInterfaces）
   getMac: 'get:mac',
 

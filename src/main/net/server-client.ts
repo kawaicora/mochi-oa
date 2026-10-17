@@ -1655,6 +1655,32 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'asset:flow:list', payload)
   }
+
+  // ─── 公司职位系统（公司隔离）─────────
+  async jobCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:create', payload)
+  }
+  async jobUpdate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:update', payload)
+  }
+  async jobDelete(companyId: number, id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:delete', { companyId, id })
+  }
+  async jobList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:list', payload)
+  }
+  async jobBind(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:bind', payload)
+  }
+  async jobBindings(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'job:bindings', payload)
+  }
 }
 
 export const serverClient = new ServerClient()
