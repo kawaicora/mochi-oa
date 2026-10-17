@@ -25,8 +25,8 @@ const Video = Node.create({
       },
       width: {
         default: null,
-        parseHTML: (el) => (el as HTMLElement).getAttribute('width') || (el as HTMLElement).style.width || null,
-        renderHTML: (attrs) => (attrs.width ? { style: `width:${attrs.width}px` } : {})
+        parseHTML: (el) => Number(el.getAttribute('width') || (el.style.width || '').replace('px', '')) || null,
+        renderHTML: (attrs) => (attrs.width ? { width: String(attrs.width), style: `width:${attrs.width}px` } : {})
       },
       controls: {
         default: 'controls',
@@ -99,8 +99,8 @@ const editor = useEditor({
           ...this.parent?.(),
           width: {
             default: null,
-            parseHTML: (el) => (el as HTMLElement).getAttribute('width') || (el as HTMLElement).style.width || null,
-            renderHTML: (attrs) => (attrs.width ? { style: `width:${attrs.width}px` } : {})
+            parseHTML: (el) => Number(el.getAttribute('width') || (el.style.width || '').replace('px', '')) || null,
+            renderHTML: (attrs) => (attrs.width ? { width: String(attrs.width), style: `width:${attrs.width}px` } : {})
           }
         }
       }
@@ -127,7 +127,13 @@ watch(
   () => props.modelValue,
   (v) => {
     const ed = editor.value
-    if (ed && v !== ed.getHTML()) ed.commands.setContent(v || '', { emitUpdate: false })
+    if (ed && v !== ed.getHTML()) {
+      // 恢复 setContent 前的滚动位置（避免图片缩放等触发重渲染时跳回顶部）
+      const wrap = wrapRef.value
+      const st = wrap?.scrollTop ?? 0
+      ed.commands.setContent(v || '', { emitUpdate: false })
+      requestAnimationFrame(() => { if (wrap) wrap.scrollTop = st })
+    }
   }
 )
 watch(
@@ -297,7 +303,7 @@ watch(editor, (ed) => {
 .rte-btn:disabled { opacity: .5; cursor: not-allowed; }
 .rte-sep { width: 1px; height: 16px; background: var(--dt-border-light); margin: 0 4px; }
 /* 编辑区 flex 自适应占满剩余空间（不再写死 800），内容多时在 wrap 内滚动 */
-.rte-body-wrap { position: relative; flex: 1; min-height: 200px; overflow-y: auto; }
+.rte-body-wrap { position: relative; flex: 1; min-height: 0; overflow-y: auto; }
 .rte-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.75); color: var(--dt-text-3); font-size: 13px; }
 .rte-err { padding: 4px 10px; color: #d92b3a; font-size: 12px; }
 /* 原图查看弹窗 */
