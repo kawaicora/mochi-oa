@@ -114,19 +114,8 @@ const editor = useEditor({
     attributes: {
       class: 'rte-body',
       'data-placeholder': props.placeholder || '请输入内容…'
-    },
-    // 点击图片/视频 → 弹窗看原图（编辑态需先选中，点击空白处再触发查看；这里用 clickOnOverlayCaptured）
-    handleClickOn(view, pos, node) {
-      if (node.type.name === 'image' && node.attrs.src) {
-        lightbox.value = { src: node.attrs.src as string, kind: 'image' }
-        return true
-      }
-      if (node.type.name === 'video' && node.attrs.src) {
-        lightbox.value = { src: node.attrs.src as string, kind: 'video' }
-        return true
-      }
-      return false
     }
+    // 编辑态单击图片 = 选中节点（不弹窗，走默认选择）；弹窗由 onBodyClick(readonly) / dblclick(edit) 触发
   },
   onUpdate: ({ editor }) => {
     if (props.readonly) return
@@ -187,8 +176,9 @@ async function insertMedia(kind: 'image' | 'video' | 'doc'): Promise<void> {
   uploading.value = false
 }
 
-// 只读预览模式下：内容区点击图片/视频 → 弹窗看原图（用事件委托）
+// 只读预览：单击图片/视频 → 弹窗看原图。编辑态单击=选中节点，双击=弹窗。
 function onBodyClick(e: MouseEvent): void {
+  if (!props.readonly) return
   const t = e.target as HTMLElement
   if (t.tagName === 'IMG' && t.getAttribute('src')) {
     lightbox.value = { src: t.getAttribute('src') as string, kind: 'image' }
@@ -196,7 +186,56 @@ function onBodyClick(e: MouseEvent): void {
     lightbox.value = { src: t.getAttribute('src') as string, kind: 'video' }
   }
 }
-void nextTick
+// 编辑态双击图片/视频 → 弹窗看原图
+function onBodyDblclick(e: MouseEvent): void {
+  if (props.readonly) return
+  const t = e.target as HTMLElement
+  if (t.tagName === 'IMG' && t.getAttribute('src')) {
+    lightbox.value = { src: t.getAttribute('src') as string, kind: 'image' }
+  } else if (t.tagName === 'VIDEO' && t.getAttribute('src')) {
+    lightbox.value = { src: t.getAttribute('src') as string, kind: 'video' }
+  }
+}
+
+// ── 图片拖拽缩放手柄：选中图片时在右下角显示手柄，拖动改 width ──
+const wrapRef = ref<HTMLElement | null>(null)
+const handlePos = ref<{ x: number; y: number } | null>(null) // 手柄相对 wrap 的位置
+let dragStartX = 0
+let dragStartW = 0
+function updateHandle(): void {
+  if (props.readonly || !wrapRef.value) { handlePos.value = null; return }
+  const sel = wrapRef.value.querySelector('.ProseMirror-selectednode') as HTMLElement | null
+  if (!sel || (sel.tagName !== 'IMG' && sel.tagName !== 'VIDEO')) { handlePos.value = null; return }
+  const wr = wrapRef.value.getBoundingClientRect()
+  const r = sel.getBoundingClientRect()
+  handlePos.value = { x: r.right - wr.left, y: r.bottom - wr.top }
+}
+function onHandleDown(e: MouseEvent): void {
+  e.preventDefault()
+  e.stopPropagation()
+  const ed = editor.value
+  if (!ed) return
+  dragStartX = e.clientX
+  dragStartW = ed.getAttributes('image').width ? parseInt(ed.getAttributes('image').width, 10) : (wrapRef.value?.querySelector('.ProseMirror-selectednode') as HTMLElement)?.getBoundingClientRect().width ?? 300
+  const move = (ev: MouseEvent): void => {
+    const w = Math.max(120, Math.round(dragStartW + (ev.clientX - dragStartX)))
+    ed.chain().focus().updateAttributes('image', { width: w }).run()
+    updateHandle()
+  }
+  const up = (): void => {
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+    updateHandle()
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+}
+// 选择变化时刷新手柄位置
+watch(editor, (ed) => {
+  if (!ed) return
+  ed.on('selectionUpdate', () => updateHandle())
+  ed.on('transaction', () => setTimeout(updateHandle, 0))
+})
 </script>
 
 <template>
@@ -226,9 +265,11 @@ void nextTick
       <button class="rte-btn" title="清除格式" @click="editor?.chain().focus().unsetAllMarks().clearNodes().run()"><i class="fas fa-eraser"></i></button>
     </div>
     <!-- 编辑/预览内容区 -->
-    <div class="rte-body-wrap" @click="onBodyClick">
+    <div ref="wrapRef" class="rte-body-wrap" @click="onBodyClick" @dblclick="onBodyDblclick">
       <EditorContent :editor="editor" />
       <div v-if="uploading" class="rte-loading"><i class="fas fa-spinner fa-spin"></i>&nbsp;上传中…</div>
+      <!-- 选中图片拖拽手柄 -->
+      <div v-if="handlePos" class="rte-resize-handle" :style="{ left: handlePos.x + 'px', top: handlePos.y + 'px' }" @mousedown="onHandleDown"></div>
     </div>
     <div v-if="err && !readonly" class="rte-err">{{ err }}</div>
 
@@ -247,7 +288,7 @@ void nextTick
 </template>
 
 <style scoped>
-.rte { border: 1px solid var(--dt-border-light); border-radius: 8px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+.rte { border: 1px solid var(--dt-border-light); border-radius: 8px; background: #fff; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .rte.readonly { border-color: transparent; background: transparent; }
 .rte-bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; background: #fafbfc; border-bottom: 1px solid var(--dt-border-light); flex-wrap: wrap; }
 .rte-btn { border: none; background: transparent; width: 28px; height: 26px; border-radius: 6px; cursor: pointer; color: var(--dt-text-2); font-size: 13px; }
@@ -266,6 +307,8 @@ void nextTick
 .rte-lightbox-bar { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
 .rte-lightbox-dl { color: #fff; background: rgba(255,255,255,.15); padding: 6px 14px; border-radius: 6px; font-size: 13px; text-decoration: none; }
 .rte-lightbox-close { background: rgba(255,255,255,.15); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; }
+/* 选中图片右下角拖拽手柄 */
+.rte-resize-handle { position: absolute; width: 12px; height: 12px; background: var(--dt-primary); border: 2px solid #fff; border-radius: 3px; cursor: ew-resize; transform: translate(-50%, -50%); box-shadow: 0 1px 4px rgba(0,0,0,.3); z-index: 5; }
 </style>
 
 <!--
@@ -274,7 +317,7 @@ void nextTick
   用 .rte 前缀避免污染全局。
 -->
 <style>
-.rte .rte-body { padding: 10px 12px; min-height: 800px; outline: none; font-size: 14px; line-height: 1.6; }
+.rte .rte-body { padding: 10px 12px; min-height: 200px; outline: none; font-size: 14px; line-height: 1.6; }
 .rte.readonly .rte-body { padding: 4px 0; min-height: 0; }
 .rte .rte-body p { margin: 4px 0; }
 .rte .rte-body img { max-width: 100%; border-radius: 6px; cursor: zoom-in; }

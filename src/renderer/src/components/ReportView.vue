@@ -98,11 +98,11 @@ const err = ref('')
 const okMsg = ref('')
 const submittedFlash = ref(false)
 
-// ── 草稿缓存（照 ReqView 的 localStorage 写法，记住内容/标题/模板/接收人）──
-const DRAFT_KEY = 'mochi:oa:report:draft'
+// ── 草稿缓存（按日报/周报分 key，避免跨类型泄漏）──
+const draftKey = (t: ReportType) => `mochi:oa:report:draft:${t}`
 watch([title, contentHtml, templateId, type, recipients], () => {
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+    localStorage.setItem(draftKey(type.value), JSON.stringify({
       type: type.value,
       title: title.value,
       contentHtml: contentHtml.value,
@@ -111,13 +111,14 @@ watch([title, contentHtml, templateId, type, recipients], () => {
     }))
   } catch (e) { console.error('[报表] 写草稿失败', e) }
 }, { deep: true })
-function clearDraft(): void { try { localStorage.removeItem(DRAFT_KEY) } catch (e) { console.error('[报表] 清草稿失败', e) } }
+function clearDraft(): void { try { localStorage.removeItem(draftKey(type.value)) } catch (e) { console.error('[报表] 清草稿失败', e) } }
 function restoreDraft(): void {
   try {
-    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as {
+    const d = JSON.parse(localStorage.getItem(draftKey(type.value)) ?? 'null') as {
       type?: ReportType; title?: string; contentHtml?: string; templateId?: number; recipients?: number[]
     } | null
-    if (d) {
+    // 跨类型草稿不恢复（type 不匹配直接忽略，避免日报内容漏到周报）
+    if (d && d.type === type.value) {
       title.value = d.title ?? ''
       contentHtml.value = d.contentHtml ?? ''
       templateId.value = d.templateId ?? 0
