@@ -5,6 +5,7 @@ import { useServerStore } from '../stores/server'
 import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
 import MemberPicker from './common/MemberPicker.vue'
+import { toPlain } from '../utils/plain'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time'
@@ -154,7 +155,7 @@ async function submit(): Promise<void> {
       if (tab.value === 'leave') payload.leaveType = leaveType.value
       else payload.compType = compType.value
     }
-    const ack = await window.pantry.serverAttendanceCreate(payload)
+    const ack = await window.pantry.serverAttendanceCreate(toPlain(payload))
     if (!ack.ok) { console.error('[考勤] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     okMsg.value = '已提交'
     // 提交成功 → 清空该类型草稿并重置表单

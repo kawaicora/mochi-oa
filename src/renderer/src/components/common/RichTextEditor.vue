@@ -247,7 +247,7 @@ void nextTick
 </template>
 
 <style scoped>
-.rte { border: 1px solid var(--dt-border-light); border-radius: 8px; background: #fff; overflow: hidden; }
+.rte { border: 1px solid var(--dt-border-light); border-radius: 8px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
 .rte.readonly { border-color: transparent; background: transparent; }
 .rte-bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; background: #fafbfc; border-bottom: 1px solid var(--dt-border-light); flex-wrap: wrap; }
 .rte-btn { border: none; background: transparent; width: 28px; height: 26px; border-radius: 6px; cursor: pointer; color: var(--dt-text-2); font-size: 13px; }
@@ -255,23 +255,10 @@ void nextTick
 .rte-btn.on { background: #e3edff; color: var(--dt-primary); }
 .rte-btn:disabled { opacity: .5; cursor: not-allowed; }
 .rte-sep { width: 1px; height: 16px; background: var(--dt-border-light); margin: 0 4px; }
-/* 编辑区确定高度：至少 800px，内容多时在 wrap 内滚动；可占满可用高度 */
-.rte-body-wrap { position: relative; overflow-y: auto; min-height: 800px; max-height: 80vh; }
-.rte-body { padding: 10px 12px; min-height: 800px; outline: none; font-size: 14px; line-height: 1.6; }
-.rte.readonly .rte-body-wrap { min-height: 0; max-height: none; overflow: visible; }
-.rte.readonly .rte-body { padding: 4px 0; min-height: 0; }
-.rte-body p { margin: 4px 0; }
-/* 图片/视频：超宽等比缩到可用宽度，小图不强制压缩 */
-.rte-body img { max-width: 100%; border-radius: 6px; cursor: zoom-in; }
-.rte-body video { max-width: 100%; border-radius: 6px; }
-.rte-body h2 { font-size: 16px; font-weight: 700; margin: 8px 0; }
-.rte-body ul, .rte-body ol { padding-left: 22px; margin: 4px 0; }
-.rte-body a.rte-attach { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #f0f4ff; color: var(--dt-primary); border-radius: 6px; font-size: 13px; }
-.rte-body a.rte-attach::before { content: '\f0c6'; font-family: 'Font Awesome 5 Free'; font-weight: 900; }
-.rte-body p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--dt-text-4); float: left; height: 0; pointer-events: none; }
+/* 编辑区 flex 自适应占满剩余空间（不再写死 800），内容多时在 wrap 内滚动 */
+.rte-body-wrap { position: relative; flex: 1; min-height: 200px; overflow-y: auto; }
 .rte-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.75); color: var(--dt-text-3); font-size: 13px; }
 .rte-err { padding: 4px 10px; color: #d92b3a; font-size: 12px; }
-
 /* 原图查看弹窗 */
 .rte-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .rte-lightbox-inner { position: relative; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; }
@@ -279,4 +266,22 @@ void nextTick
 .rte-lightbox-bar { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
 .rte-lightbox-dl { color: #fff; background: rgba(255,255,255,.15); padding: 6px 14px; border-radius: 6px; font-size: 13px; text-decoration: none; }
 .rte-lightbox-close { background: rgba(255,255,255,.15); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; }
+</style>
+
+<!--
+  Tiptap 运行时创建的 .ProseMirror(.rte-body) 节点没有 Vue scoped data-v-xxx 属性，
+  scoped 选择器永不匹配。因此 .rte-body 及其排版规则必须放在【非 scoped】块里。
+  用 .rte 前缀避免污染全局。
+-->
+<style>
+.rte .rte-body { padding: 10px 12px; min-height: 800px; outline: none; font-size: 14px; line-height: 1.6; }
+.rte.readonly .rte-body { padding: 4px 0; min-height: 0; }
+.rte .rte-body p { margin: 4px 0; }
+.rte .rte-body img { max-width: 100%; border-radius: 6px; cursor: zoom-in; }
+.rte .rte-body video { max-width: 100%; border-radius: 6px; }
+.rte .rte-body h2 { font-size: 16px; font-weight: 700; margin: 8px 0; }
+.rte .rte-body ul, .rte .rte-body ol { padding-left: 22px; margin: 4px 0; }
+.rte .rte-body a.rte-attach { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #f0f4ff; color: var(--dt-primary); border-radius: 6px; font-size: 13px; }
+.rte .rte-body a.rte-attach::before { content: '\f0c6'; font-family: 'Font Awesome 5 Free'; font-weight: 900; }
+.rte .rte-body p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--dt-text-4); float: left; height: 0; pointer-events: none; }
 </style>

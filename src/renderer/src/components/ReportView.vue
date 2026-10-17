@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import RichTextEditor from './common/RichTextEditor.vue'
 import MemberPicker from './common/MemberPicker.vue'
+import { toPlain } from '../utils/plain'
 
 // ── 类型（与服务端冻结协议对齐，content 存 HTML）──
 type ReportType = 'daily' | 'weekly'
@@ -161,22 +162,22 @@ async function doSave(): Promise<void> {
   okMsg.value = ''
   try {
     let ack
-    // 接收人：update 传了则全量替换；create 带上
-    const recipientsPayload = hasCompany.value ? recipients.value : []
+    // 接收人：update 传了则全量替换；create 带上。toPlain 剥掉 Vue Proxy 防 IPC 克隆错误。
+    const recipientsPayload = hasCompany.value ? toPlain(recipients.value) : []
     if (current.value && current.value.id > 0) {
-      ack = await window.pantry.serverReportUpdate({
+      ack = await window.pantry.serverReportUpdate(toPlain({
         companyId: companyId.value, id: current.value.id,
         title: title.value.trim(), content,
         templateId: templateId.value > 0 ? templateId.value : null,
         recipients: recipientsPayload
-      })
+      }))
     } else {
-      ack = await window.pantry.serverReportCreate({
+      ack = await window.pantry.serverReportCreate(toPlain({
         companyId: companyId.value, type: type.value, periodDate: periodDate(),
         title: title.value.trim(), content,
         templateId: templateId.value > 0 ? templateId.value : null,
         recipients: recipientsPayload
-      })
+      }))
     }
     if (!ack.ok) { console.error('[报表] 保存失败', ack.error); err.value = ack.error || '保存失败'; return }
     current.value = (ack.data as { report?: ReportItem })?.report ?? current.value
@@ -559,7 +560,7 @@ onUnmounted(() => { offReminder?.() })
 .rp-ok { padding: 8px 18px; color: #2fbb6b; font-size: 13px; }
 
 /* 上：编辑区 */
-.rp-edit { padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
+.rp-edit { padding: 12px 18px; border-bottom: 1px solid var(--dt-border-light); flex: 1; min-height: 240px; display: flex; flex-direction: column; overflow: hidden; }
 .rp-sec-head { font-size: 14px; font-weight: 700; margin: 2px 0 10px; display: flex; align-items: center; gap: 10px; }
 .rp-sec-head.admin { margin-top: 18px; }
 .rp-edit-row { display: flex; gap: 12px; }
