@@ -8,6 +8,7 @@
  */
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
+import { startLocalForward, stopLocalForward } from './local-proxy'
 
 const execAsync = promisify(exec)
 
@@ -64,20 +65,17 @@ export async function setSystemProxy(t: ProxyTarget): Promise<{ ok: boolean; err
     } catch (e) { return { ok: false, error: String(e) } }
   }
 
-  // Windows：备份 → 逐步设置 → 失败回滚
+  // Windows：备份 → 启动本地转发 → 系统代理指向本地端口 → 失败回滚
   const backup = await backupWinReg()
   console.log(`[system-proxy] 设置前备份：ProxyEnable=${backup.enable} ProxyServer=${backup.server}`)
   try {
+    // 启动本地无鉴权转发代理（认证在本地转发层完成，Chrome 兼容）
+    const localPort = await startLocalForward(host, port, t.username || '', t.password || '')
+    const localHost = '127.0.0.1'
     await execAsync(`reg add "${REG_BASE}" /v ProxyEnable /t REG_DWORD /d 1 /f`)
-    await execAsync(`reg add "${REG_BASE}" /v ProxyServer /t REG_SZ /d "${host}:${port}" /f`)
+    await execAsync(`reg add "${REG_BASE}" /v ProxyServer /t REG_SZ /d "${localHost}:${localPort}" /f`)
     await execAsync(`reg add "${REG_BASE}" /v AutoConfigURL /t REG_SZ /d "" /f`)
-    console.log(`[system-proxy] 注册表写入：ProxyEnable=1 ProxyServer=${host}:${port}`)
-
-    if (t.username && t.password) {
-      const target = `${host}:${port}`
-      await execAsync(`cmdkey /add:${target} /user:${t.username} /pass:${t.password}`)
-      console.log(`[system-proxy] Credential Manager 已写入 ${target} 用户=${t.username}`)
-    }
+    console.log(`[system-proxy] 注册表写入：ProxyEnable=1 ProxyServer=${localHost}:${localPort} → 远端 ${host}:${port}`)
 
     // 广播 WM_SETTINGCHANGE（PS 5.1 用 -MemberDefinition，避免引号地狱）
     await execAsync(
@@ -87,10 +85,8 @@ export async function setSystemProxy(t: ProxyTarget): Promise<{ ok: boolean; err
     return { ok: true }
   } catch (e) {
     console.error('[system-proxy] 设置失败，回滚中：', e)
+    stopLocalForward()
     await restoreWinReg(backup)
-    if (t.username && t.password) {
-      try { await execAsync(`cmdkey /delete:${host}:${port}`) } catch { /* ignore */ }
-    }
     return { ok: false, error: String(e) }
   }
 }
@@ -111,13 +107,11 @@ export async function clearSystemProxy(t?: { host?: string; port?: number }): Pr
     } catch (e) { return { ok: false, error: String(e) } }
   }
   try {
+    stopLocalForward()
     await execAsync(`reg add "${REG_BASE}" /v ProxyEnable /t REG_DWORD /d 0 /f`)
     // 清掉 ProxyServer 残留地址（用户曾发现 ProxyEnable=0 但 ProxyServer 残留导致重启后异常）
     await execAsync(`reg add "${REG_BASE}" /v ProxyServer /t REG_SZ /d "" /f`)
     await execAsync(`reg add "${REG_BASE}" /v AutoConfigURL /t REG_SZ /d "" /f`)
-    if (t?.host && t?.port) {
-      try { await execAsync(`cmdkey /delete:${t.host}:${t.port}`) } catch { /* ignore */ }
-    }
     console.log('[system-proxy] 已断开并清空 ProxyServer/AutoConfigURL 残留')
     return { ok: true }
   } catch (e) {

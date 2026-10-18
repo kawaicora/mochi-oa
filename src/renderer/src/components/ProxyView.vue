@@ -5,6 +5,7 @@ import MemberPicker from './common/MemberPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
+import { removePending } from '../utils/reminder'
 
 /**
  * 网络申请（代理）：员工申请 + admin 审批。
@@ -75,13 +76,13 @@ async function submit(): Promise<void> {
 async function approve(r: ProxyReq): Promise<void> {
   try {
     const ack = await window.pantry.serverProxyApprove(toPlain({ companyId: companyId.value, id: r.id }))
-    if (ack.ok) await load(); else console.error('[代理] 审批失败', ack.error)
+    if (ack.ok) { removePending('proxy:' + r.id); await load(); } else console.error('[代理] 审批失败', ack.error)
   } catch (e) { console.error('[代理] 审批异常', e) }
 }
 async function reject(r: ProxyReq): Promise<void> {
   try {
     const ack = await window.pantry.serverProxyReject(toPlain({ companyId: companyId.value, id: r.id }))
-    if (ack.ok) await load(); else console.error('[代理] 拒绝失败', ack.error)
+    if (ack.ok) { removePending('proxy:' + r.id); await load(); } else console.error('[代理] 拒绝失败', ack.error)
   } catch (e) { console.error('[代理] 拒绝异常', e) }
 }
 
