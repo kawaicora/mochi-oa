@@ -12,10 +12,10 @@ import AlarmView from './AlarmView.vue'
 import TaskView from './TaskView.vue'
 import TaskSide from './TaskSide.vue'
 import ReportView from './ReportView.vue'
-import AttendanceHome from './AttendanceHome.vue'
+import CheckinView from './CheckinView.vue'
+import ApplyHome from './ApplyHome.vue'
 import AssetView from './AssetView.vue'
 import JobView from './JobView.vue'
-import ProxyView from './ProxyView.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -25,7 +25,7 @@ import type { ServerSession } from '@shared/server-types'
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'attendance' | 'asset' | 'job' | 'proxy'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'checkin' | 'apply' | 'asset' | 'job'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
@@ -34,10 +34,10 @@ const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   alarm: { label: '闹钟', icon: 'fas fa-bell' },
   todo: { label: '任务', icon: 'fas fa-tasks' },
   report: { label: '报表', icon: 'fas fa-file-alt' },
-  attendance: { label: '考勤', icon: 'fas fa-user-clock' },
+  checkin: { label: '打卡', icon: 'fas fa-clock' },
+  apply: { label: '申请', icon: 'fas fa-edit' },
   asset: { label: '资产', icon: 'fas fa-box-open' },
-  job: { label: '职位', icon: 'fas fa-id-badge' },
-  proxy: { label: '网络申请', icon: 'fas fa-globe' }
+  job: { label: '职位', icon: 'fas fa-id-badge' }
 }
 // 报表需公司上下文：未加入公司时不显示导航按钮
 const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
@@ -267,7 +267,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="(k !== 'report' && k !== 'todo' && k !== 'attendance' && k !== 'asset' && k !== 'job' && k !== 'proxy') || hasCompany"
+            v-show="(k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'job') || hasCompany"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
@@ -305,7 +305,8 @@ function openJoin(): void {
         <template v-else-if="nav === 'alarm'"></template>
         <template v-else-if="nav === 'todo'"><TaskSide /></template>
         <template v-else-if="nav === 'report'"></template>
-        <template v-else-if="nav === 'attendance'"></template>
+        <template v-else-if="nav === 'checkin'"></template>
+        <template v-else-if="nav === 'apply'"></template>
         <template v-else-if="nav === 'asset'"></template>
       </div>
 
@@ -331,10 +332,10 @@ function openJoin(): void {
         <template v-else-if="nav === 'alarm'"><AlarmView /></template>
         <template v-else-if="nav === 'todo'"><TaskView /></template>
         <template v-else-if="nav === 'report'"><ReportView /></template>
-        <template v-else-if="nav === 'attendance'"><AttendanceHome /></template>
+        <template v-else-if="nav === 'checkin'"><CheckinView /></template>
+        <template v-else-if="nav === 'apply'"><ApplyHome /></template>
         <template v-else-if="nav === 'asset'"><AssetView /></template>
         <template v-else-if="nav === 'job'"><JobView /></template>
-        <template v-else-if="nav === 'proxy'"><ProxyView /></template>
       </div>
     </div>
 
