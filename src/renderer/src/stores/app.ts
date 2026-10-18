@@ -432,7 +432,7 @@ export const useAppStore = defineStore('app', () => {
       await switchCompany(first)
       await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
       ready.value = true
-      // 启动代理生命周期检查：本地有未过期账号→保留；过期→自动断开
+      // 启动代理生命周期检查：本地有未过期账号→保留；过期→自动断开；无记录但系统代理开着→清理残留
       try {
         const raw = localStorage.getItem('mochi:proxyActive')
         if (raw) {
@@ -442,6 +442,8 @@ export const useAppStore = defineStore('app', () => {
             await window.pantry.systemProxyClear(toPlain({ host: info.host, port: info.port }))
             localStorage.removeItem('mochi:proxyActive')
           }
+        } else {
+          // 无本地代理记录 → 主进程启动时已检测系统代理残留并清理（main 进程负责）
         }
       } catch (e) { console.error('[proxy] 启动检查异常', e) }
       // 启动 1h 循环提醒：定时复查仍 pending 的审批，重新弹业务通知

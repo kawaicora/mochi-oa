@@ -155,7 +155,7 @@ onMounted(async () => {
         <div class="pv-reason">{{ r.reason }}</div>
         <div class="pv-meta">{{ fmtHuman(r.createdAt) }}　时长 {{ r.durationDays }} 天</div>
         <div v-if="r.account" class="pv-acc">
-          <div>{{ r.account.host }}:{{ r.account.port }}　{{ r.account.username }} / {{ r.account.password }}</div>
+          <div>服务器地址：{{ r.account.host }}:{{ r.account.port }}　账号：{{ r.account.username }} / {{ r.account.password }}</div>
           <div class="pv-acc-btns">
             <button v-if="!proxyOn" @click="setProxy(r)">设置系统代理</button>
             <button v-else @click="clearProxy">断开代理</button>
