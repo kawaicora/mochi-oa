@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
+import { useServerStore } from '../stores/server'
 import { toPlain } from '../utils/plain'
 import { fmtTime, fmtDate } from '../utils/time'
 
@@ -29,7 +30,31 @@ interface CheckinDay {
 interface MonthAtt { date: string; type: string; status: string }
 
 const app = useAppStore()
+const server = useServerStore()
 const companyId = computed(() => app.activeCompanyId)
+const isAdmin = computed(() => app.isAdmin)
+
+// ── 月度考勤统计（管理员查看/下载当月已生成的 CSV）──
+interface StatFile { name: string; url: string }
+const statFiles = ref<StatFile[]>([])
+const statMonth = ref('')
+async function loadStatFiles(): Promise<void> {
+  if (!companyId.value || !app.isAdmin) return
+  try {
+    const ack = await window.pantry.serverAttendanceStatList({ companyId: companyId.value })
+    if (!ack.ok) { console.error('[打卡] 考勤统计列表失败', ack.error); return }
+    const data = (ack.data ?? {}) as { files?: StatFile[]; month?: string }
+    statFiles.value = data.files ?? []
+    statMonth.value = data.month ?? ''
+  } catch (e) { console.error('[打卡] 考勤统计列表异常', e) }
+}
+async function downloadStat(f: StatFile): Promise<void> {
+  try {
+    const abs = server.absFileUrl(f.url)
+    const r = await window.pantry.serverDownloadFile(abs)
+    console.log('[打卡] 下载考勤统计', f.name, r)
+  } catch (e) { console.error('[打卡] 下载考勤统计失败', e) }
+}
 
 // ── 当前显示的月份 ──
 const now = new Date()
@@ -231,7 +256,7 @@ watch(companyId, async () => {
   if (!companyId.value) return
   await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 })
-onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus()]) })
+onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()]) })
 </script>
 
 <template>
@@ -280,6 +305,19 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
         {{ punchLabel }}
       </button>
       <div class="ci-mac">本机 MAC：{{ mac || '（未取到）' }}</div>
+    </div>
+
+    <!-- 月度考勤统计（admin 查看/下载 CSV，财务人事私聊发送给员工） -->
+    <div v-if="app.isAdmin" class="ci-stat">
+      <div class="ci-stat-head"><i class="fas fa-chart-bar"></i> 月度考勤统计{{ statMonth ? `（${statMonth}）` : '' }}</div>
+      <div v-if="!statFiles.length" class="ci-stat-empty">当月尚未生成统计（每月最后一天 23:59 自动生成）</div>
+      <ul v-else class="ci-stat-list">
+        <li v-for="f in statFiles" :key="f.name" class="ci-stat-item">
+          <span class="ci-stat-name">{{ f.name }}</span>
+          <button class="dt-btn sm" @click="downloadStat(f)"><i class="fas fa-download"></i> 下载</button>
+        </li>
+      </ul>
+      <div class="ci-stat-tip">提示：下载后通过聊天私聊发送给对应员工（财务/人事）</div>
     </div>
 
     <!-- 打卡规则设置弹窗（admin） -->
@@ -368,6 +406,14 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
 .ci-ok { color: #2fbb6b; font-size: 13px; }
 .ci-warn { color: #d92b3a; font-size: 13px; }
 .ci-mac { font-size: 11px; color: var(--dt-text-4); }
+.ci-stat { width: 100%; max-width: 420px; margin-top: 14px; border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px 14px; background: #fff; font-size: 13px; }
+.ci-stat-head { font-weight: 600; margin-bottom: 8px; }
+.ci-stat-empty { color: var(--dt-text-3); font-size: 12px; }
+.ci-stat-list { list-style: none; margin: 0; padding: 0; }
+.ci-stat-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--dt-border-light); }
+.ci-stat-item:last-child { border-bottom: none; }
+.ci-stat-name { word-break: break-all; }
+.ci-stat-tip { margin-top: 6px; color: var(--dt-text-3); font-size: 11px; }
 .ci-rec { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--dt-border-light); font-size: 13px; }
 .ci-rec-summary { margin-top: 6px; font-size: 12px; color: var(--dt-text-3); }
 .ci-rec-empty { color: var(--dt-text-4); font-size: 13px; }

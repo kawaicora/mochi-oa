@@ -476,6 +476,17 @@ export class ServerClient extends EventEmitter {
       console.log('[companyNotif] attendance:request:notification', d)
       this.emit('companyNotification', d)
     })
+    // 月度考勤统计已生成 → 公司通知（仅 owner/admin 收到，提示财务/人事私聊发送）
+    socket.on('attendance:stat:generated', (d: unknown) => {
+      console.log('[companyNotif] attendance:stat:generated', d)
+      const p = (d ?? {}) as { companyId?: number; month?: string; count?: number }
+      this.emit('companyNotification', {
+        title: '月度考勤统计已生成',
+        body: `${p.month ?? ''} 考勤统计已生成（${p.count ?? 0} 人），请财务/人事下载 CSV 私聊发送给员工`,
+        companyId: p.companyId,
+        month: p.month
+      })
+    })
 
     // 多会话推送：新设备登录 → 本端弹窗提醒；本端会话被踢/过期 → 清 token 回登录页
     socket.on('auth:newDeviceLogin', (d: { sessionId: number; device: string; ip: string; at: string }) =>
@@ -1591,6 +1602,10 @@ export class ServerClient extends EventEmitter {
   async attendanceList(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:list', payload)
+  }
+  async attendanceStatList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:stat:list', payload)
   }
   async attendanceApprove(companyId: number, id: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }

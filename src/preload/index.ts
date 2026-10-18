@@ -326,6 +326,7 @@ const api = {
   // 考勤申请
   serverAttendanceCreate: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCreate, payload),
   serverAttendanceList: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceList, payload),
+  serverAttendanceStatList: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceStatList, payload),
   serverAttendanceApprove: (companyId: number, id: number): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceApprove, companyId, id),
   serverAttendanceReject: (companyId: number, id: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceReject, companyId, id, note ?? ''),
   // 审批流程配置

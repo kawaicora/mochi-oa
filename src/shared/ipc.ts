@@ -170,6 +170,7 @@ export const IpcChannels = {
   // 考勤申请（补卡/请假/调休，公司隔离）
   serverAttendanceCreate: 'server:attendance:create',
   serverAttendanceList: 'server:attendance:list',
+  serverAttendanceStatList: 'server:attendance:stat:list',
   serverAttendanceApprove: 'server:attendance:approve',
   serverAttendanceReject: 'server:attendance:reject',
   // 审批流程配置（按类型配审批人/抄送人）
