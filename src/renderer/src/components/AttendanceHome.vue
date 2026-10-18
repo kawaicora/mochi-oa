@@ -29,7 +29,7 @@ const sub = ref<'checkin' | 'apply'>('checkin')
 </template>
 
 <style scoped>
-.ah { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.ah { flex: 1; width: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .ah-tabs { display: flex; gap: 4px; padding: 8px 18px 0; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; }
 .ah-tabs button { border: none; background: transparent; padding: 8px 14px; font-size: 14px; cursor: pointer; color: var(--dt-text-3); border-bottom: 2px solid transparent; }
 .ah-tabs button.on { color: var(--dt-primary); font-weight: 700; border-bottom-color: var(--dt-primary); }

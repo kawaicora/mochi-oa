@@ -40,7 +40,7 @@ function pick(c: Cell): void { if (c.inMonth) emit('select', c.dateStr) }
       <div v-for="(c, i) in cells" :key="i" class="cm-cell" :class="{ empty: !c.inMonth, today: c.isToday }" @click="pick(c)">
         <span class="cm-day">{{ c.inMonth ? c.day : '' }}</span>
         <!-- 调用方插槽：自定义每格内容（状态点等），传入 dateStr -->
-        <slot v-if="c.inMonth" :date="c.dateStr" />
+      <slot v-if="c.inMonth" name="day" :date="c.dateStr" />
       </div>
     </div>
   </div>
