@@ -26,7 +26,7 @@ interface CheckinDay {
   records: CheckinItem[]
 }
 // 当月考勤申请（用于日历紫点判断）
-interface MonthAtt { date: string; type: string }
+interface MonthAtt { date: string; type: string; status: string }
 
 const app = useAppStore()
 const companyId = computed(() => app.activeCompanyId)
@@ -58,15 +58,25 @@ const monthAtts = ref<MonthAtt[]>([])
 const p0 = (n: number) => String(n).padStart(2, '0')
 const todayStr = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`
 
-// 某日期状态点 class：blue 正常(>=2) / yellow 异常(=1 或白名单拒) / purple 当天有申请
-type DotKind = 'none' | 'blue' | 'yellow' | 'purple'
-function dotOf(dateStr: string): DotKind {
+// 某日期状态点（可并排多个）：打卡点(蓝正常/黄异常) + 申请点(紫)。
+// 补卡规则：打卡异常在补卡通过前显示黄点；补卡通过后异常黄点被替换为紫点(黄消失)。
+// 请假/调休通过 → 另加紫点；正常打卡 + 有申请 → 蓝+紫并排。
+type DotKind = 'blue' | 'yellow' | 'purple'
+function dotsOf(dateStr: string): DotKind[] {
   const day = dayMap.value.get(dateStr)
-  const hasAtt = monthAtts.value.some((a) => a.date === dateStr)
-  if (day && day.count >= 2) return 'blue'
-  if ((day && day.count === 1) || rejectedDays.value.has(dateStr)) return 'yellow'
-  if (hasAtt) return 'purple'
-  return 'none'
+  const atts = monthAtts.value.filter((a) => a.date === dateStr)
+  const makeupApproved = atts.some((a) => a.type === 'make_up' && a.status === 'approved')
+  const appApproved = atts.some((a) => (a.type === 'leave' || a.type === 'comp_time') && a.status === 'approved')
+  const hasPending = atts.some((a) => a.status !== 'rejected') // 有申请(通过或待审)
+  const out: DotKind[] = []
+  // 打卡点：补卡通过则异常黄点被替换(不显示黄，改由下方紫点代表补卡)
+  if (!makeupApproved) {
+    if (day && day.count >= 2) out.push('blue')
+    else if ((day && day.count === 1) || rejectedDays.value.has(dateStr)) out.push('yellow')
+  }
+  // 申请点：补卡通过 / 请假调休通过 / 有待审申请 → 紫
+  if (makeupApproved || appApproved || hasPending) out.push('purple')
+  return out
 }
 
 // ── 当天详情弹窗 ──
@@ -195,11 +205,11 @@ async function loadMonthAtts(): Promise<void> {
     const dateEnd = `${y}-${p(m + 1)}-${new Date(y, m + 1, 0).getDate()}`
     const ack = await window.pantry.serverAttendanceList({ companyId: companyId.value, dateStart, dateEnd, page: 1, pageSize: 100 })
     if (!ack.ok) { console.error('[打卡] 当月申请加载失败', ack.error); return }
-    const reqs = (ack.data as { requests?: Array<{ startTime?: string | null; createdAt: string; type: string }> })?.requests ?? []
+    const reqs = (ack.data as { requests?: Array<{ startTime?: string | null; createdAt: string; type: string; status: string }> })?.requests ?? []
     const out: MonthAtt[] = []
     for (const r of reqs) {
       const ds = r.startTime ? fmtDate(r.startTime) : fmtDate(r.createdAt)
-      out.push({ date: ds, type: r.type })
+      out.push({ date: ds, type: r.type, status: r.status })
     }
     monthAtts.value = out
   } catch (e) { console.error('[打卡] 当月申请加载异常', e) }
@@ -234,7 +244,7 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
     <!-- 月历（公共组件，状态点用插槽填充）-->
     <CalendarMonth :year="cur.getFullYear()" :month="cur.getMonth() + 1" :today="todayStr" @select="(ds) => (selected = ds)">
       <template #day="{ date }">
-        <i v-if="dotOf(date) !== 'none'" class="dot" :class="dotOf(date)"></i>
+        <span class="ci-dots"><i v-for="(k, i) in dotsOf(date)" :key="i" class="dot" :class="k"></i></span>
       </template>
     </CalendarMonth>
 
@@ -340,6 +350,7 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
 .ci-legend { display: flex; gap: 14px; justify-content: center; margin: 8px 0; font-size: 12px; color: var(--dt-text-3); }
 .ci-lg { display: inline-flex; align-items: center; gap: 4px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ci-dots { display: inline-flex; gap: 3px; }
 .dot.blue { background: #3b82f6; }
 .dot.yellow { background: #f59e0b; }
 .dot.purple { background: #8b5cf6; }
