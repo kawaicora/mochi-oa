@@ -17,6 +17,7 @@ interface AssetItem {
   price: number
   assetType: AssetType
   status: AssetStatus
+  qrCode?: string // 服务端返回 MOA-ASSET:<公司ID>:<资产ID>；缺省时按同一规则本地拼
   createdAt: string
   updatedAt: string
 }
@@ -35,17 +36,17 @@ interface FlowItem {
   note: string | null
   createdAt: string
 }
-// 流转枚举（与服务端白名单一致）：
-// 出库(out)=售卖/赠与/借出/外带/领用/调拨/丢失/报废/退还/其他
+// 流转枚举（与服务端白名单一致，key 不得擅自改名，否则被服务端白名单拒绝）：
 // 入库(in)=购买/租聘/借用/调拨/归还/自购/受赠/其他
+// 出库(out)=售卖/赠与/借出/外带/领用/调拨/丢失/报废/退还/其他
 const IN_FLOWS = [
   { v: 'in_purchase', l: '购买入库' },
   { v: 'in_rent', l: '租聘入库' },
   { v: 'in_borrow', l: '借用入库' },
   { v: 'in_transfer', l: '调拨入库' },
   { v: 'in_return', l: '归还入库' },
-  { v: 'in_self', l: '自购入库' },
-  { v: 'in_gift', l: '受赠入库' },
+  { v: 'in_self_purchase', l: '自购入库' },
+  { v: 'in_donation', l: '受赠入库' },
   { v: 'in_other', l: '其他入库' }
 ]
 const OUT_FLOWS = [
@@ -53,11 +54,11 @@ const OUT_FLOWS = [
   { v: 'out_gift', l: '赠与' },
   { v: 'out_lend', l: '借出' },
   { v: 'out_carry', l: '外带' },
-  { v: 'out_collect', l: '领用' },
+  { v: 'out_usage', l: '领用' },
   { v: 'out_transfer', l: '调拨' },
   { v: 'out_lost', l: '丢失' },
   { v: 'out_scrap', l: '报废' },
-  { v: 'out_return', l: '退还' },
+  { v: 'out_refund', l: '退还' },
   { v: 'out_other', l: '其他出库' }
 ]
 const FLOW_LABEL: Record<string, string> = {}
@@ -73,6 +74,28 @@ const meId = computed(() => server.state.userId ?? 0)
 function qrPayload(cid: number, aid: number): string {
   return `MOA-ASSET:${cid}:${aid}`
 }
+// 优先用服务端 asset:get / asset:create 返回的 qrCode；缺省按同一规则本地拼
+function assetQr(a: AssetItem): string {
+  return a.qrCode || qrPayload(a.companyId, a.id)
+}
+// 复制二维码文本（clipboard 不可用时退回选中文本兜底）
+async function copyQr(a: AssetItem): Promise<void> {
+  const text = assetQr(a)
+  try {
+    if (navigator.clipboard) { await navigator.clipboard.writeText(text) }
+    else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copiedQr.value = text
+    window.setTimeout(() => { if (copiedQr.value === text) copiedQr.value = '' }, 2000)
+  } catch (e) { console.error('[资产] 复制二维码失败', e) }
+}
+const copiedQr = ref('')
 
 const TYPE_LABEL: Record<AssetType, string> = { purchase: '购买', rent: '租赁', borrow: '借用' }
 
@@ -129,6 +152,14 @@ async function openDetail(a: AssetItem): Promise<void> {
   detail.value = a
   flowPage.value = 1
   await loadFlows()
+}
+/** 列表行直接打开"出入库"流转弹窗（admin），无需先进详情 */
+async function openFlow(a: AssetItem): Promise<void> {
+  detail.value = a
+  flowPage.value = 1
+  await loadFlows()
+  showFlow.value = true
+  err.value = ''
 }
 async function loadFlows(): Promise<void> {
   if (!detail.value) return
@@ -313,6 +344,7 @@ function fmt(s: string): string {
             <td>{{ TYPE_LABEL[a.assetType] }}</td>
             <td><span class="av-badge" :class="a.status">{{ a.status === 'in_stock' ? '在库' : '在外' }}</span></td>
             <td class="av-ops">
+              <button v-if="isAdmin" class="dt-btn sm" @click.stop="openFlow(a)"><i class="fas fa-exchange-alt"></i> 出入库</button>
               <button v-if="isAdmin" class="av-op danger" @click.stop="remove(a)"><i class="fas fa-trash"></i></button>
             </td>
           </tr>
@@ -348,8 +380,9 @@ function fmt(s: string): string {
             <div class="av-created">
               <div>编号：<b>{{ createdAsset.code }}</b></div>
               <div>名称：{{ createdAsset.name }}</div>
-              <QRCode :text="qrPayload(createdAsset.companyId, createdAsset.id)" :size="180" />
-              <div class="av-qr-url">{{ qrPayload(createdAsset.companyId, createdAsset.id) }}</div>
+              <QRCode :text="assetQr(createdAsset)" :size="180" />
+              <div class="av-qr-url">{{ assetQr(createdAsset) }}</div>
+              <button class="dt-btn sm" @click="copyQr(createdAsset)"><i class="fas fa-copy"></i> {{ copiedQr === assetQr(createdAsset) ? '已复制' : '复制二维码文本' }}</button>
             </div>
           </template>
         </div>
@@ -368,7 +401,11 @@ function fmt(s: string): string {
         <div class="modal-body">
           <div class="av-dinfo">
             <div>价格：¥{{ detail.price }}　类型：{{ TYPE_LABEL[detail.assetType] }}　状态：{{ detail.status === 'in_stock' ? '在库' : '在外' }}</div>
-            <QRCode :text="qrPayload(detail.companyId, detail.id)" :size="120" />
+            <div class="av-qr-box">
+              <QRCode :text="assetQr(detail)" :size="120" />
+              <div class="av-qr-url">{{ assetQr(detail) }}</div>
+              <button class="dt-btn sm" @click="copyQr(detail)"><i class="fas fa-copy"></i> {{ copiedQr === assetQr(detail) ? '已复制' : '复制二维码文本' }}</button>
+            </div>
           </div>
           <div class="av-flow-head">
             <span>流转记录</span>
@@ -465,7 +502,8 @@ function fmt(s: string): string {
 .av-qr-url { font-size: 11px; color: var(--dt-text-4); word-break: break-all; font-family: monospace; }
 .av-detail { width: 640px; }
 .av-code-head { font-size: 12px; color: var(--dt-text-4); font-weight: 400; margin-left: 8px; }
-.av-dinfo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.av-dinfo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.av-qr-box { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }
 .av-flow-head { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 6px; font-weight: 700; }
 .av-flows { max-height: 220px; overflow: auto; }
 .av-flow { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--dt-border-light); font-size: 13px; flex-wrap: wrap; }

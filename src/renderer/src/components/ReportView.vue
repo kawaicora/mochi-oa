@@ -443,35 +443,8 @@ onUnmounted(() => { offReminder?.() })
 
     <!-- 下：记录区（按 4 个标签页独立展示，不挤在一起） -->
     <div class="rp-records">
-      <!-- 日报 / 周报 tab：该类型我的提交记录 -->
-      <template v-if="mainTab === 'daily' || mainTab === 'weekly'">
-        <div class="rp-seg-head">我的{{ type === 'daily' ? '日报' : '周报' }}提交</div>
-        <div class="rp-table-wrap">
-          <div v-if="!history.length" class="rp-empty">暂无提交记录</div>
-          <table v-else class="rp-table">
-            <thead><tr><th>周期</th><th>标题</th><th>状态</th><th>提交时间</th></tr></thead>
-            <tbody>
-              <tr v-for="r in history" :key="r.id" @click="detail = r" class="rp-row">
-                <td>{{ r.periodDate }}</td>
-                <td class="rp-cell-title">{{ r.title || '（无标题）' }}</td>
-                <td>
-                  <span v-if="r.submitted" class="rp-badge ok">已提交</span>
-                  <span v-else class="rp-badge warn">草稿</span>
-                </td>
-                <td>{{ fmtDateTime(r.submittedAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="rp-pager">
-          <button class="dt-btn" :disabled="histPage <= 1" @click="histPage--; loadHistory()">上一页</button>
-          <span>{{ histPage }} / {{ histPages }}</span>
-          <button class="dt-btn" :disabled="histPage >= histPages" @click="histPage++; loadHistory()">下一页</button>
-        </div>
-      </template>
-
       <!-- 提交历史 tab：我的提交（全部 / 按类型筛选） -->
-      <template v-else-if="mainTab === 'history'">
+      <template v-if="mainTab === 'history'">
         <div class="rp-seg">
           <button :class="{ on: histType === 'all' }" @click="histType = 'all'; histPage = 1; loadHistory('all')">全部</button>
           <button :class="{ on: histType === 'daily' }" @click="histType = 'daily'; histPage = 1; loadHistory('daily')">日报</button>
@@ -503,7 +476,7 @@ onUnmounted(() => { offReminder?.() })
       </template>
 
       <!-- 我收到的 tab -->
-      <template v-else>
+      <template v-else-if="mainTab === 'inbox'">
         <div class="rp-seg-head">我收到的</div>
         <div class="rp-table-wrap">
           <div v-if="!inbox.length" class="rp-empty">还没有收到别人发给你的报表</div>

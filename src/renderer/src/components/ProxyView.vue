@@ -8,12 +8,18 @@ import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
 import { removePending, addPending } from '../utils/reminder'
 
 // 显式"停止提醒"：调服务端 proxy:request:notification:stop + 本地 removePending
+// 本地记录已停止的条（Set 重新赋值以触发响应式）；服务端若返回 notifyStopped 同样展示"已停止"
+const stoppedIds = ref<Set<number>>(new Set())
+function isStopped(r: ProxyReq): boolean {
+  return !!r.notifyStopped || stoppedIds.value.has(r.id)
+}
 async function snoozeRemind(r: ProxyReq): Promise<void> {
   err.value = ''; okMsg.value = ''
   try {
     const ack = await window.pantry.serverProxyNotifyStop(toPlain({ companyId: companyId.value, id: r.id }))
     if (!ack.ok) { console.error('[代理] 停止提醒失败', ack.error); err.value = '停止提醒失败：' + (ack.error || ''); return }
     removePending('proxy:' + r.id)
+    stoppedIds.value = new Set(stoppedIds.value).add(r.id)
     okMsg.value = '已停止对该条的循环提醒'
   } catch (e) { console.error('[代理] 停止提醒异常', e); err.value = '停止提醒异常' }
 }
@@ -36,6 +42,7 @@ interface ProxyReq {
   nick?: string
   username?: string
   account?: { host: string; port: number; username: string; password: string } | null
+  notifyStopped?: boolean // 服务端：该条循环提醒已被停止（审批处理自动停止或用户主动停止）
 }
 const app = useAppStore()
 const companyId = computed(() => app.activeCompanyId)
@@ -168,7 +175,10 @@ onMounted(async () => {
       <div v-for="r in list" :key="r.id" class="pv-item" :class="r.status" :data-req-id="r.id">
         <div class="pv-item-head">
           <span>#{{ r.id }} {{ r.nick || r.username }}</span>
-          <span class="pv-status">{{ statusLabel[r.status] }}</span>
+          <span>
+            <span v-if="isStopped(r)" class="pv-stopped-badge"><i class="fas fa-bell-slash"></i> 已停止提醒</span>
+            <span class="pv-status">{{ statusLabel[r.status] }}</span>
+          </span>
         </div>
         <div class="pv-reason">{{ r.reason }}</div>
         <div class="pv-meta">{{ fmtHuman(r.createdAt) }}　时长 {{ r.durationDays }} 天</div>
@@ -182,7 +192,7 @@ onMounted(async () => {
         <div v-if="myTab === 'todo' && r.status === 'pending'" class="pv-acts">
           <button class="pv-approve" @click="approve(r)">通过</button>
           <button class="pv-reject" @click="reject(r)">拒绝</button>
-          <button class="pv-mute" title="不再循环提醒本条" @click="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
+          <button v-if="!isStopped(r)" class="pv-mute" title="不再循环提醒本条" @click="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
         </div>
       </div>
       <div v-if="!list.length" class="pv-empty">暂无申请</div>
@@ -211,6 +221,7 @@ onMounted(async () => {
 .pv-item.rejected { border-color: #d92b3a; }
 .pv-item-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
 .pv-status { font-size: 12px; color: var(--dt-text-3); }
+.pv-stopped-badge { margin-right: 6px; padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #f3f4f6; color: #9ca3af; }
 .pv-reason { font-size: 13px; margin: 6px 0; }
 .pv-meta { font-size: 12px; color: var(--dt-text-3); }
 .pv-acc { margin-top: 8px; padding: 8px; background: #f6f8fb; border-radius: 4px; font-size: 13px; }

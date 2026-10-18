@@ -33,6 +33,7 @@ interface AttendanceRequest {
   updatedAt: string
   nick?: string
   username?: string
+  notifyStopped?: boolean // 服务端：该条循环提醒已被停止（审批处理自动停止或用户主动停止）
 }
 // 草稿结构（按类型存 localStorage；含审批人/抄送人选择）
 interface Draft {
@@ -255,12 +256,18 @@ async function openReceived(r: AttendanceRequest): Promise<void> {
   } catch (e) { console.error('[考勤] 抄送标记查看失败', e) }
 }
 // 显式"停止提醒"：调服务端 attendance:request:notification:stop + 本地 removePending
+// 本地记录已停止的条（Set 重新赋值以触发响应式）；服务端若返回 notifyStopped 同样展示"已停止"
+const stoppedIds = ref<Set<number>>(new Set())
+function isStopped(r: AttendanceRequest): boolean {
+  return !!r.notifyStopped || stoppedIds.value.has(r.id)
+}
 async function snoozeRemind(r: AttendanceRequest): Promise<void> {
   err.value = ''
   try {
     const ack = await window.pantry.serverAttendanceNotifyStop(toPlain({ companyId: companyId.value, id: r.id }))
     if (!ack.ok) { console.error('[考勤] 停止提醒失败', ack.error); err.value = '停止提醒失败：' + (ack.error || ''); return }
     removePending('att:' + r.id)
+    stoppedIds.value = new Set(stoppedIds.value).add(r.id)
     okMsg.value = '已停止对该条的循环提醒'
   } catch (e) { console.error('[考勤] 停止提醒异常', e); err.value = '停止提醒异常' }
 }
@@ -395,11 +402,12 @@ onMounted(async () => {
       <div v-if="!receivedPending.length" class="at-empty">无待审批</div>
       <div v-for="r in receivedPending" :key="'p'+r.id" class="at-rrow" @click="openReceived(r)">
         <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
+        <span v-if="isStopped(r)" class="at-stopped-badge"><i class="fas fa-bell-slash"></i> 已停止提醒</span>
         <span>{{ r.nick || r.username }}：{{ r.startTime ? fmt(r.startTime) : fmt(r.createdAt) }}</span>
         <span class="at-ops">
           <button class="at-op ok" @click.stop="approve(r)">通过</button>
           <button class="at-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
-          <button class="at-op mute" title="不再循环提醒本条" @click.stop="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
+          <button v-if="!isStopped(r)" class="at-op mute" title="不再循环提醒本条" @click.stop="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
         </span>
       </div>
       <div class="at-sec-t">已处理（{{ receivedDone.length }}）</div>
@@ -488,6 +496,7 @@ onMounted(async () => {
 .at-op.ok { color: #2fbb6b; }
 .at-op.danger { color: #d92b3a; }
 .at-op.mute { color: #8a94a6; }
+.at-stopped-badge { padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; background: #f3f4f6; color: #9ca3af; }
 .at-pager { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; font-size: 12px; color: var(--dt-text-3); }
 .at-flow-cfg { border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px; margin-top: 6px; }
 .at-flow-row { display: flex; align-items: flex-end; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--dt-border-light); }
