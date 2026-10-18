@@ -5,7 +5,12 @@ import MemberPicker from './common/MemberPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
-import { removePending } from '../utils/reminder'
+import { removePending, addPending } from '../utils/reminder'
+
+// 显式"停止提醒"：从循环提醒集合移除该条（客户端侧；服务端无独立 stop 端点）
+function snoozeRemind(r: ProxyReq): void {
+  removePending('proxy:' + r.id)
+}
 
 /**
  * 网络申请（代理）：员工申请 + admin 审批。
@@ -48,7 +53,14 @@ async function load(): Promise<void> {
   if (!companyId.value) return
   try {
     const ack = await window.pantry.serverProxyList(toPlain({ companyId: companyId.value, mine: myTab.value === 'mine' }))
-    if (ack.ok) list.value = (ack.data as { requests?: ProxyReq[] })?.requests ?? []
+    if (ack.ok) {
+      list.value = (ack.data as { requests?: ProxyReq[] })?.requests ?? []
+      // 待审批项注册进 1h 循环提醒集合
+      for (const r of list.value) {
+        if (r.status === 'pending') addPending('proxy:' + r.id)
+        else removePending('proxy:' + r.id)
+      }
+    }
     else console.error('[代理] 列表加载失败', ack.error)
   } catch (e) { console.error('[代理] 列表加载异常', e) }
 }
@@ -164,6 +176,7 @@ onMounted(async () => {
         <div v-if="myTab === 'todo' && r.status === 'pending'" class="pv-acts">
           <button class="pv-approve" @click="approve(r)">通过</button>
           <button class="pv-reject" @click="reject(r)">拒绝</button>
+          <button class="pv-mute" title="不再循环提醒本条" @click="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
         </div>
       </div>
       <div v-if="!list.length" class="pv-empty">暂无申请</div>
@@ -199,6 +212,7 @@ onMounted(async () => {
 .pv-acc-btns button, .pv-acts button { margin-right: 8px; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
 .pv-approve { background: #2fbb6b; color: #fff; border: none; }
 .pv-reject { background: #d92b3a; color: #fff; border: none; }
+.pv-mute { background: #fff; color: #8a94a6; border: 1px solid #d1d5db; }
 .pv-acts { margin-top: 8px; }
 .pv-empty { color: var(--dt-text-4); text-align: center; padding: 20px; font-size: 13px; }
 </style>

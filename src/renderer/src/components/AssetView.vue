@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useAppStore } from '../stores/app'
-import { fmtLocal } from '../utils/time'
+import { fmtHuman, fmtLocal } from '../utils/time'
 import { useServerStore } from '../stores/server'
 import QRCode from './common/QRCode.vue'
+import MemberPicker from './common/MemberPicker.vue'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AssetType = 'purchase' | 'rent' | 'borrow'
@@ -30,24 +31,34 @@ interface FlowItem {
   operatorId: number
   operatorNick: string
   relatedTo: string | null
+  relatedToUserId?: number | null
   note: string | null
   createdAt: string
 }
-// 流转枚举：进入(in) / 离开(out)。服务端按此方向映射，扩展只需在对应分组加一项。
+// 流转枚举（与服务端白名单一致）：
+// 出库(out)=售卖/赠与/借出/外带/领用/调拨/丢失/报废/退还/其他
+// 入库(in)=购买/租聘/借用/调拨/归还/自购/受赠/其他
 const IN_FLOWS = [
   { v: 'in_purchase', l: '购买入库' },
-  { v: 'in_rent', l: '租赁入库' },
-  { v: 'in_borrow', l: '借入入库' },
-  { v: 'in_return', l: '退回入库' },
-  { v: 'in_reclaim', l: '回收入库' }
+  { v: 'in_rent', l: '租聘入库' },
+  { v: 'in_borrow', l: '借用入库' },
+  { v: 'in_transfer', l: '调拨入库' },
+  { v: 'in_return', l: '归还入库' },
+  { v: 'in_self', l: '自购入库' },
+  { v: 'in_gift', l: '受赠入库' },
+  { v: 'in_other', l: '其他入库' }
 ]
 const OUT_FLOWS = [
   { v: 'out_sell', l: '售卖' },
   { v: 'out_gift', l: '赠与' },
   { v: 'out_lend', l: '借出' },
   { v: 'out_carry', l: '外带' },
+  { v: 'out_collect', l: '领用' },
+  { v: 'out_transfer', l: '调拨' },
+  { v: 'out_lost', l: '丢失' },
   { v: 'out_scrap', l: '报废' },
-  { v: 'out_lost', l: '丢失' }
+  { v: 'out_return', l: '退还' },
+  { v: 'out_other', l: '其他出库' }
 ]
 const FLOW_LABEL: Record<string, string> = {}
 ;[...IN_FLOWS, ...OUT_FLOWS].forEach((f) => (FLOW_LABEL[f.v] = f.l))
@@ -56,12 +67,11 @@ const app = useAppStore()
 const server = useServerStore()
 const companyId = computed(() => app.activeCompanyId)
 const isAdmin = computed(() => app.isAdmin)
+const meId = computed(() => server.state.userId ?? 0)
 
-// 拼二维码绝对 URL：http(s)://host:port/asset/qr/<code>
-function qrUrl(code: string): string {
-  const base = (server.settings.serverUrl || '')
-    .replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '')
-  return `${base}/asset/qr/${code}`
+// 拼二维码载荷：纯文本 MOA-ASSET:<companyId>:<assetId>（与服务端一致）
+function qrPayload(cid: number, aid: number): string {
+  return `MOA-ASSET:${cid}:${aid}`
 }
 
 const TYPE_LABEL: Record<AssetType, string> = { purchase: '购买', rent: '租赁', borrow: '借用' }
@@ -135,9 +145,13 @@ async function loadFlows(): Promise<void> {
 // ── 新增流转弹窗 ──
 const showFlow = ref(false)
 const flowType = ref('in_purchase')
-const relatedTo = ref('')
+// 相关人：成员选择（多选兜底，单选也行；最多 3 人）
+const relatedUserIds = ref<number[]>([])
 const flowNote = ref('')
 const flowSaving = ref(false)
+function relatedName(ids: number[]): string {
+  return ids.map((id) => app.members.find((m) => m.userId === id)?.nick || app.members.find((m) => m.userId === id)?.username || `#${id}`).join('、')
+}
 async function createFlow(): Promise<void> {
   if (!detail.value) return
   flowSaving.value = true
@@ -145,13 +159,15 @@ async function createFlow(): Promise<void> {
   try {
     const ack = await window.pantry.serverAssetFlowCreate({
       companyId: companyId.value, assetId: detail.value.id, flowType: flowType.value,
-      relatedTo: relatedTo.value || undefined, note: flowNote.value || undefined
+      relatedToUserId: relatedUserIds.value[0] ?? null,
+      relatedTo: relatedName(relatedUserIds.value) || undefined,
+      note: flowNote.value || undefined
     })
     if (!ack.ok) { console.error('[资产] 流转失败', ack.error); err.value = ack.error || '流转失败'; return }
     const a = (ack.data as { asset?: AssetItem })?.asset
     if (a) detail.value = a
     showFlow.value = false
-    relatedTo.value = ''; flowNote.value = ''
+    relatedUserIds.value = []; flowNote.value = ''
     flowPage.value = 1
     await Promise.all([loadFlows(), loadList()])
   } catch (e) { console.error('[资产] 流转异常', e); err.value = '流转异常' }
@@ -169,6 +185,100 @@ async function remove(a: AssetItem): Promise<void> {
   } catch (e) { console.error('[资产] 删除异常', e) }
 }
 
+// ── 扫码：摄像头(jsQR) + 手动输入兜底 ──
+const showScan = ref(false)
+const manualPayload = ref('')
+const scanErr = ref('')
+let scanStream: MediaStream | null = null
+let scanTimer: number | null = null
+let scanCanvas: HTMLCanvasElement | null = null
+const scanVideo = ref<HTMLVideoElement | null>(null)
+
+async function startCamera(): Promise<void> {
+  scanErr.value = ''
+  try {
+    // 动态 import jsqr（体积不小，按需加载）
+    const jsQRMod: any = await import('jsqr')
+    const JsQR = jsQRMod.default || jsQRMod
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    if (scanVideo.value) {
+      scanVideo.value.srcObject = scanStream
+      await scanVideo.value.play()
+    }
+    scanCanvas = document.createElement('canvas')
+    const tick = (): void => {
+      if (!scanVideo.value || !scanCanvas) return
+      const v = scanVideo.value
+      if (v.readyState === v.HAVE_ENOUGH_DATA) {
+        scanCanvas.width = v.videoWidth
+        scanCanvas.height = v.videoHeight
+        const ctx = scanCanvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(v, 0, 0, scanCanvas.width, scanCanvas.height)
+          const img = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height)
+          const code = JsQR(img.data, img.width, img.height)
+          if (code && code.data) {
+            handlePayload(code.data)
+            return
+          }
+        }
+      }
+      scanTimer = window.setTimeout(tick, 300)
+    }
+    tick()
+  } catch (e) {
+    console.error('[扫码] 摄像头启动失败，可手动输入', e)
+    scanErr.value = '摄像头不可用，请手动输入载荷码'
+  }
+}
+function stopCamera(): void {
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = null }
+  if (scanStream) { try { scanStream.getTracks().forEach((t) => t.stop()) } catch (e) { console.error('[扫码] 停摄像头异常', e) } scanStream = null }
+  if (scanVideo.value) scanVideo.value.srcObject = null
+}
+function openScan(): void {
+  showScan.value = true
+  manualPayload.value = ''
+  scanErr.value = ''
+  void startCamera()
+}
+function closeScan(): void {
+  stopCamera()
+  showScan.value = false
+}
+onBeforeUnmount(() => stopCamera())
+
+/** 解析 MOA-ASSET:<cid>:<aid> → asset:get → 详情（公司隔离校验） */
+async function handlePayload(raw: string): Promise<void> {
+  const text = (raw || '').trim()
+  const m = text.match(/^MOA-ASSET:(\d+):(\d+)$/)
+  if (!m) {
+    scanErr.value = '载荷格式不正确，应为 MOA-ASSET:<公司ID>:<资产ID>'
+    return
+  }
+  const cid = Number(m[1]); const aid = Number(m[2])
+  if (cid !== companyId.value) {
+    scanErr.value = `该资产属于公司 #${cid}，与当前公司 #${companyId.value} 不匹配`
+    return
+  }
+  try {
+    const ack = await window.pantry.serverAssetGet({ companyId: cid, id: aid })
+    if (!ack.ok) { scanErr.value = '查询失败：' + (ack.error || '未知'); return }
+    const a = (ack.data as { asset?: AssetItem })?.asset
+    if (!a) { scanErr.value = '未找到该资产'; return }
+    stopCamera()
+    showScan.value = false
+    manualPayload.value = ''
+    await openDetail(a)
+  } catch (e) {
+    console.error('[扫码] 查询资产异常', e)
+    scanErr.value = '查询异常'
+  }
+}
+function submitManual(): void {
+  void handlePayload(manualPayload.value)
+}
+
 const err = ref('')
 watch([keyword], () => { page.value = 1; loadList() })
 watch(companyId, () => { page.value = 1; loadList() })
@@ -183,9 +293,10 @@ function fmt(s: string): string {
 <template>
   <div class="av">
     <div v-if="err" class="av-err">{{ err }}</div>
-    <!-- 列表头：搜索 + 新增 -->
+    <!-- 列表头：搜索 + 扫码 + 新增 -->
     <div class="av-head">
       <input v-model="keyword" class="srv-input" placeholder="搜索名称/编号…" />
+      <button class="dt-btn" @click="openScan"><i class="fas fa-qrcode"></i> 扫码看详情</button>
       <button v-if="isAdmin" class="dt-btn dt-btn-primary" @click="showCreate = true; err = ''"><i class="fas fa-plus"></i> 新增资产</button>
     </div>
 
@@ -232,13 +343,13 @@ function fmt(s: string): string {
               <option value="borrow">借用</option>
             </select>
           </template>
-          <!-- 创建成功：展示自动编号 + 二维码 -->
+          <!-- 创建成功：展示自动编号 + 二维码（载荷 MOA-ASSET:<cid>:<aid>） -->
           <template v-else>
             <div class="av-created">
               <div>编号：<b>{{ createdAsset.code }}</b></div>
               <div>名称：{{ createdAsset.name }}</div>
-              <QRCode :text="qrUrl(createdAsset.code)" :size="180" />
-              <div class="av-qr-url">{{ qrUrl(createdAsset.code) }}</div>
+              <QRCode :text="qrPayload(createdAsset.companyId, createdAsset.id)" :size="180" />
+              <div class="av-qr-url">{{ qrPayload(createdAsset.companyId, createdAsset.id) }}</div>
             </div>
           </template>
         </div>
@@ -257,20 +368,20 @@ function fmt(s: string): string {
         <div class="modal-body">
           <div class="av-dinfo">
             <div>价格：¥{{ detail.price }}　类型：{{ TYPE_LABEL[detail.assetType] }}　状态：{{ detail.status === 'in_stock' ? '在库' : '在外' }}</div>
-            <QRCode :text="qrUrl(detail.code)" :size="120" />
+            <QRCode :text="qrPayload(detail.companyId, detail.id)" :size="120" />
           </div>
           <div class="av-flow-head">
             <span>流转记录</span>
-            <button v-if="isAdmin" class="dt-btn sm" @click="showFlow = true; err = ''"><i class="fas fa-plus"></i> 新增流转</button>
+            <button v-if="isAdmin" class="dt-btn sm" @click="showFlow = true; err = ''"><i class="fas fa-plus"></i> 发起流转</button>
           </div>
           <div v-if="!flows.length" class="av-empty">暂无流转记录</div>
           <div v-else class="av-flows">
             <div v-for="f in flows" :key="f.id" class="av-flow">
               <span class="av-flow-type" :class="f.direction">{{ FLOW_LABEL[f.flowType] || f.flowType }}</span>
-              <span class="av-flow-op">{{ f.operatorNick }}</span>
-              <span v-if="f.relatedTo" class="av-flow-rel">→ {{ f.relatedTo }}</span>
-              <span v-if="f.note" class="av-flow-note">{{ f.note }}</span>
-              <span class="av-flow-time">{{ fmt(f.createdAt) }}</span>
+              <span class="av-flow-op">经办人：{{ f.operatorNick || '—' }}</span>
+              <span v-if="f.relatedTo" class="av-flow-rel">相关人：{{ f.relatedTo }}</span>
+              <span v-if="f.note" class="av-flow-note">备注：{{ f.note }}</span>
+              <span class="av-flow-time">{{ fmtHuman(f.createdAt) }}</span>
             </div>
           </div>
           <div class="av-pager">
@@ -283,28 +394,47 @@ function fmt(s: string): string {
       </div>
     </div>
 
-    <!-- 新增流转弹窗 -->
+    <!-- 发起流转弹窗 -->
     <div v-if="showFlow" class="modal-mask" @click.self="showFlow = false">
       <div class="modal">
-        <div class="modal-head">新增流转</div>
+        <div class="modal-head">发起流转</div>
         <div class="modal-body">
-          <label class="av-lab">流转类型</label>
+          <label class="av-lab">流转类型 <i class="req">*</i></label>
           <select v-model="flowType" class="srv-select">
-            <optgroup label="资产进入">
+            <optgroup label="资产入库">
               <option v-for="f in IN_FLOWS" :key="f.v" :value="f.v">{{ f.l }}</option>
             </optgroup>
-            <optgroup label="资产离开">
+            <optgroup label="资产出库">
               <option v-for="f in OUT_FLOWS" :key="f.v" :value="f.v">{{ f.l }}</option>
             </optgroup>
           </select>
+          <label class="av-lab">经办人</label>
+          <div class="av-form-readonly">当前登录人（系统自动记录）</div>
           <label class="av-lab">相关人</label>
-          <input v-model="relatedTo" class="srv-input" placeholder="如：借出人/客户名" />
+          <MemberPicker v-model="relatedUserIds" :max="3" placeholder="选择相关成员（客户/借出对象等）" />
           <label class="av-lab">备注</label>
           <input v-model="flowNote" class="srv-input" />
         </div>
         <div class="modal-foot">
           <button class="dt-btn" @click="showFlow = false">取消</button>
           <button class="dt-btn dt-btn-primary" :disabled="flowSaving" @click="createFlow">{{ flowSaving ? '提交中…' : '确定' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 扫码弹窗：摄像头 + 手动输入兜底 -->
+    <div v-if="showScan" class="modal-mask" @click.self="closeScan">
+      <div class="modal av-scan">
+        <div class="modal-head"><i class="fas fa-qrcode"></i> 扫码查看资产详情</div>
+        <div class="modal-body">
+          <video ref="scanVideo" class="av-scan-video" playsinline muted></video>
+          <div v-if="scanErr" class="av-scan-err">{{ scanErr }}</div>
+          <label class="av-lab">手动输入载荷码（摄像头不可用时）</label>
+          <input v-model="manualPayload" class="srv-input" placeholder="MOA-ASSET:<公司ID>:<资产ID>" @keydown.enter="submitManual" />
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn" @click="closeScan">关闭</button>
+          <button class="dt-btn dt-btn-primary" @click="submitManual">查询</button>
         </div>
       </div>
     </div>
@@ -330,8 +460,9 @@ function fmt(s: string): string {
 .av-ops .av-op { border: none; background: transparent; cursor: pointer; color: #d92b3a; }
 .av-pager { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 12px; color: var(--dt-text-3); }
 .av-lab { display: block; font-size: 12px; color: var(--dt-text-3); margin: 10px 0 4px; font-weight: 600; }
+.av-form-readonly { font-size: 13px; color: var(--dt-text-2); background: #f6f8fb; padding: 8px 10px; border-radius: 6px; }
 .av-created { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.av-qr-url { font-size: 11px; color: var(--dt-text-4); word-break: break-all; }
+.av-qr-url { font-size: 11px; color: var(--dt-text-4); word-break: break-all; font-family: monospace; }
 .av-detail { width: 640px; }
 .av-code-head { font-size: 12px; color: var(--dt-text-4); font-weight: 400; margin-left: 8px; }
 .av-dinfo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -347,4 +478,7 @@ function fmt(s: string): string {
 .av-flow-time { font-size: 11px; color: var(--dt-text-4); margin-left: auto; }
 .req { color: #e64545; font-style: normal; }
 .dt-btn.sm { padding: 3px 10px; font-size: 12px; }
+.av-scan { width: 420px; }
+.av-scan-video { width: 100%; max-height: 240px; background: #000; border-radius: 8px; }
+.av-scan-err { color: #d92b3a; font-size: 12px; margin: 6px 0; }
 </style>

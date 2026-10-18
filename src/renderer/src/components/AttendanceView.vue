@@ -254,6 +254,12 @@ async function openReceived(r: AttendanceRequest): Promise<void> {
     await window.pantry.serverAttendanceCcView(toPlain({ companyId: companyId.value, requestId: r.id }))
   } catch (e) { console.error('[考勤] 抄送标记查看失败', e) }
 }
+// 显式"停止提醒"：从循环提醒集合移除该条（客户端侧；服务端无独立 stop 端点）
+async function snoozeRemind(r: AttendanceRequest): Promise<void> {
+  removePending('att:' + r.id)
+  okMsg.value = '已停止对该条的循环提醒'
+  err.value = ''
+}
 
 watch(tab, () => { okMsg.value = ''; err.value = '' })
 // 切申请类型 → 载入该类型草稿
@@ -389,6 +395,7 @@ onMounted(async () => {
         <span class="at-ops">
           <button class="at-op ok" @click.stop="approve(r)">通过</button>
           <button class="at-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
+          <button class="at-op mute" title="不再循环提醒本条" @click.stop="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
         </span>
       </div>
       <div class="at-sec-t">已处理（{{ receivedDone.length }}）</div>
@@ -476,6 +483,7 @@ onMounted(async () => {
 .at-op { border: none; background: transparent; cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 6px; }
 .at-op.ok { color: #2fbb6b; }
 .at-op.danger { color: #d92b3a; }
+.at-op.mute { color: #8a94a6; }
 .at-pager { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; font-size: 12px; color: var(--dt-text-3); }
 .at-flow-cfg { border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px; margin-top: 6px; }
 .at-flow-row { display: flex; align-items: flex-end; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--dt-border-light); }
