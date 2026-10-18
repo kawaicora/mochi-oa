@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useAppStore } from '../stores/app'
-import type { OrgMember, Department } from '../../shared/server-types'
+import type { OrgMember, Department } from '@shared/server-types'
 
 /**
  * 公司通讯录选人弹窗（统一组件）。
