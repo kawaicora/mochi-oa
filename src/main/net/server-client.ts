@@ -1665,6 +1665,18 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'proxy:account:list', { companyId })
   }
+  async attendanceReceived(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:received:list', payload)
+  }
+  async attendanceCcList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:cc:list', payload)
+  }
+  async attendanceCcView(ids: number[]): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:cc:view', { ids })
+  }
 
   // ─── 资产管理（公司隔离）─────────
   async assetCreate(payload: Record<string, unknown>): Promise<Ack> {

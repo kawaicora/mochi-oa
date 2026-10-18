@@ -546,6 +546,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverProxyReject, (_e, id, reason) => serverClient.proxyReject(Number(id) || 0, String(reason || '')))
   ipcMain.handle(IpcChannels.serverProxyRenew, (_e, id, days) => serverClient.proxyRenew(Number(id) || 0, Number(days) || 0))
   ipcMain.handle(IpcChannels.serverProxyAccountList, (_e, companyId) => serverClient.proxyAccountList(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverAttendanceReceived, (_e, payload) => serverClient.attendanceReceived((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceCc, (_e, payload) => serverClient.attendanceCcList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceCcView, (_e, ids) => serverClient.attendanceCcView(Array.isArray(ids) ? ids.map(Number) : []))
   // 系统代理（本地操作）
   ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number }))
   ipcMain.handle(IpcChannels.systemProxyClear, () => clearSystemProxy())

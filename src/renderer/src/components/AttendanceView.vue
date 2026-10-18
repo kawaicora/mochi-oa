@@ -58,7 +58,7 @@ const LEAVE_TYPES = ['事假', '病假', '年假', '婚假', '产假', '其他']
 const COMP_TYPES = ['加班调休', '其他']
 
 // ── 顶部标签页：申请 | 历史记录 ──
-const topTab = ref<'apply' | 'history'>('apply')
+const topTab = ref<'apply' | 'history' | 'received' | 'cc'>('apply')
 // 申请类型（补卡/请假/调休）
 const tab = ref<AttType>('make_up')
 
@@ -218,6 +218,36 @@ function fmt(s: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+// ── 收到审批 / 收到抄送 ──
+const receivedPending = ref<AttendanceRequest[]>([])
+const receivedDone = ref<AttendanceRequest[]>([])
+const ccList = ref<AttendanceRequest[]>([])
+async function loadReceived(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverAttendanceReceived(toPlain({ companyId: companyId.value }))
+    if (!ack.ok) { console.error('[考勤] 收到审批加载失败', ack.error); return }
+    const d = (ack.data as { pending?: AttendanceRequest[]; processed?: AttendanceRequest[] }) ?? {}
+    receivedPending.value = d.pending ?? []
+    receivedDone.value = d.processed ?? []
+  } catch (e) { console.error('[考勤] 收到审批加载异常', e) }
+}
+async function loadCc(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverAttendanceCc(toPlain({ companyId: companyId.value }))
+    if (!ack.ok) { console.error('[考勤] 收到抄送加载失败', ack.error); return }
+    ccList.value = (ack.data as { list?: AttendanceRequest[] })?.list ?? []
+  } catch (e) { console.error('[考勤] 收到抄送加载异常', e) }
+}
+async function openReceived(r: AttendanceRequest): Promise<void> {
+  detail.value = r
+  // 抄送查看标记：若该请求在 ccList 且未查看，调 cc:view
+  try {
+    await window.pantry.serverAttendanceCcView([r.id])
+  } catch (e) { console.error('[考勤] 抄送标记查看失败', e) }
+}
+
 watch(tab, () => { okMsg.value = ''; err.value = '' })
 // 切申请类型 → 载入该类型草稿
 watch(tab, (t) => loadDraft(t))
@@ -238,10 +268,12 @@ onMounted(async () => {
     <div v-if="err" class="at-err">{{ err }}</div>
     <div v-if="okMsg" class="at-ok">{{ okMsg }}</div>
 
-    <!-- 顶部：申请 | 历史记录 标签页 -->
+    <!-- 顶部：申请 | 历史记录 | 收到审批 | 收到抄送 标签页 -->
     <div class="at-tabs">
       <button :class="{ on: topTab === 'apply' }" @click="topTab = 'apply'">申请</button>
       <button :class="{ on: topTab === 'history' }" @click="topTab = 'history'">历史记录</button>
+      <button :class="{ on: topTab === 'received' }" @click="topTab = 'received'; loadReceived()">收到审批</button>
+      <button :class="{ on: topTab === 'cc' }" @click="topTab = 'cc'; loadCc()">收到抄送</button>
     </div>
 
     <!-- 上：申请表单 -->
@@ -340,6 +372,35 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- 收到审批 -->
+    <div v-show="topTab === 'received'" class="at-body">
+      <div class="at-sec-t">未处理（{{ receivedPending.length }}）</div>
+      <div v-if="!receivedPending.length" class="at-empty">无待审批</div>
+      <div v-for="r in receivedPending" :key="'p'+r.id" class="at-rrow" @click="openReceived(r)">
+        <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
+        <span>{{ r.nick || r.username }}：{{ r.startTime ? fmt(r.startTime) : fmt(r.createdAt) }}</span>
+        <span class="at-ops">
+          <button class="at-op ok" @click.stop="approve(r)">通过</button>
+          <button class="at-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
+        </span>
+      </div>
+      <div class="at-sec-t">已处理（{{ receivedDone.length }}）</div>
+      <div v-if="!receivedDone.length" class="at-empty">无已处理</div>
+      <div v-for="r in receivedDone" :key="'d'+r.id" class="at-rrow" @click="openReceived(r)">
+        <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
+        <span>{{ r.nick || r.username }}：{{ fmt(r.createdAt) }}</span>
+      </div>
+    </div>
+
+    <!-- 收到抄送 -->
+    <div v-show="topTab === 'cc'" class="at-body">
+      <div v-if="!ccList.length" class="at-empty">无抄送</div>
+      <div v-for="r in ccList" :key="'c'+r.id" class="at-rrow" @click="openReceived(r)">
+        <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
+        <span>{{ r.nick || r.username }}：{{ fmt(r.createdAt) }}</span>
+      </div>
+    </div>
+
     <!-- 详情弹窗 -->
     <div v-if="detail" class="modal-mask" @click.self="detail = null">
       <div class="modal at-modal">
@@ -392,6 +453,9 @@ onMounted(async () => {
 .at-sec-title.admin { margin-top: 18px; }
 .at-table-wrap { overflow: auto; border: 1px solid var(--dt-border-light); border-radius: 8px; }
 .at-empty { color: var(--dt-text-4); text-align: center; padding: 24px 0; font-size: 13px; }
+.at-sec-t { font-size: 13px; font-weight: 700; margin: 10px 0 6px; }
+.at-rrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--dt-border-light); font-size: 13px; cursor: pointer; }
+.at-rrow:hover { background: var(--dt-bg-hover); }
 .at-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
 .at-table th, .at-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--dt-border-light); white-space: nowrap; }
 .at-table th { background: #fafbfc; font-weight: 600; color: var(--dt-text-3); font-size: 12px; }
