@@ -80,6 +80,16 @@ const punchErr = ref('') // 白名单拒绝等异常提示
 async function loadMac(): Promise<void> {
   try { mac.value = (await window.pantry.getMac()) || '' } catch (e) { console.error('[打卡] 取 MAC 失败', e); mac.value = '' }
 }
+// 当天打卡次数（从当月 records 里筛 today）
+const todayCount = computed(() => dayMap.value.get(todayStr)?.count ?? 0)
+// 按钮文案：0=上班打卡；1=下班打卡；≥2=再打卡覆盖下班
+const punchLabel = computed(() => {
+  if (punching.value) return '打卡中…'
+  if (todayCount.value <= 0) return '上班打卡'
+  if (todayCount.value === 1) return '下班打卡'
+  return '再打卡（覆盖下班）'
+})
+
 async function doCheckin(): Promise<void> {
   if (!companyId.value) { punchErr.value = '尚未加入公司'; return }
   punchMsg.value = ''
@@ -91,11 +101,14 @@ async function doCheckin(): Promise<void> {
       // 白名单拦截：黄底异常提示 + 记录到当天（黄点）
       console.error('[打卡] 打卡被拒', ack.error)
       punchErr.value = ack.error || '打卡失败'
-      const p = (n: number) => String(n).padStart(2, '0')
-      const t = new Date()
-      rejectedDays.value.add(`${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`)
+      rejectedDays.value.add(todayStr)
     } else {
-      punchMsg.value = '打卡成功'
+      // 按回包 kind 提示：first=上班 / second=下班 / override=覆盖下班
+      const kind = (ack.data as { kind?: string } | undefined)?.kind
+      punchMsg.value = kind === 'first' ? '已记录上班时间'
+        : kind === 'second' ? '已记录下班时间'
+        : kind === 'override' ? '已更新下班时间'
+        : '打卡成功'
       await loadData()
     }
   } catch (e) {
@@ -173,7 +186,7 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
       <div v-if="punchMsg" class="ci-ok">{{ punchMsg }}</div>
       <div v-if="punchErr" class="ci-warn">{{ punchErr }}</div>
       <button class="ci-punch" :disabled="punching" @click="doCheckin">
-        {{ punching ? '打卡中…' : '打 卡' }}
+        {{ punchLabel }}
       </button>
       <div class="ci-mac">本机 MAC：{{ mac || '（未取到）' }}</div>
     </div>
