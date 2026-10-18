@@ -54,12 +54,15 @@ export async function startLocalForward(remoteHost: string, remotePort: number, 
     clientSocket.on('error', (e) => { console.error('[local-proxy] 客户端断开', e); remote.end() })
   })
 
-  await new Promise<void>((resolve) => {
+  server.on('error', (e) => { console.error('[local-proxy] 服务器错误', e) })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       localPort = addr.port
       localServer = server
-      console.log(`[local-proxy] 本地转发代理已启动 127.0.0.1:${localPort} → ${remoteHost}:${remotePort}`)
+      console.log(`[local-proxy] 本地转发代理已监听 127.0.0.1:${localPort} → ${remoteHost}:${remotePort}`)
       resolve()
     })
   })
