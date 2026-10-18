@@ -121,9 +121,13 @@ async function openRules(): Promise<void> {
   try {
     const ack = await window.pantry.serverCheckinRulesGet(companyId.value)
     if (!ack.ok) { console.error('[打卡] 规则加载失败', ack.error); return }
-    const d = (ack.data as { rules?: RulesForm })?.rules
+    const d = (ack.data as { rules?: RulesForm & { week_rules: string | WeekRule[] } })?.rules
     if (d) {
-      const f = JSON.parse(JSON.stringify(d)) as RulesForm
+      const f = JSON.parse(JSON.stringify(d)) as RulesForm & { week_rules: string | WeekRule[] }
+      // 服务端 week_rules 是 JSON 字符串（DB TEXT），需 parse 成数组
+      if (typeof f.week_rules === 'string') {
+        try { f.week_rules = JSON.parse(f.week_rules) as WeekRule[] } catch { f.week_rules = [] }
+      }
       if (!f.alt_rule) f.alt_rule = { dow: 6, altStart: '09:00', altEnd: '18:00' }
       rulesForm.value = f
     }
