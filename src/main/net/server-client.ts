@@ -1625,6 +1625,18 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'checkin:settings:save', payload)
   }
+  async checkinRulesGet(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:rules:get', { companyId })
+  }
+  async checkinRulesSave(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:rules:save', payload)
+  }
+  async checkinStatusGet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'checkin:status:get', payload)
+  }
 
   // ─── 资产管理（公司隔离）─────────
   async assetCreate(payload: Record<string, unknown>): Promise<Ack> {

@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
+import { toPlain } from '../utils/plain'
 
 // ── 类型（与服务端冻结协议对齐）──
 interface CheckinItem {
@@ -90,6 +91,56 @@ const punchLabel = computed(() => {
   return '再打卡（覆盖下班）'
 })
 
+// ── 当天状态（checkin:status:get）──
+type StatusKind = 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early'
+interface DayStatus { date: string; rest: boolean; workStart: string | null; workEnd: string | null; punchIn: string | null; punchOut: string | null; status: StatusKind; mode: string }
+const dayStatus = ref<DayStatus | null>(null)
+const statusLabel: Record<StatusKind, string> = {
+  rest: '休息日', none: '暂无打卡记录', normal: '正常', late: '迟到', early: '早退', late_early: '迟到+早退'
+}
+const statusCls: Record<StatusKind, string> = {
+  rest: 'rest', none: 'none', normal: 'ok', late: 'warn', early: 'warn', late_early: 'warn'
+}
+async function loadStatus(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverCheckinStatusGet({ companyId: companyId.value, date: todayStr })
+    if (ack.ok) dayStatus.value = (ack.data as DayStatus) ?? null
+    else console.error('[打卡] 当天状态加载失败', ack.error)
+  } catch (e) { console.error('[打卡] 当天状态加载异常', e) }
+}
+
+// ── 打卡规则弹窗（admin/owner）──
+const showRules = ref(false)
+interface WeekRule { dow: number; start: string; end: string; rest: boolean }
+interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null }
+const rulesForm = ref<RulesForm | null>(null)
+const WEEK_NAMES = ['周日','周一','周二','周三','周四','周五','周六']
+async function openRules(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverCheckinRulesGet(companyId.value)
+    if (!ack.ok) { console.error('[打卡] 规则加载失败', ack.error); return }
+    const d = (ack.data as { rules?: RulesForm })?.rules
+    if (d) {
+      const f = JSON.parse(JSON.stringify(d)) as RulesForm
+      if (!f.alt_rule) f.alt_rule = { dow: 6, altStart: '09:00', altEnd: '18:00' }
+      rulesForm.value = f
+    }
+    showRules.value = true
+  } catch (e) { console.error('[打卡] 规则加载异常', e) }
+}
+async function saveRules(): Promise<void> {
+  if (!companyId.value || !rulesForm.value) return
+  try {
+    const ack = await window.pantry.serverCheckinRulesSave(toPlain({ companyId: companyId.value, rules: rulesForm.value }))
+    if (!ack.ok) { console.error('[打卡] 规则保存失败', ack.error); return }
+    showRules.value = false
+    await loadStatus()
+  } catch (e) { console.error('[打卡] 规则保存异常', e) }
+}
+
+
 async function doCheckin(): Promise<void> {
   if (!companyId.value) { punchErr.value = '尚未加入公司'; return }
   punchMsg.value = ''
@@ -110,6 +161,7 @@ async function doCheckin(): Promise<void> {
         : kind === 'override' ? '已更新下班时间'
         : '打卡成功'
       await loadData()
+      await loadStatus()
     }
   } catch (e) {
     console.error('[打卡] 打卡异常', e)
@@ -154,9 +206,9 @@ function nextMonth(): void { cur.value = new Date(cur.value.getFullYear(), cur.v
 watch(monthStr, async () => { await Promise.all([loadData(), loadMonthAtts()]) })
 watch(companyId, async () => {
   if (!companyId.value) return
-  await Promise.all([loadData(), loadMonthAtts()])
+  await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 })
-onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts()]) })
+onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus()]) })
 </script>
 
 <template>
@@ -183,12 +235,70 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
 
     <!-- 打卡按钮区 -->
     <div class="ci-actions">
+      <!-- 当天状态卡 -->
+      <div v-if="dayStatus" class="ci-status" :class="statusCls[dayStatus.status]">
+        <div class="ci-st-head">
+          <span class="ci-st-title">{{ dayStatus.date }} · {{ statusLabel[dayStatus.status] }}</span>
+          <button v-if="app.isAdmin" class="ci-st-cfg" @click="openRules"><i class="fas fa-cog"></i> 规则设置</button>
+        </div>
+        <div class="ci-st-row">
+          <span>上班：{{ dayStatus.workStart || '--' }}</span>
+          <span>打卡：{{ dayStatus.punchIn || '未打' }}</span>
+        </div>
+        <div class="ci-st-row">
+          <span>下班：{{ dayStatus.workEnd || '--' }}</span>
+          <span>打卡：{{ dayStatus.punchOut || '未打' }}</span>
+        </div>
+      </div>
+
       <div v-if="punchMsg" class="ci-ok">{{ punchMsg }}</div>
       <div v-if="punchErr" class="ci-warn">{{ punchErr }}</div>
       <button class="ci-punch" :disabled="punching" @click="doCheckin">
         {{ punchLabel }}
       </button>
       <div class="ci-mac">本机 MAC：{{ mac || '（未取到）' }}</div>
+    </div>
+
+    <!-- 打卡规则设置弹窗（admin） -->
+    <div v-if="showRules && rulesForm" class="modal-mask" @click.self="showRules = false">
+      <div class="modal" style="width:560px">
+        <div class="modal-head">打卡规则设置</div>
+        <div class="modal-body" style="max-height:70vh;overflow:auto">
+          <div class="ci-r-row">
+            <label>模式</label>
+            <select v-model="rulesForm.mode">
+              <option value="double">双休</option>
+              <option value="single">单休</option>
+              <option value="none">无休</option>
+              <option value="alternate">大小周</option>
+            </select>
+          </div>
+          <div class="ci-r-row">
+            <label>迟到豁免（分钟）</label>
+            <input type="number" v-model.number="rulesForm.grace_late_min" min="0" />
+            <label>早退豁免（分钟）</label>
+            <input type="number" v-model.number="rulesForm.grace_early_min" min="0" />
+          </div>
+          <div v-for="(w, i) in rulesForm.week_rules" :key="i" class="ci-r-row">
+            <label>{{ WEEK_NAMES[w.dow] }}</label>
+            <label class="ci-r-chk"><input type="checkbox" v-model="w.rest" /> 休息</label>
+            <input v-if="!w.rest" type="time" v-model="w.start" />
+            <input v-if="!w.rest" type="time" v-model="w.end" />
+          </div>
+          <div v-if="rulesForm.mode === 'alternate' && rulesForm.alt_rule" class="ci-r-row">
+            <label>大小周交替日</label>
+            <select v-model="rulesForm.alt_rule.dow">
+              <option v-for="(n, i) in WEEK_NAMES" :key="i" :value="i">{{ n }}</option>
+            </select>
+            <input v-model="rulesForm.alt_rule.altStart" type="time" />
+            <input v-model="rulesForm.alt_rule.altEnd" type="time" />
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn" @click="showRules = false">取消</button>
+          <button class="dt-btn primary" @click="saveRules">保存</button>
+        </div>
+      </div>
     </div>
 
     <!-- 当天详情弹窗 -->
@@ -240,4 +350,16 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
 .ci-day-att { margin-top: 10px; }
 .ci-att-t { font-size: 12px; color: var(--dt-text-3); margin-bottom: 4px; }
 .ci-att-item { font-size: 13px; padding: 2px 0; }
+.ci-status { width: 100%; max-width: 420px; border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px 14px; font-size: 13px; background: #fff; }
+.ci-status.ok { border-color: #2fbb6b; background: #f0faf4; }
+.ci-status.warn { border-color: #d92b3a; background: #fdf0f1; color: #d92b3a; }
+.ci-status.rest { background: #f6f7f9; color: var(--dt-text-3); }
+.ci-status.none { background: #fff; }
+.ci-st-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 700; }
+.ci-st-cfg { border: none; background: transparent; color: var(--dt-primary); cursor: pointer; font-size: 12px; }
+.ci-st-row { display: flex; justify-content: space-between; padding: 2px 0; }
+.ci-r-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; }
+.ci-r-row label { min-width: 90px; color: var(--dt-text-3); }
+.ci-r-row input[type="number"], .ci-r-row input[type="time"], .ci-r-row select { height: 28px; border: 1px solid var(--dt-border); border-radius: 4px; padding: 0 6px; font-size: 13px; }
+.ci-r-chk { min-width: 60px !important; display: flex; align-items: center; gap: 4px; }
 </style>

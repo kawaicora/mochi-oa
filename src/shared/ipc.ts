@@ -182,6 +182,10 @@ export const IpcChannels = {
   serverCheckinList: 'server:checkin:list',
   serverCheckinSettingsGet: 'server:checkin:settings:get',
   serverCheckinSettingsSave: 'server:checkin:settings:save',
+  // 打卡规则（上下班时间/休息/豁免）与当天状态
+  serverCheckinRulesGet: 'server:checkin:rules:get',
+  serverCheckinRulesSave: 'server:checkin:rules:save',
+  serverCheckinStatusGet: 'server:checkin:status:get',
   // 资产管理（企业资源，公司隔离；增删改/流转=admin，列表/详情=成员可读）
   serverAssetCreate: 'server:asset:create',
   serverAssetList: 'server:asset:list',

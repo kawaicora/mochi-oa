@@ -535,6 +535,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverCheckinList, (_e, payload) => serverClient.checkinList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverCheckinSettingsGet, (_e, companyId) => serverClient.checkinSettingsGet(Number(companyId) || 0))
   ipcMain.handle(IpcChannels.serverCheckinSettingsSave, (_e, payload) => serverClient.checkinSettingsSave((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverCheckinRulesGet, (_e, companyId) => serverClient.checkinRulesGet(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverCheckinRulesSave, (_e, payload) => serverClient.checkinRulesSave((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverCheckinStatusGet, (_e, payload) => serverClient.checkinStatusGet((payload as Record<string, unknown>) ?? {}))
   // 取本机 MAC：遍历非 internal 接口取第一个 mac，全大写去冒号；异常回退空串
   ipcMain.handle(IpcChannels.getMac, () => {
     try {
