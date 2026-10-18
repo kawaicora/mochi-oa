@@ -189,9 +189,27 @@ async function doSave(): Promise<void> {
   saving.value = false
 }
 
+// ── 新建一篇（清空编辑器，写新草稿）──
+function newReport(): void {
+  current.value = null
+  title.value = ''
+  contentHtml.value = ''
+  templateId.value = 0
+  recipients.value = []
+  err.value = ''
+  okMsg.value = ''
+  // 清空本地草稿，避免恢复旧内容
+  clearDraft()
+}
+
 // ── 提交 ──
 async function doSubmit(): Promise<void> {
-  if (!current.value || !current.value.id) { err.value = '请先保存再提交'; return }
+  // 没保存过的新内容先自动保存（创建/update），再提交
+  if (!current.value || !current.value.id) {
+    // 还没 id → 先保存（create）
+    await doSave()
+    if (!current.value || !current.value.id) { err.value = '保存失败，无法提交'; return }
+  }
   submitting.value = true
   err.value = ''
   okMsg.value = ''
@@ -199,7 +217,7 @@ async function doSubmit(): Promise<void> {
     const ack = await window.pantry.serverReportSubmit(companyId.value, current.value.id)
     if (!ack.ok) { console.error('[报表] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     current.value = (ack.data as { report?: ReportItem })?.report ?? current.value
-    okMsg.value = '已提交'
+    okMsg.value = current.value?.submitted ? '已提交（可继续编辑后重新提交）' : '已提交'
     submittedFlash.value = true
     setTimeout(() => { submittedFlash.value = false }, 3000)
     await loadHistory()
@@ -405,8 +423,11 @@ onUnmounted(() => { offReminder?.() })
         <button class="dt-btn dt-btn-primary" :disabled="saving" @click="doSave">
           <i class="fas fa-save"></i> {{ saving ? '保存中…' : '保存' }}
         </button>
-        <button class="dt-btn" :disabled="submitting || !current || current.submitted" @click="doSubmit">
-          <i class="fas fa-paper-plane"></i> {{ submitting ? '提交中…' : '提交' }}
+        <button class="dt-btn" :disabled="submitting" @click="doSubmit">
+          <i class="fas fa-paper-plane"></i> {{ submitting ? '提交中…' : (current?.submitted ? '重新提交' : '提交') }}
+        </button>
+        <button class="dt-btn" @click="newReport">
+          <i class="fas fa-file-plus"></i> 新一篇
         </button>
       </div>
     </div>
