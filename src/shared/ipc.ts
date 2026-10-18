@@ -350,7 +350,7 @@ export type NotifTarget =
  *   - alarm    闹钟：闹钟自己会播放铃声（见 utils/alarms.ts），不走通知管理器
  *   - system   其他系统级提示（新设备登录、远程控制请求等）
  */
-export type NotifKind = 'message' | 'call' | 'meeting' | 'task' | 'alarm' | 'system'
+export type NotifKind = 'message' | 'call' | 'meeting' | 'task' | 'alarm' | 'system' | 'company'
 
 /** 通知管理器入参（渲染层 → 主进程） */
 export interface NotifyPayload {
@@ -370,7 +370,8 @@ export const NOTIF_KIND_LABEL: Record<NotifKind, string> = {
   meeting: '会议',
   task: '任务',
   alarm: '闹钟',
-  system: '系统'
+  system: '系统',
+  company: '公司通知'
 }
 
 /** 主进程 → 渲染进程推送事件 */

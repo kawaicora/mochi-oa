@@ -231,6 +231,21 @@ function fmtTime(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** 代理申请卡片：解析 content JSON 摘要 */
+function proxyCardSummary(content: string): string {
+  try {
+    const c = JSON.parse(content)
+    return `${c.nick || c.applicant || ''}：${c.reason || ''}（${c.status || 'pending'}）`
+  } catch { return content }
+}
+/** 点击卡片：切到网络申请页（深链留待 ProxyView 接收 requestId） */
+function openProxyCard(content: string): void {
+  try {
+    const c = JSON.parse(content)
+    console.log('[proxy_card] requestId', c.requestId)
+  } catch (e) { console.error('[proxy_card] 解析失败', e) }
+}
+
 /** 消息已读回执标记：仅自己发出的消息；私聊=对方是否已读，群聊=已读人数 */
 function readLabelOf(m: ServerChatMessage): string {
   const sel = selected.value
@@ -889,6 +904,12 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
             </div>
             <div class="msg-bubble" @contextmenu.prevent="openMsgMenu($event, m.id)">
               <span v-if="m.kind === 'text'">{{ m.content }}</span>
+              <!-- 代理申请卡片 -->
+              <div v-else-if="m.kind === 'proxy_card'" class="msg-card" @click="openProxyCard(m.content)">
+                <div class="msg-card-t">上网申请</div>
+                <div class="msg-card-b">{{ proxyCardSummary(m.content) }}</div>
+                <div class="msg-card-btn">查看/处理</div>
+              </div>
               <!-- 视频：FLV 走 flv.js；rm/avi/mkv/3gp/rmvb 走服务端 ffmpeg 转码；其余原生 Blob 播放 -->
               <MsgVideo
                 v-else-if="m.kind === 'video'"
@@ -1280,6 +1301,10 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
   background: var(--dt-active);
   border-color: transparent;
 }
+.msg-card { min-width: 220px; max-width: 280px; cursor: pointer; }
+.msg-card-t { font-size: 13px; font-weight: 700; color: var(--dt-primary); margin-bottom: 4px; }
+.msg-card-b { font-size: 13px; color: var(--dt-text); margin-bottom: 6px; }
+.msg-card-btn { font-size: 12px; color: var(--dt-primary); text-decoration: underline; }
 .msg-img {
   max-width: 240px;
   max-height: 240px;
