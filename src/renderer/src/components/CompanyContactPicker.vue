@@ -33,13 +33,16 @@ const props = withDefaults(
     controlled?: boolean
     /** 受控模式下的显隐 */
     open?: boolean
+    /** 单选模式：点选即确认回传，触发按钮只展示一个姓名 */
+    single?: boolean
   }>(),
   {
     placeholder: '选择成员',
     title: '选择成员',
     max: 0,
     controlled: false,
-    open: undefined
+    open: undefined,
+    single: false
   }
 )
 const emit = defineEmits<{
@@ -139,6 +142,12 @@ function closeModal(): void {
 }
 
 function toggle(userId: number): void {
+  // 单选模式：点选即确认关闭
+  if (props.single) {
+    tempSel.value = [userId]
+    confirm()
+    return
+  }
   const i = tempSel.value.indexOf(userId)
   if (i >= 0) {
     tempSel.value.splice(i, 1)
@@ -189,14 +198,25 @@ watch(isOpen, (v) => {
   <!-- 触发按钮（非受控模式才渲染） -->
   <button v-if="!controlled" class="ccp-trigger" @click="openModal">
     <i class="fas fa-user-check"></i>
-    <span v-if="!selectedMembers.length" class="ccp-ph">{{ placeholder }}</span>
-    <span v-else class="ccp-tags">
-      <span v-for="m in selectedMembers" :key="m.userId" class="ccp-tag">
-        {{ m.nick || m.username }}
-        <i class="ccp-x" @click="removeTrigger(m.userId, $event)">×</i>
+    <!-- 单选：只显示一个姓名，右侧带清除 -->
+    <template v-if="single">
+      <span v-if="!selectedMembers.length" class="ccp-ph">{{ placeholder }}</span>
+      <span v-else class="ccp-single-name">
+        {{ selectedMembers[0].nick || selectedMembers[0].username }}
+        <i class="ccp-x" @click="removeTrigger(selectedMembers[0].userId, $event)">×</i>
       </span>
-    </span>
-    <i v-if="selectedMembers.length" class="ccp-count">{{ selectedMembers.length }}</i>
+    </template>
+    <!-- 多选：标签列表 -->
+    <template v-else>
+      <span v-if="!selectedMembers.length" class="ccp-ph">{{ placeholder }}</span>
+      <span v-else class="ccp-tags">
+        <span v-for="m in selectedMembers" :key="m.userId" class="ccp-tag">
+          {{ m.nick || m.username }}
+          <i class="ccp-x" @click="removeTrigger(m.userId, $event)">×</i>
+        </span>
+      </span>
+      <i v-if="selectedMembers.length" class="ccp-count">{{ selectedMembers.length }}</i>
+    </template>
   </button>
 
   <!-- 弹窗 -->
@@ -217,10 +237,10 @@ watch(isOpen, (v) => {
             <div class="ccp-gname">{{ g.name }}（{{ g.members.length }}）</div>
             <label v-for="m in g.members" :key="m.userId" class="ccp-item">
               <input
-                type="checkbox"
+                :type="single ? 'radio' : 'checkbox'"
                 :checked="isTempSel(m.userId)"
                 @change="toggle(m.userId)"
-                :disabled="!isTempSel(m.userId) && max > 0 && tempSel.length >= max"
+                :disabled="!isTempSel(m.userId) && !single && max > 0 && tempSel.length >= max"
               />
               <span class="ccp-item-name">{{ m.nick || m.username }}</span>
               <span v-if="m.role === 'owner'" class="ccp-role owner">创建人</span>
@@ -230,9 +250,16 @@ watch(isOpen, (v) => {
         </template>
       </div>
       <div class="ccp-foot">
-        <span class="ccp-foot-count">已选 {{ tempSel.length }} 人</span>
-        <button class="dt-btn" @click="closeModal">取消</button>
-        <button class="dt-btn dt-btn-primary" @click="confirm">确定</button>
+        <template v-if="single">
+          <span class="ccp-foot-count">点选人员即确定</span>
+          <button v-if="tempSel.length" class="dt-btn" @click="tempSel = []; confirm()">清空</button>
+          <button class="dt-btn" @click="closeModal">取消</button>
+        </template>
+        <template v-else>
+          <span class="ccp-foot-count">已选 {{ tempSel.length }} 人</span>
+          <button class="dt-btn" @click="closeModal">取消</button>
+          <button class="dt-btn dt-btn-primary" @click="confirm">确定</button>
+        </template>
       </div>
     </div>
   </div>
@@ -264,6 +291,7 @@ watch(isOpen, (v) => {
   font-size: 12px;
 }
 .ccp-x { cursor: pointer; font-style: normal; }
+.ccp-single-name { display: inline-flex; align-items: center; gap: 4px; }
 .ccp-count {
   background: var(--dt-primary);
   color: #fff;

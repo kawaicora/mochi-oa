@@ -9,6 +9,7 @@ import DocView from './DocView.vue'
 import WikiView from './WikiView.vue'
 import DashView from './DashView.vue'
 import MemberTrackView from './MemberTrackView.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
 
@@ -800,10 +801,13 @@ watch(view, (v) => {
           <div class="tv-form-sec">
             <label class="tv-lab">执行人（每人执行的内容）</label>
             <div v-for="(a, i) in createAssign" :key="i" class="tv-create-assign">
-              <select v-model.number="a.userId" class="srv-select">
-                <option :value="0">选择执行人</option>
-                <option v-for="m in members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option>
-              </select>
+              <CompanyContactPicker
+                :model-value="a.userId ? [a.userId] : []"
+                @update:model-value="(ids: number[]) => (a.userId = ids[0] ?? 0)"
+                single
+                title="选择执行人"
+                placeholder="选择执行人"
+              />
               <input v-model="a.content" class="srv-input" placeholder="要执行的内容" />
               <button v-if="createAssign.length > 1" class="tv-op" @click="createAssign.splice(i, 1)"><i class="fas fa-minus"></i></button>
             </div>

@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 
 const props = defineProps<{ projectId?: number }>()
 const app = useAppStore()
@@ -36,6 +37,11 @@ const fmtTime = (s: string): string => { if (!s) return ''; const d = new Date(s
 
 const showCreate = ref(false)
 const cf = ref({ title: '', description: '', severity: 'normal', priority: 'middle', handlerId: 0, foundVersion: '' })
+// CompanyContactPicker 用 number[] v-model，这里桥接单选 handlerId
+const handlerIds = computed<number[]>({
+  get: () => (cf.value.handlerId ? [cf.value.handlerId] : []),
+  set: (ids: number[]) => { cf.value.handlerId = ids[0] ?? 0 }
+})
 const bug = 'mochi:oa:bug:create-draft'
 // 草稿缓存：输入实时写本地；提交成功后清除
 watch(
@@ -125,7 +131,7 @@ async function onDelete(b: Bug): Promise<void> {
           <label class="pm-lab">发现版本</label>
           <input v-model="cf.foundVersion" class="srv-input" placeholder="如 0.9.4" />
           <label class="pm-lab">处理人</label>
-          <select v-model.number="cf.handlerId" class="srv-select"><option :value="0">不指派</option><option v-for="m in app.members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option></select>
+          <CompanyContactPicker v-model="handlerIds" single title="选择处理人" placeholder="不指派" />
           <label class="pm-lab">描述</label>
           <textarea v-model="cf.description" class="srv-input" rows="3" placeholder="缺陷描述"></textarea>
         </div>

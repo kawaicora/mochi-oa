@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import DateTimeInput from './common/DateTimePicker.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import { useServerStore } from '../stores/server'
 
 const props = defineProps<{ projectId?: number }>()
@@ -43,6 +44,11 @@ const fmt = (s: string): string => { if (!s) return ''; const d = new Date(s); r
 // ── 创建 ──
 const showCreate = ref(false)
 const cf = ref({ title: '', description: '', category: 'uncategorized', priority: 'middle', handlerId: 0, startTime: '', dueTime: '' })
+// CompanyContactPicker 用 number[] v-model，这里桥接单选 handlerId
+const handlerIds = computed<number[]>({
+  get: () => (cf.value.handlerId ? [cf.value.handlerId] : []),
+  set: (ids: number[]) => { cf.value.handlerId = ids[0] ?? 0 }
+})
 const req = 'mochi:oa:req:create-draft'
 // 草稿缓存：输入实时写本地；提交成功后清除
 watch(
@@ -131,7 +137,7 @@ async function onDelete(r: Req): Promise<void> {
             <div><label class="pm-lab">优先级</label><select v-model="cf.priority" class="srv-select"><option value="nth">Nice To Have</option><option value="middle">Middle</option><option value="high">High</option></select></div>
           </div>
           <label class="pm-lab">处理人</label>
-          <select v-model.number="cf.handlerId" class="srv-select"><option :value="0">不指派</option><option v-for="m in app.members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option></select>
+          <CompanyContactPicker v-model="handlerIds" single title="选择处理人" placeholder="不指派" />
           <div class="pm-two">
             <div><label class="pm-lab">预计开始 <i class="req">*</i></label><DateTimeInput v-model="cf.startTime" /></div>
             <div><label class="pm-lab">预计结束 <i class="req">*</i></label><DateTimeInput v-model="cf.dueTime" /></div>

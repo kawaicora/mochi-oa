@@ -7,6 +7,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import DateTimeInput from '../components/common/DateTimePicker.vue'
+import CompanyContactPicker from '../components/CompanyContactPicker.vue'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -352,10 +353,13 @@ onMounted(async () => {
         <div v-if="detailTab === 'assign'" class="twin-tab">
           <button class="dt-btn" @click="assignOpen = !assignOpen"><i class="fas fa-plus"></i> 添加执行人</button>
           <div v-if="assignOpen" class="twin-issue-form">
-            <select v-model.number="assignForm.userId" class="srv-select">
-              <option :value="0">选择执行人</option>
-              <option v-for="m in members" :key="m.userId" :value="m.userId">{{ m.nick || m.username }}</option>
-            </select>
+            <CompanyContactPicker
+              :model-value="assignForm.userId ? [assignForm.userId] : []"
+              @update:model-value="(ids: number[]) => (assignForm.userId = ids[0] ?? 0)"
+              single
+              title="选择执行人"
+              placeholder="选择执行人"
+            />
             <input v-model="assignForm.content" class="srv-input" placeholder="要执行的内容" />
             <button class="dt-btn dt-btn-primary" @click="addAssignment">添加</button>
           </div>
