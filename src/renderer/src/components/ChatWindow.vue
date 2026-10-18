@@ -13,6 +13,8 @@ import type { ServerChatMessage } from '@shared/server-types'
 import { convKey } from '../utils/notify-manager'
 import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
 import { setProxyDeepLink } from '../utils/proxy-deeplink'
+import { setExpenseDeepLink } from '../utils/expense-deeplink'
+import { setAdvanceDeepLink } from '../utils/advance-deeplink'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -245,6 +247,36 @@ function openProxyCard(content: string): void {
     const c = JSON.parse(content)
     if (c.requestId) setProxyDeepLink(Number(c.requestId))
   } catch (e) { console.error('[proxy_card] 解析失败', e) }
+}
+
+/** 报销申请卡片：解析 {"requestId","title","body","byNick"} 摘要 */
+function expenseCardSummary(content: string): string {
+  try {
+    const c = JSON.parse(content)
+    return `${c.byNick || ''}：${c.body || ''}（${c.title || '报销申请'}）`
+  } catch (e) { console.error('[expense_card] 解析失败', e); return content }
+}
+/** 点击卡片：深链到 ApplyHome 的报销 tab 并定位申请单 */
+function openExpenseCard(content: string): void {
+  try {
+    const c = JSON.parse(content)
+    if (c.requestId) setExpenseDeepLink(Number(c.requestId))
+  } catch (e) { console.error('[expense_card] 解析失败', e) }
+}
+
+/** 备用金申请卡片：解析 {"requestId","title","body","byNick"} 摘要 */
+function advanceCardSummary(content: string): string {
+  try {
+    const c = JSON.parse(content)
+    return `${c.byNick || ''}：${c.body || ''}（${c.title || '备用金申请'}）`
+  } catch (e) { console.error('[advance_card] 解析失败', e); return content }
+}
+/** 点击卡片：深链到 ApplyHome 的备用金 tab 并定位申请单 */
+function openAdvanceCard(content: string): void {
+  try {
+    const c = JSON.parse(content)
+    if (c.requestId) setAdvanceDeepLink(Number(c.requestId))
+  } catch (e) { console.error('[advance_card] 解析失败', e) }
 }
 
 /** 消息已读回执标记：仅自己发出的消息；私聊=对方是否已读，群聊=已读人数 */
@@ -909,6 +941,18 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
               <div v-else-if="m.kind === 'proxy_card'" class="msg-card" @click="openProxyCard(m.content)">
                 <div class="msg-card-t">上网申请</div>
                 <div class="msg-card-b">{{ proxyCardSummary(m.content) }}</div>
+                <div class="msg-card-btn">查看/处理</div>
+              </div>
+              <!-- 报销申请卡片 -->
+              <div v-else-if="m.kind === 'expense_card'" class="msg-card" @click="openExpenseCard(m.content)">
+                <div class="msg-card-t">报销申请</div>
+                <div class="msg-card-b">{{ expenseCardSummary(m.content) }}</div>
+                <div class="msg-card-btn">查看/处理</div>
+              </div>
+              <!-- 备用金申请卡片 -->
+              <div v-else-if="m.kind === 'advance_card'" class="msg-card" @click="openAdvanceCard(m.content)">
+                <div class="msg-card-t">备用金申请</div>
+                <div class="msg-card-b">{{ advanceCardSummary(m.content) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 视频：FLV 走 flv.js；rm/avi/mkv/3gp/rmvb 走服务端 ffmpeg 转码；其余原生 Blob 播放 -->

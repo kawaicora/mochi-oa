@@ -2,8 +2,24 @@
 import { ref } from 'vue'
 import AttendanceView from './AttendanceView.vue'
 import ProxyView from './ProxyView.vue'
+import ExpenseView from './ExpenseView.vue'
+import AdvanceView from './AdvanceView.vue'
+import { proxyDeepLinkId } from '../utils/proxy-deeplink'
+import { expenseDeepLinkId } from '../utils/expense-deeplink'
+import { advanceDeepLinkId } from '../utils/advance-deeplink'
 
-const tab = ref<'attendance' | 'proxy'>('attendance')
+type ApplyTab = 'attendance' | 'proxy' | 'expense' | 'advance'
+
+// 深链联动：消息卡片点击会 dispatch 'apply' 并置好对应 deepLinkId。
+// 在 setup（渲染前）根据哪个 deepLinkId 有值决定内层 tab，
+// 这样 ExpenseView/AdvanceView/ProxyView mount 时即落在正确分组，再自行定位高亮。
+const initialTab = ((): ApplyTab => {
+  if (expenseDeepLinkId.value != null) return 'expense'
+  if (advanceDeepLinkId.value != null) return 'advance'
+  if (proxyDeepLinkId.value != null) return 'proxy'
+  return 'attendance'
+})()
+const tab = ref<ApplyTab>(initialTab)
 </script>
 
 <template>
@@ -11,10 +27,14 @@ const tab = ref<'attendance' | 'proxy'>('attendance')
     <div class="ah-tabs">
       <button :class="{ on: tab === 'attendance' }" @click="tab = 'attendance'"><i class="fas fa-calendar-check"></i> 考勤申请</button>
       <button :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'"><i class="fas fa-globe"></i> 网络申请</button>
+      <button :class="{ on: tab === 'expense' }" @click="tab = 'expense'"><i class="fas fa-receipt"></i> 报销申请</button>
+      <button :class="{ on: tab === 'advance' }" @click="tab = 'advance'"><i class="fas fa-hand-holding-usd"></i> 备用金申请</button>
     </div>
     <div class="ah-body">
       <AttendanceView v-show="tab === 'attendance'" />
       <ProxyView v-show="tab === 'proxy'" />
+      <ExpenseView v-show="tab === 'expense'" />
+      <AdvanceView v-show="tab === 'advance'" />
     </div>
   </div>
 </template>
