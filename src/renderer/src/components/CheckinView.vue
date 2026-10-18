@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
 import { toPlain } from '../utils/plain'
+import { fmtTime, fmtDate } from '../utils/time'
 
 // ── 类型（与服务端冻结协议对齐）──
 interface CheckinItem {
@@ -197,7 +198,7 @@ async function loadMonthAtts(): Promise<void> {
     const reqs = (ack.data as { requests?: Array<{ startTime?: string | null; createdAt: string; type: string }> })?.requests ?? []
     const out: MonthAtt[] = []
     for (const r of reqs) {
-      const ds = r.startTime ? r.startTime.slice(0, 10) : r.createdAt.slice(0, 10)
+      const ds = r.startTime ? fmtDate(r.startTime) : fmtDate(r.createdAt)
       out.push({ date: ds, type: r.type })
     }
     monthAtts.value = out
@@ -312,10 +313,10 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
         <div class="modal-body">
           <div v-if="selectedDay && selectedDay.records.length">
             <div v-for="r in selectedDay.records" :key="r.id" class="ci-rec">
-              <span class="ci-rec-time">{{ r.checkTime.slice(11) }}</span>
+              <span class="ci-rec-time">{{ fmtTime(r.checkTime) }}</span>
               <span class="ci-rec-ip">{{ r.ip }}</span>
             </div>
-            <div class="ci-rec-summary">共 {{ selectedDay.count }} 次　首 {{ selectedDay.firstTime?.slice(11) }}　末 {{ selectedDay.lastTime?.slice(11) }}</div>
+            <div class="ci-rec-summary">共 {{ selectedDay.count }} 次　首 {{ fmtTime(selectedDay.firstTime) }}　末 {{ fmtTime(selectedDay.lastTime) }}</div>
           </div>
           <div v-else class="ci-rec-empty">当天无打卡记录</div>
           <div v-if="selectedAtts.length" class="ci-day-att">

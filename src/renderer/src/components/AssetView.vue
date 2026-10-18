@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
+import { fmtLocal } from '../utils/time'
 import { useServerStore } from '../stores/server'
 import QRCode from './common/QRCode.vue'
 
@@ -175,7 +176,7 @@ onMounted(loadList)
 
 function fmt(s: string): string {
   if (!s) return '—'
-  return s.replace('T', ' ').slice(0, 16)
+  return fmtLocal(s)
 }
 </script>
 
