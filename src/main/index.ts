@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
 import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputShutdown } from './remote-input'
+import { clearSystemProxy } from './system-proxy'
 import { IpcChannels, type NotifTarget } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
@@ -383,7 +384,8 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
-  // 注入助手（python3 uinput / osascript CGEvent）不会随父进程自动退出，必须显式收掉
+  // 退出前清理系统代理（停本地转发 + 注册表还原），避免残留失效代理导致用户离线
+  void clearSystemProxy().catch(() => {})
   remoteInputShutdown()
 })
 

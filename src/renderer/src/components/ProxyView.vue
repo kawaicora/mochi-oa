@@ -94,7 +94,7 @@ async function setProxy(r: ProxyReq): Promise<void> {
       proxyOn.value = true
       lastProxy.value = { host: r.account.host, port: r.account.port }
       // 持久化代理信息（含 expiresAt），供启动检查/到期自动断开
-      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ host: r.account.host, port: r.account.port, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
+      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
     } else alert('设置代理失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 设置失败', e); alert('设置代理异常') }
 }
