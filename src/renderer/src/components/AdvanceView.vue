@@ -220,9 +220,9 @@ async function loadReceived(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdvanceReceived(companyId.value)
     if (!ack.ok) { console.error('[备用金] 收到审批加载失败', ack.error); return }
-    const d = (ack.data as { pending?: AdvanceRequest[]; handled?: AdvanceRequest[] }) ?? {}
+    const d = (ack.data as { pending?: AdvanceRequest[]; processed?: AdvanceRequest[] }) ?? {}
     receivedPending.value = d.pending ?? []
-    receivedDone.value = d.handled ?? []
+    receivedDone.value = d.processed ?? []
   } catch (e) { console.error('[备用金] 收到审批加载异常', e) }
 }
 async function loadCc(): Promise<void> {
