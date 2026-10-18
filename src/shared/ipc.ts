@@ -186,6 +186,17 @@ export const IpcChannels = {
   serverCheckinRulesGet: 'server:checkin:rules:get',
   serverCheckinRulesSave: 'server:checkin:rules:save',
   serverCheckinStatusGet: 'server:checkin:status:get',
+  // 网络申请（代理）
+  serverProxyCreate: 'server:proxy:create',
+  serverProxyList: 'server:proxy:list',
+  serverProxyGet: 'server:proxy:get',
+  serverProxyApprove: 'server:proxy:approve',
+  serverProxyReject: 'server:proxy:reject',
+  serverProxyRenew: 'server:proxy:renew',
+  serverProxyAccountList: 'server:proxy:account:list',
+  // 设置/断开系统代理（主进程本地操作，不走 socket）
+  systemProxySet: 'system:proxy:set',
+  systemProxyClear: 'system:proxy:clear',
   // 资产管理（企业资源，公司隔离；增删改/流转=admin，列表/详情=成员可读）
   serverAssetCreate: 'server:asset:create',
   serverAssetList: 'server:asset:list',

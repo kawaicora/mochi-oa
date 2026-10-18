@@ -15,6 +15,7 @@ import ReportView from './ReportView.vue'
 import AttendanceHome from './AttendanceHome.vue'
 import AssetView from './AssetView.vue'
 import JobView from './JobView.vue'
+import ProxyView from './ProxyView.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
@@ -24,7 +25,7 @@ import type { ServerSession } from '@shared/server-types'
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'attendance' | 'asset' | 'job'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'attendance' | 'asset' | 'job' | 'proxy'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
@@ -35,7 +36,8 @@ const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   report: { label: '报表', icon: 'fas fa-file-alt' },
   attendance: { label: '考勤', icon: 'fas fa-user-clock' },
   asset: { label: '资产', icon: 'fas fa-box-open' },
-  job: { label: '职位', icon: 'fas fa-id-badge' }
+  job: { label: '职位', icon: 'fas fa-id-badge' },
+  proxy: { label: '网络申请', icon: 'fas fa-globe' }
 }
 // 报表需公司上下文：未加入公司时不显示导航按钮
 const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
@@ -258,7 +260,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="(k !== 'report' && k !== 'todo' && k !== 'attendance' && k !== 'asset' && k !== 'job') || hasCompany"
+            v-show="(k !== 'report' && k !== 'todo' && k !== 'attendance' && k !== 'asset' && k !== 'job' && k !== 'proxy') || hasCompany"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
@@ -325,6 +327,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'attendance'"><AttendanceHome /></template>
         <template v-else-if="nav === 'asset'"><AssetView /></template>
         <template v-else-if="nav === 'job'"><JobView /></template>
+        <template v-else-if="nav === 'proxy'"><ProxyView /></template>
       </div>
     </div>
 

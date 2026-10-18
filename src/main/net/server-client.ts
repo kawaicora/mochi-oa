@@ -1637,6 +1637,34 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'checkin:status:get', payload)
   }
+  async proxyCreate(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:create', payload)
+  }
+  async proxyList(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:list', payload)
+  }
+  async proxyGet(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:get', { id })
+  }
+  async proxyApprove(id: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:approve', { id })
+  }
+  async proxyReject(id: number, reason?: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:reject', { id, reason })
+  }
+  async proxyRenew(id: number, days: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:renew', { id, days })
+  }
+  async proxyAccountList(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:account:list', { companyId })
+  }
 
   // ─── 资产管理（公司隔离）─────────
   async assetCreate(payload: Record<string, unknown>): Promise<Ack> {

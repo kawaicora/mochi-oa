@@ -340,6 +340,15 @@ const api = {
   serverCheckinRulesGet: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCheckinRulesGet, companyId),
   serverCheckinRulesSave: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverCheckinRulesSave, payload),
   serverCheckinStatusGet: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverCheckinStatusGet, payload),
+  serverProxyCreate: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverProxyCreate, payload),
+  serverProxyList: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverProxyList, payload),
+  serverProxyGet: (id: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyGet, id),
+  serverProxyApprove: (id: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyApprove, id),
+  serverProxyReject: (id: number, reason?: string): Promise<Ack> => safeInvoke(IpcChannels.serverProxyReject, id, reason || ''),
+  serverProxyRenew: (id: number, days: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyRenew, id, days),
+  serverProxyAccountList: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyAccountList, companyId),
+  systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
+  systemProxyClear: (): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear),
   // 取本机 MAC（返回大写无冒号字符串）
   getMac: (): Promise<string> => safeInvoke(IpcChannels.getMac),
   // 资产管理

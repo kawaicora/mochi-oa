@@ -36,3 +36,20 @@ export function fmtTime(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return String(iso)
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+/** 人性化：今天 HH:mm / 昨天 HH:mm / 昨天之前 yyyy-MM-dd HH:mm */
+export function fmtHuman(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  const now = new Date()
+  const startOfDay = (x: Date): number => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const today = startOfDay(now)
+  const that = startOfDay(d)
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const diffDays = Math.round((today - that) / 86400000)
+  if (diffDays === 0) return `今天 ${hm}`
+  if (diffDays === 1) return `昨天 ${hm}`
+  if (diffDays === -1) return `明天 ${hm}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`
+}

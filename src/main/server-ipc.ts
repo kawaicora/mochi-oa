@@ -11,6 +11,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import * as iconv from 'iconv-lite'
+import { setSystemProxy, clearSystemProxy } from './system-proxy'
 import { IpcChannels, IpcEvents, ScreenshotToolbar, type NotifKind } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './notif'
@@ -538,6 +539,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverCheckinRulesGet, (_e, companyId) => serverClient.checkinRulesGet(Number(companyId) || 0))
   ipcMain.handle(IpcChannels.serverCheckinRulesSave, (_e, payload) => serverClient.checkinRulesSave((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverCheckinStatusGet, (_e, payload) => serverClient.checkinStatusGet((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverProxyCreate, (_e, payload) => serverClient.proxyCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverProxyList, (_e, payload) => serverClient.proxyList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverProxyGet, (_e, id) => serverClient.proxyGet(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverProxyApprove, (_e, id) => serverClient.proxyApprove(Number(id) || 0))
+  ipcMain.handle(IpcChannels.serverProxyReject, (_e, id, reason) => serverClient.proxyReject(Number(id) || 0, String(reason || '')))
+  ipcMain.handle(IpcChannels.serverProxyRenew, (_e, id, days) => serverClient.proxyRenew(Number(id) || 0, Number(days) || 0))
+  ipcMain.handle(IpcChannels.serverProxyAccountList, (_e, companyId) => serverClient.proxyAccountList(Number(companyId) || 0))
+  // 系统代理（本地操作）
+  ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number }))
+  ipcMain.handle(IpcChannels.systemProxyClear, () => clearSystemProxy())
   // 取本机 MAC：遍历非 internal 接口取第一个 mac，全大写去冒号；异常回退空串
   ipcMain.handle(IpcChannels.getMac, () => {
     try {

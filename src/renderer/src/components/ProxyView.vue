@@ -1,0 +1,185 @@
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useAppStore } from '../stores/app'
+import MemberPicker from './common/MemberPicker.vue'
+import { toPlain } from '../utils/plain'
+import { fmtHuman } from '../utils/time'
+
+/**
+ * 网络申请（代理）：员工申请 + admin 审批。
+ * 审批通过后显示账号信息，可一键设置/断开系统代理。
+ */
+interface ProxyReq {
+  id: number
+  companyId: number
+  userId: number
+  reason: string
+  durationDays: number
+  status: 'pending' | 'approved' | 'rejected'
+  approverId: number | null
+  rejectReason?: string
+  createdAt: string
+  approvedAt?: string
+  nick?: string
+  username?: string
+  account?: { host: string; port: number; username: string; password: string } | null
+}
+const app = useAppStore()
+const companyId = computed(() => app.activeCompanyId)
+
+// 表单
+const reason = ref('')
+const durationDays = ref(7)
+const approverIds = ref<number[]>([])
+const approverOpen = ref(false)
+const card = ref(false) // 以消息发送
+const err = ref('')
+const okMsg = ref('')
+
+// 列表
+const list = ref<ProxyReq[]>([])
+const myTab = ref<'mine' | 'todo'>('mine')
+const proxyOn = ref(false)
+
+async function load(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverProxyList(toPlain({ companyId: companyId.value, mine: myTab.value === 'mine' }))
+    if (ack.ok) list.value = (ack.data as { requests?: ProxyReq[] })?.requests ?? []
+    else console.error('[代理] 列表加载失败', ack.error)
+  } catch (e) { console.error('[代理] 列表加载异常', e) }
+}
+
+async function submit(): Promise<void> {
+  err.value = ''; okMsg.value = ''
+  if (!companyId.value) return
+  if (!reason.value.trim()) { err.value = '请填写申请理由'; return }
+  if (!approverIds.value.length) { err.value = '请选择审批人'; return }
+  try {
+    const ack = await window.pantry.serverProxyCreate(toPlain({
+      companyId: companyId.value,
+      reason: reason.value.trim(),
+      durationDays: Number(durationDays.value) || 7,
+      approverIds: approverIds.value,
+      sendCard: card.value
+    }))
+    if (!ack.ok) { err.value = ack.error || '申请失败'; return }
+    okMsg.value = '申请已提交'
+    reason.value = ''; approverIds.value = []; card.value = false
+    await load()
+  } catch (e) { console.error('[代理] 提交异常', e); err.value = '提交异常' }
+}
+
+async function approve(r: ProxyReq): Promise<void> {
+  try {
+    const ack = await window.pantry.serverProxyApprove(r.id)
+    if (ack.ok) await load(); else console.error('[代理] 审批失败', ack.error)
+  } catch (e) { console.error('[代理] 审批异常', e) }
+}
+async function reject(r: ProxyReq): Promise<void> {
+  try {
+    const ack = await window.pantry.serverProxyReject(r.id)
+    if (ack.ok) await load(); else console.error('[代理] 拒绝失败', ack.error)
+  } catch (e) { console.error('[代理] 拒绝异常', e) }
+}
+
+async function setProxy(r: ProxyReq): Promise<void> {
+  if (!r.account) return
+  try {
+    const ack = await window.pantry.systemProxySet(toPlain({ host: r.account.host, port: r.account.port }))
+    if (ack.ok) proxyOn.value = true; else alert('设置代理失败：' + (ack.error || ''))
+  } catch (e) { console.error('[代理] 设置失败', e); alert('设置代理异常') }
+}
+async function clearProxy(): Promise<void> {
+  try {
+    const ack = await window.pantry.systemProxyClear()
+    if (ack.ok) proxyOn.value = false; else alert('断开失败：' + (ack.error || ''))
+  } catch (e) { console.error('[代理] 断开异常', e) }
+}
+
+const statusLabel: Record<string, string> = { pending: '待审批', approved: '已通过', rejected: '已拒绝' }
+
+onMounted(load)
+</script>
+
+<template>
+  <div class="pv">
+    <div class="pv-tabs">
+      <button :class="{ on: myTab === 'mine' }" @click="myTab = 'mine'; load()">我的申请</button>
+      <button v-if="app.isAdmin" :class="{ on: myTab === 'todo' }" @click="myTab = 'todo'; load()">待审批</button>
+    </div>
+
+    <!-- 申请表单（员工） -->
+    <div v-if="myTab === 'mine'" class="pv-form">
+      <div class="pv-t">申请网络代理</div>
+      <div class="pv-row"><label>理由</label><textarea v-model="reason" rows="2" placeholder="申请代理的用途"></textarea></div>
+      <div class="pv-row"><label>时长（天）</label><input type="number" v-model.number="durationDays" min="1" /></div>
+      <div class="pv-row"><label>审批人</label>
+        <button class="pv-pick" @click="approverOpen = true">{{ approverIds.length ? `已选 ${approverIds.length} 人` : '选择审批人' }}</button>
+      </div>
+      <div class="pv-row"><label><input type="checkbox" v-model="card" /> 以消息卡片发送给审批人</label></div>
+      <div v-if="err" class="pv-err">{{ err }}</div>
+      <div v-if="okMsg" class="pv-ok">{{ okMsg }}</div>
+      <div class="pv-row"><button class="pv-submit" @click="submit">提交申请</button></div>
+      <div v-if="proxyOn" class="pv-on">系统代理已开启　<button @click="clearProxy">断开代理</button></div>
+    </div>
+
+    <MemberPicker v-model="approverIds" :open="approverOpen" @close="approverOpen = false" />
+
+    <!-- 列表 -->
+    <div class="pv-list">
+      <div v-for="r in list" :key="r.id" class="pv-item" :class="r.status">
+        <div class="pv-item-head">
+          <span>#{{ r.id }} {{ r.nick || r.username }}</span>
+          <span class="pv-status">{{ statusLabel[r.status] }}</span>
+        </div>
+        <div class="pv-reason">{{ r.reason }}</div>
+        <div class="pv-meta">{{ fmtHuman(r.createdAt) }}　时长 {{ r.durationDays }} 天</div>
+        <div v-if="r.account" class="pv-acc">
+          <div>{{ r.account.host }}:{{ r.account.port }}　{{ r.account.username }} / {{ r.account.password }}</div>
+          <div class="pv-acc-btns">
+            <button v-if="!proxyOn" @click="setProxy(r)">设置系统代理</button>
+            <button v-else @click="clearProxy">断开代理</button>
+          </div>
+        </div>
+        <div v-if="myTab === 'todo' && r.status === 'pending'" class="pv-acts">
+          <button class="pv-approve" @click="approve(r)">通过</button>
+          <button class="pv-reject" @click="reject(r)">拒绝</button>
+        </div>
+      </div>
+      <div v-if="!list.length" class="pv-empty">暂无申请</div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.pv { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 18px; overflow: auto; }
+.pv-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--dt-border-light); margin-bottom: 10px; }
+.pv-tabs button { border: none; background: transparent; padding: 8px 14px; cursor: pointer; color: var(--dt-text-3); border-bottom: 2px solid transparent; }
+.pv-tabs button.on { color: var(--dt-primary); font-weight: 700; border-bottom-color: var(--dt-primary); }
+.pv-form { background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+.pv-t { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+.pv-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.pv-row label { min-width: 90px; color: var(--dt-text-3); }
+.pv-row textarea, .pv-row input { flex: 1; border: 1px solid var(--dt-border); border-radius: 4px; padding: 6px; font-size: 13px; }
+.pv-pick { border: 1px solid var(--dt-border); background: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.pv-err { color: #d92b3a; font-size: 13px; margin: 6px 0; }
+.pv-ok { color: #2fbb6b; font-size: 13px; margin: 6px 0; }
+.pv-submit { background: var(--dt-primary); color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }
+.pv-on { margin-top: 8px; color: #2fbb6b; font-size: 13px; }
+.pv-list { display: flex; flex-direction: column; gap: 8px; }
+.pv-item { background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px 14px; }
+.pv-item.approved { border-color: #2fbb6b; }
+.pv-item.rejected { border-color: #d92b3a; }
+.pv-item-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+.pv-status { font-size: 12px; color: var(--dt-text-3); }
+.pv-reason { font-size: 13px; margin: 6px 0; }
+.pv-meta { font-size: 12px; color: var(--dt-text-3); }
+.pv-acc { margin-top: 8px; padding: 8px; background: #f6f8fb; border-radius: 4px; font-size: 13px; }
+.pv-acc-btns { margin-top: 6px; }
+.pv-acc-btns button, .pv-acts button { margin-right: 8px; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
+.pv-approve { background: #2fbb6b; color: #fff; border: none; }
+.pv-reject { background: #d92b3a; color: #fff; border: none; }
+.pv-acts { margin-top: 8px; }
+.pv-empty { color: var(--dt-text-4); text-align: center; padding: 20px; font-size: 13px; }
+</style>
