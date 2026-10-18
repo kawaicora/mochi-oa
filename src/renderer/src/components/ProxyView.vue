@@ -7,9 +7,15 @@ import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
 import { removePending, addPending } from '../utils/reminder'
 
-// 显式"停止提醒"：从循环提醒集合移除该条（客户端侧；服务端无独立 stop 端点）
-function snoozeRemind(r: ProxyReq): void {
-  removePending('proxy:' + r.id)
+// 显式"停止提醒"：调服务端 proxy:request:notification:stop + 本地 removePending
+async function snoozeRemind(r: ProxyReq): Promise<void> {
+  err.value = ''; okMsg.value = ''
+  try {
+    const ack = await window.pantry.serverProxyNotifyStop(toPlain({ companyId: companyId.value, id: r.id }))
+    if (!ack.ok) { console.error('[代理] 停止提醒失败', ack.error); err.value = '停止提醒失败：' + (ack.error || ''); return }
+    removePending('proxy:' + r.id)
+    okMsg.value = '已停止对该条的循环提醒'
+  } catch (e) { console.error('[代理] 停止提醒异常', e); err.value = '停止提醒异常' }
 }
 
 /**

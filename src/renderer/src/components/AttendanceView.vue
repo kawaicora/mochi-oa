@@ -254,11 +254,15 @@ async function openReceived(r: AttendanceRequest): Promise<void> {
     await window.pantry.serverAttendanceCcView(toPlain({ companyId: companyId.value, requestId: r.id }))
   } catch (e) { console.error('[考勤] 抄送标记查看失败', e) }
 }
-// 显式"停止提醒"：从循环提醒集合移除该条（客户端侧；服务端无独立 stop 端点）
+// 显式"停止提醒"：调服务端 attendance:request:notification:stop + 本地 removePending
 async function snoozeRemind(r: AttendanceRequest): Promise<void> {
-  removePending('att:' + r.id)
-  okMsg.value = '已停止对该条的循环提醒'
   err.value = ''
+  try {
+    const ack = await window.pantry.serverAttendanceNotifyStop(toPlain({ companyId: companyId.value, id: r.id }))
+    if (!ack.ok) { console.error('[考勤] 停止提醒失败', ack.error); err.value = '停止提醒失败：' + (ack.error || ''); return }
+    removePending('att:' + r.id)
+    okMsg.value = '已停止对该条的循环提醒'
+  } catch (e) { console.error('[考勤] 停止提醒异常', e); err.value = '停止提醒异常' }
 }
 
 watch(tab, () => { okMsg.value = ''; err.value = '' })

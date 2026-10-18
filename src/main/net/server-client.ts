@@ -1675,6 +1675,11 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'proxy:account:list', { companyId })
   }
+  /** 主动停止某网络申请的循环提醒（服务端 proxy:request:notification:stop） */
+  async proxyNotifyStop(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:request:notification:stop', payload)
+  }
   async attendanceReceived(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:received:list', payload)
@@ -1686,6 +1691,11 @@ export class ServerClient extends EventEmitter {
   async attendanceCcView(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:cc:view', payload)
+  }
+  /** 主动停止某考勤审批的循环提醒（服务端 attendance:request:notification:stop） */
+  async attendanceNotifyStop(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'attendance:request:notification:stop', payload)
   }
 
   // ─── 资产管理（公司隔离）─────────

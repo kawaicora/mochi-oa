@@ -548,9 +548,11 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverProxyReject, (_e, payload) => serverClient.proxyReject((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverProxyRenew, (_e, payload) => serverClient.proxyRenew((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverProxyAccountList, (_e, companyId) => serverClient.proxyAccountList(Number(companyId) || 0))
+  ipcMain.handle(IpcChannels.serverProxyNotifyStop, (_e, payload) => serverClient.proxyNotifyStop((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceReceived, (_e, payload) => serverClient.attendanceReceived((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCc, (_e, payload) => serverClient.attendanceCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCcView, (_e, payload) => serverClient.attendanceCcView((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceNotifyStop, (_e, payload) => serverClient.attendanceNotifyStop((payload as Record<string, unknown>) ?? {}))
   // 系统代理（本地操作）
   ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number; username?: string; password?: string }))
   ipcMain.handle(IpcChannels.systemProxyClear, (_e, target) => clearSystemProxy(target as { host?: string; port?: number } | undefined))

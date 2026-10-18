@@ -194,10 +194,12 @@ export const IpcChannels = {
   serverProxyReject: 'server:proxy:reject',
   serverProxyRenew: 'server:proxy:renew',
   serverProxyAccountList: 'server:proxy:account:list',
+  serverProxyNotifyStop: 'server:proxy:notify:stop',
   // 考勤：收到审批/收到抄送
   serverAttendanceReceived: 'server:attendance:received',
   serverAttendanceCc: 'server:attendance:cc',
   serverAttendanceCcView: 'server:attendance:cc:view',
+  serverAttendanceNotifyStop: 'server:attendance:notify:stop',
   // 设置/断开系统代理（主进程本地操作，不走 socket）
   systemProxySet: 'system:proxy:set',
   systemProxyClear: 'system:proxy:clear',
