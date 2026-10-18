@@ -24,7 +24,18 @@ export async function startLocalForward(remoteHost: string, remotePort: number, 
       headers: { ...req.headers, 'proxy-authorization': auth }
     }
     const proxyReq = http.request(options, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+      // 上游 407/认证失败 → 本地返回 502，绝不透传 Proxy-Authenticate 给浏览器（避免 ERR_PROXY_AUTH_UNSUPPORTED）
+      if (proxyRes.statusCode === 407) {
+        console.error('[local-proxy] 上游代理认证失败(407)，本地返回 502')
+        res.writeHead(502, { 'content-type': 'text/plain' })
+        res.end('Upstream proxy auth failed')
+        proxyRes.resume()
+        return
+      }
+      // 过滤掉上游可能返回的 Proxy-Authenticate 头
+      const headers = { ...proxyRes.headers }
+      delete headers['proxy-authenticate']
+      res.writeHead(proxyRes.statusCode || 502, headers)
       proxyRes.pipe(res)
     })
     proxyReq.on('error', (e) => {
@@ -44,6 +55,15 @@ export async function startLocalForward(remoteHost: string, remotePort: number, 
     remote.on('data', (chunk) => {
       if (!responded) {
         responded = true
+        // 上游 CONNECT 响应 407/失败 → 本地返回 502，不透传认证质询
+        const head = chunk.toString('utf8', 0, Math.min(chunk.length, 256))
+        if (/^HTTP\/1\.[01] 407/.test(head) || /^HTTP\/1\.[01] [45]\d\d/.test(head)) {
+          console.error('[local-proxy] CONNECT 上游失败：', head.split('\r\n')[0])
+          clientSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+          clientSocket.end()
+          remote.end()
+          return
+        }
         clientSocket.write(chunk)
         if (head.length) remote.write(head)
         remote.pipe(clientSocket)
