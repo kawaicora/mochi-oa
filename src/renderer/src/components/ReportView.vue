@@ -80,8 +80,16 @@ function sundayStr(): string { const m = mondayDate(); return toStr(new Date(m.g
 /** 当前周期归属日：日报=今天，周报=本周周一 */
 function periodDate(): string { return type.value === 'daily' ? todayStr() : mondayStr() }
 
-// ── 顶部：日报/周报切换 ──
+// ── 顶部：四个独立标签页 日报/周报/提交历史/我收到的 ──
 const type = ref<ReportType>('daily')
+const mainTab = ref<'daily' | 'weekly' | 'history' | 'inbox'>('daily')
+const histType = ref<'all' | ReportType>('all') // 提交历史 tab 的类型筛选
+function setMainTab(t: 'daily' | 'weekly' | 'history' | 'inbox') {
+  mainTab.value = t
+  if (t === 'daily' || t === 'weekly') type.value = t
+  else if (t === 'history') { histPage.value = 1; loadHistory('all') }
+  else if (t === 'inbox') loadInbox()
+}
 const periodLabel = computed(() => (type.value === 'daily' ? `今日 ${todayStr()}` : `本周 ${mondayStr()} ~ ${sundayStr()}`))
 
 // ── 我的报表编辑区 ──
@@ -231,11 +239,11 @@ const histPage = ref(1)
 const histTotal = ref(0)
 const pageSize = 10
 const detail = ref<ReportItem | null>(null)
-async function loadHistory(): Promise<void> {
+async function loadHistory(hType: 'all' | ReportType = type.value): Promise<void> {
   if (!companyId.value) return
   try {
     const ack = await window.pantry.serverReportList({
-      companyId: companyId.value, type: type.value,
+      companyId: companyId.value, type: hType === 'all' ? '' : hType,
       page: histPage.value, pageSize
     })
     if (!ack.ok) { console.error('[报表] 历史列表失败', ack.error); return }
@@ -246,7 +254,6 @@ async function loadHistory(): Promise<void> {
 const histPages = computed(() => Math.max(1, Math.ceil(histTotal.value / pageSize)))
 
 // ── 我收到的（别人发给我的）──
-const sideTab = ref<'mine' | 'inbox'>('mine')
 const inbox = ref<ReportItem[]>([])
 const inboxPage = ref(1)
 const inboxTotal = ref(0)
@@ -369,14 +376,16 @@ onUnmounted(() => { offReminder?.() })
 
 <template>
   <div class="rp">
-    <!-- 顶部：标题 + 日报/周报切换 + 周期 -->
+    <!-- 顶部：四个独立标签页 日报/周报/提交历史/我收到的 -->
     <div class="rp-bar">
       <span class="rp-title"><i class="fas fa-file-alt"></i> 报表</span>
       <div class="rp-seg">
-        <button :class="{ on: type === 'daily' }" @click="type = 'daily'">日报</button>
-        <button :class="{ on: type === 'weekly' }" @click="type = 'weekly'">周报</button>
+        <button :class="{ on: mainTab === 'daily' }" @click="setMainTab('daily')">日报</button>
+        <button :class="{ on: mainTab === 'weekly' }" @click="setMainTab('weekly')">周报</button>
+        <button :class="{ on: mainTab === 'history' }" @click="setMainTab('history')">提交历史</button>
+        <button :class="{ on: mainTab === 'inbox' }" @click="setMainTab('inbox')">我收到的</button>
       </div>
-      <span class="rp-period">{{ periodLabel }}</span>
+      <span v-if="mainTab === 'daily' || mainTab === 'weekly'" class="rp-period">{{ periodLabel }}</span>
     </div>
 
     <!-- 到点提醒条 -->
@@ -389,8 +398,8 @@ onUnmounted(() => { offReminder?.() })
     <div v-if="err" class="rp-err">{{ err }}</div>
     <div v-if="okMsg" class="rp-ok">{{ okMsg }}<i v-if="submittedFlash" class="fas fa-check-circle"></i> 已提交</div>
 
-    <!-- 上：我的编辑区 -->
-    <div class="rp-edit">
+    <!-- 上：我的编辑区（仅在 日报/周报 标签页显示） -->
+    <div v-if="mainTab === 'daily' || mainTab === 'weekly'" class="rp-edit">
       <div class="rp-sec-head">我的{{ type === 'daily' ? '日报' : '周报' }}
         <span v-if="current && current.submitted" class="rp-submitted-badge">已提交</span>
         <span v-else-if="current" class="rp-draft-badge">草稿</span>
@@ -432,15 +441,11 @@ onUnmounted(() => { offReminder?.() })
       </div>
     </div>
 
-    <!-- 下：记录区（我的提交 / 我收到的 两个独立 tab） -->
+    <!-- 下：记录区（按 4 个标签页独立展示，不挤在一起） -->
     <div class="rp-records">
-      <div class="rp-seg">
-        <button :class="{ on: sideTab === 'mine' }" @click="sideTab = 'mine'">我的提交</button>
-        <button :class="{ on: sideTab === 'inbox' }" @click="sideTab = 'inbox'">我收到的</button>
-      </div>
-
-      <!-- 我的提交 -->
-      <template v-if="sideTab === 'mine'">
+      <!-- 日报 / 周报 tab：该类型我的提交记录 -->
+      <template v-if="mainTab === 'daily' || mainTab === 'weekly'">
+        <div class="rp-seg-head">我的{{ type === 'daily' ? '日报' : '周报' }}提交</div>
         <div class="rp-table-wrap">
           <div v-if="!history.length" class="rp-empty">暂无提交记录</div>
           <table v-else class="rp-table">
@@ -465,8 +470,41 @@ onUnmounted(() => { offReminder?.() })
         </div>
       </template>
 
-      <!-- 我收到的 -->
+      <!-- 提交历史 tab：我的提交（全部 / 按类型筛选） -->
+      <template v-else-if="mainTab === 'history'">
+        <div class="rp-seg">
+          <button :class="{ on: histType === 'all' }" @click="histType = 'all'; histPage = 1; loadHistory('all')">全部</button>
+          <button :class="{ on: histType === 'daily' }" @click="histType = 'daily'; histPage = 1; loadHistory('daily')">日报</button>
+          <button :class="{ on: histType === 'weekly' }" @click="histType = 'weekly'; histPage = 1; loadHistory('weekly')">周报</button>
+        </div>
+        <div class="rp-table-wrap">
+          <div v-if="!history.length" class="rp-empty">暂无提交记录</div>
+          <table v-else class="rp-table">
+            <thead><tr><th>类型</th><th>周期</th><th>标题</th><th>状态</th><th>提交时间</th></tr></thead>
+            <tbody>
+              <tr v-for="r in history" :key="r.id" @click="detail = r" class="rp-row">
+                <td>{{ r.type === 'daily' ? '日报' : '周报' }}</td>
+                <td>{{ r.periodDate }}</td>
+                <td class="rp-cell-title">{{ r.title || '（无标题）' }}</td>
+                <td>
+                  <span v-if="r.submitted" class="rp-badge ok">已提交</span>
+                  <span v-else class="rp-badge warn">草稿</span>
+                </td>
+                <td>{{ fmtDateTime(r.submittedAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="rp-pager">
+          <button class="dt-btn" :disabled="histPage <= 1" @click="histPage--; loadHistory(histType === 'all' ? 'all' : histType)">上一页</button>
+          <span>{{ histPage }} / {{ histPages }}</span>
+          <button class="dt-btn" :disabled="histPage >= histPages" @click="histPage++; loadHistory(histType === 'all' ? 'all' : histType)">下一页</button>
+        </div>
+      </template>
+
+      <!-- 我收到的 tab -->
       <template v-else>
+        <div class="rp-seg-head">我收到的</div>
         <div class="rp-table-wrap">
           <div v-if="!inbox.length" class="rp-empty">还没有收到别人发给你的报表</div>
           <table v-else class="rp-table">
