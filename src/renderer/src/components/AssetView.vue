@@ -4,7 +4,7 @@ import { useAppStore } from '../stores/app'
 import { fmtHuman, fmtLocal } from '../utils/time'
 import { useServerStore } from '../stores/server'
 import QRCode from './common/QRCode.vue'
-import MemberPicker from './common/MemberPicker.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AssetType = 'purchase' | 'rent' | 'borrow'
@@ -411,7 +411,7 @@ function fmt(s: string): string {
           <label class="av-lab">经办人</label>
           <div class="av-form-readonly">当前登录人（系统自动记录）</div>
           <label class="av-lab">相关人</label>
-          <MemberPicker v-model="relatedUserIds" :max="3" placeholder="选择相关成员（客户/借出对象等）" />
+          <CompanyContactPicker v-model="relatedUserIds" :max="3" title="选择相关成员" placeholder="选择相关成员（客户/借出对象等）" />
           <label class="av-lab">备注</label>
           <input v-model="flowNote" class="srv-input" />
         </div>

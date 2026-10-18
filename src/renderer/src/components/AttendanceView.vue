@@ -4,7 +4,7 @@ import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
-import MemberPicker from './common/MemberPicker.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { addPending, removePending } from '../utils/reminder'
 
@@ -332,15 +332,15 @@ onMounted(async () => {
       <label class="at-lab">事由 <i class="req">*</i></label>
       <RichTextEditor v-model="reason" placeholder="请填写事由…（可附图/视频/附件）" />
 
-      <!-- 发起时动态选择审批人/抄送人（复用公共 MemberPicker，随草稿保存） -->
+      <!-- 发起时动态选择审批人/抄送人（统一 CompanyContactPicker，随草稿保存） -->
       <div class="at-pick-row">
         <div>
           <label class="at-lab">审批人</label>
-          <MemberPicker v-model="approverIds" placeholder="选择审批人" />
+          <CompanyContactPicker v-model="approverIds" title="选择审批人" placeholder="选择审批人" />
         </div>
         <div>
           <label class="at-lab">抄送人</label>
-          <MemberPicker v-model="ccIds" placeholder="选择抄送人" />
+          <CompanyContactPicker v-model="ccIds" title="选择抄送人" placeholder="选择抄送人" />
         </div>
       </div>
 

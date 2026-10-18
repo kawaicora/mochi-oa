@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import RichTextEditor from './common/RichTextEditor.vue'
-import MemberPicker from './common/MemberPicker.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 
 // ── 类型（与服务端冻结协议对齐，content 存 HTML）──
@@ -422,10 +422,10 @@ onUnmounted(() => { offReminder?.() })
       <label class="rp-lab">内容</label>
       <RichTextEditor v-model="contentHtml" :placeholder="type === 'daily' ? '今天做了什么 / 遇到什么问题 / 明天计划…' : '本周总结 / 下周计划…'" />
 
-      <!-- 发送给（接收人多选，仅已加入公司显示；通用 MemberPicker） -->
+      <!-- 发送给（接收人多选，仅已加入公司显示；统一 CompanyContactPicker） -->
       <div v-if="hasCompany" class="rp-recv">
         <label class="rp-lab">发送给</label>
-        <MemberPicker v-model="recipients" placeholder="选择接收人" />
+        <CompanyContactPicker v-model="recipients" title="选择接收人" placeholder="选择接收人" />
       </div>
 
       <div class="rp-actions">

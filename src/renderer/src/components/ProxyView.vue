@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
-import MemberPicker from './common/MemberPicker.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
@@ -161,7 +161,7 @@ onMounted(async () => {
       <div v-if="proxyOn" class="pv-on">系统代理已开启　<button @click="clearProxy">断开代理</button></div>
     </div>
 
-    <MemberPicker v-model="approverIds" :open="approverOpen" @close="approverOpen = false" />
+    <CompanyContactPicker v-model="approverIds" :open="approverOpen" @update:open="approverOpen = $event" controlled title="选择审批人" />
 
     <!-- 列表 -->
     <div class="pv-list">
