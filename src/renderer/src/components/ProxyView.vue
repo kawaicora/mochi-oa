@@ -89,13 +89,18 @@ async function setProxy(r: ProxyReq): Promise<void> {
   if (!r.account) return
   try {
     const ack = await window.pantry.systemProxySet(toPlain({ host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password }))
-    if (ack.ok) { proxyOn.value = true; lastProxy.value = { host: r.account.host, port: r.account.port } } else alert('设置代理失败：' + (ack.error || ''))
+    if (ack.ok) {
+      proxyOn.value = true
+      lastProxy.value = { host: r.account.host, port: r.account.port }
+      // 持久化代理信息（含 expiresAt），供启动检查/到期自动断开
+      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ host: r.account.host, port: r.account.port, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
+    } else alert('设置代理失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 设置失败', e); alert('设置代理异常') }
 }
 async function clearProxy(): Promise<void> {
   try {
     const ack = await window.pantry.systemProxyClear(toPlain({ host: lastProxy.value?.host, port: lastProxy.value?.port }))
-    if (ack.ok) proxyOn.value = false; else alert('断开失败：' + (ack.error || ''))
+    if (ack.ok) { proxyOn.value = false; try { localStorage.removeItem('mochi:proxyActive') } catch { /* ignore */ } } else alert('断开失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 断开异常', e) }
 }
 

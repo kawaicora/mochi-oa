@@ -43,18 +43,22 @@ export async function setSystemProxy(t: ProxyTarget): Promise<{ ok: boolean; err
   const port = Number(t.port)
   if (!host || !port) return { ok: false, error: '代理地址不完整' }
   if (process.platform !== 'win32') {
-    // mac/linux 简单实现（无回滚，非主平台）
     try {
       if (process.platform === 'darwin') {
         const { stdout } = await execAsync('networksetup -listallnetworkservices')
         const svc = stdout.split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('*'))[0] || 'Wi-Fi'
-        await execAsync(`networksetup -setwebproxy "${svc}" ${host} ${port}`)
-        await execAsync(`networksetup -setsecurewebproxy "${svc}" ${host} ${port}`)
+        const u = t.username ? `-u "${t.username}"` : ''
+        const p = t.password ? `-p "${t.password}"` : ''
+        await execAsync(`networksetup -setwebproxy "${svc}" ${host} ${port} ${u} ${p}`.trim())
+        await execAsync(`networksetup -setsecurewebproxy "${svc}" ${host} ${port} ${u} ${p}`.trim())
         await execAsync(`networksetup -setwebproxystate "${svc}" on`)
       } else {
         await execAsync(`gsettings set org.gnome.system.proxy mode 'manual'`)
         await execAsync(`gsettings set org.gnome.system.proxy.http host '${host}'`)
         await execAsync(`gsettings set org.gnome.system.proxy.http port ${port}`)
+        // 环境变量凭据（终端/多数 CLI 应用生效；GUI 应用限制见文件尾注释）
+        const cred = t.username ? `${encodeURIComponent(t.username)}:${encodeURIComponent(t.password || '')}@` : ''
+        console.log(`[system-proxy] Linux: 提示用户设置环境变量 http_proxy=http://${cred}${host}:${port}`)
       }
       return { ok: true }
     } catch (e) { return { ok: false, error: String(e) } }

@@ -23,6 +23,7 @@ import type {
 import type { NotifTarget } from '../../../shared/ipc'
 import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type NotifyPolicy } from '../utils/notify-manager'
 import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
+import { toPlain } from '../utils/plain'
 import { mergeReadPosition } from '../utils/read-receipt'
 
 /** 从 ack 提取 data 载荷 */
@@ -431,6 +432,18 @@ export const useAppStore = defineStore('app', () => {
       await switchCompany(first)
       await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
       ready.value = true
+      // 启动代理生命周期检查：本地有未过期账号→保留；过期→自动断开
+      try {
+        const raw = localStorage.getItem('mochi:proxyActive')
+        if (raw) {
+          const info = JSON.parse(raw) as { host: string; port: number; expiresAt?: string }
+          if (info.expiresAt && new Date(info.expiresAt).getTime() < Date.now()) {
+            console.log('[proxy] 启动检查：本地代理账号已过期，自动断开')
+            await window.pantry.systemProxyClear(toPlain({ host: info.host, port: info.port }))
+            localStorage.removeItem('mochi:proxyActive')
+          }
+        }
+      } catch (e) { console.error('[proxy] 启动检查异常', e) }
       // 启动 1h 循环提醒：定时复查仍 pending 的审批，重新弹业务通知
       startReminder(async () => {
         try {
