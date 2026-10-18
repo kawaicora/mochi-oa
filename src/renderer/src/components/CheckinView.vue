@@ -171,12 +171,17 @@ async function doCheckin(): Promise<void> {
     } else {
       // 按回包 kind 提示：first=上班 / second=下班 / override=覆盖下班
       const kind = (ack.data as { kind?: string } | undefined)?.kind
-      punchMsg.value = kind === 'first' ? '已记录上班时间'
+      const kindText = kind === 'first' ? '已记录上班时间'
         : kind === 'second' ? '已记录下班时间'
         : kind === 'override' ? '已更新下班时间'
         : '打卡成功'
       await loadData()
       await loadStatus()
+      // 下班/覆盖打卡后必须显示当天【综合状态】（迟到/早退/正常/休息），不得无脑提示"已记录下班时间"。
+      // 全天状态 = 服务端按上下班时间+打卡规则(大小周/豁免/迟到早退判定)综合判定。
+      const st = dayStatus.value
+      const stText = st ? statusLabel[st.status] : ''
+      punchMsg.value = st && stText ? `${kindText} · 当天状态：${stText}` : kindText
     }
   } catch (e) {
     console.error('[打卡] 打卡异常', e)
