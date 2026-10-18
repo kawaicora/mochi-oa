@@ -182,6 +182,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('chatReadReceipt', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverChatReadReceipt, d))
   serverClient.on('sessionNewDevice', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionNewDevice, d))
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
+  serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
+  serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
   // 断线重试失败 → 渲染层提示并回登录页（token 保留，不用清）
   serverClient.on('reconnectGaveUp', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverReconnectGaveUp, d))
 

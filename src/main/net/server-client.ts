@@ -467,6 +467,16 @@ export class ServerClient extends EventEmitter {
     socket.on('conversations:updated', (d: unknown) => this.emit('conversationsUpdated', d))
     socket.on('chat:readReceipt', (d: unknown) => this.emit('chatReadReceipt', d))
 
+    // 公司通知类推送：proxy 审批 / 考勤审批等 → 统一 emit('companyNotification')
+    socket.on('proxy:request:notification', (d: unknown) => {
+      console.log('[companyNotif] proxy:request:notification', d)
+      this.emit('companyNotification', d)
+    })
+    socket.on('attendance:request:notification', (d: unknown) => {
+      console.log('[companyNotif] attendance:request:notification', d)
+      this.emit('companyNotification', d)
+    })
+
     // 多会话推送：新设备登录 → 本端弹窗提醒；本端会话被踢/过期 → 清 token 回登录页
     socket.on('auth:newDeviceLogin', (d: { sessionId: number; device: string; ip: string; at: string }) =>
       this.emit('sessionNewDevice', d)

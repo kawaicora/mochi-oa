@@ -478,6 +478,7 @@ const api = {
   onCompanyUpdated: (l: (d: { companyId: number }) => void) => subscribe<{ companyId: number }>(IpcEvents.companyUpdated, l),
   onCompanyRemoved: (l: (d: { companyId: number }) => void) => subscribe<{ companyId: number }>(IpcEvents.companyRemoved, l),
   onCompanyAdded: (l: (d: { companyId: number }) => void) => subscribe<{ companyId: number }>(IpcEvents.companyAdded, l),
+  onCompanyNotified: (l: (d: unknown) => void) => subscribe<unknown>(IpcEvents.companyNotified, l),
   onGroupAdded: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupAdded, l),
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),

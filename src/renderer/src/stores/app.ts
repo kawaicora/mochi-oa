@@ -22,6 +22,7 @@ import type {
 } from '../../../shared/server-types'
 import type { NotifTarget } from '../../../shared/ipc'
 import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type NotifyPolicy } from '../utils/notify-manager'
+import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
 import { mergeReadPosition } from '../utils/read-receipt'
 
 /** 从 ack 提取 data 载荷 */
@@ -308,6 +309,18 @@ export const useAppStore = defineStore('app', () => {
     if (activeCompanyId.value) void refreshMembers()
     void refreshConversations()
   })
+  // 业务通知（proxy/attendance 审批推送）→ 弹窗 + 消息铃声
+  window.pantry.onCompanyNotified((d) => {
+    try {
+      const p = (d ?? {}) as { title?: string; body?: string; requestId?: number; type?: string }
+      void notifyEvent({
+        kind: 'company',
+        title: p.title || '业务通知',
+        body: p.body || '您有新的审批待处理',
+        force: true
+      })
+    } catch (e) { console.error('[app] 业务通知处理失败', e) }
+  })
   // 会话已读/置顶他端同步：增量更新指定会话，避免全量刷新覆盖本地新消息未读自增
   window.pantry.onServerConversationsUpdated((d) => {
     const p = (d ?? {}) as { conversationId?: number; unread?: number; pinned?: boolean }
@@ -418,6 +431,35 @@ export const useAppStore = defineStore('app', () => {
       await switchCompany(first)
       await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
       ready.value = true
+      // 启动 1h 循环提醒：定时复查仍 pending 的审批，重新弹业务通知
+      startReminder(async () => {
+        try {
+          if (!activeCompanyId.value) return
+          // 重新拉 proxy 待审批 + attendance 收到审批 pending
+          const [pAck, aAck] = await Promise.all([
+            window.pantry.serverProxyList({ companyId: activeCompanyId.value, mine: false }),
+            window.pantry.serverAttendanceReceived({ companyId: activeCompanyId.value })
+          ])
+          const stillPending = new Set<string>()
+          if (pAck.ok) {
+            for (const r of ((pAck.data as { requests?: any[] })?.requests ?? [])) {
+              if (r.status === 'pending') stillPending.add('proxy:' + r.id)
+            }
+          }
+          if (aAck.ok) {
+            for (const r of (((aAck.data as any)?.pending) ?? [])) {
+              stillPending.add('att:' + r.id)
+            }
+          }
+          // 对仍在 pendingIds 且仍 pending 的项重新弹通知
+          for (const key of pendingIds.value) {
+            if (stillPending.has(key)) {
+              await notifyEvent({ kind: 'company', title: '业务提醒', body: '您有审批待处理已超过 1 小时，请尽快处理', force: true })
+              break // 一轮只弹一次，避免刷屏
+            }
+          }
+        } catch (e) { console.error('[reminder] 复查异常', e) }
+      }, REMINDER_HOUR)
     } finally {
       loading.value = false
     }

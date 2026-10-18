@@ -371,7 +371,7 @@ export const NOTIF_KIND_LABEL: Record<NotifKind, string> = {
   task: '任务',
   alarm: '闹钟',
   system: '系统',
-  company: '公司通知'
+  company: '业务通知'
 }
 
 /** 主进程 → 渲染进程推送事件 */
@@ -392,6 +392,8 @@ export const IpcEvents = {
    * 与 sessionRevoked 的区别：那个是会话真的失效要清 token，这个只是连不上服务器。
    */
   serverReconnectGaveUp: 'server:event:reconnectGaveUp',
+  /** 业务通知（proxy/attendance 审批推送等）→ 渲染层弹通知+消息铃声 */
+  companyNotified: 'server:event:companyNotified',
   /** RTC：单人来电 / 拒接 / 对端加入离开 / SDP+ICE / 通话结束 / 群呼 */
   rtcDmIncoming: 'server:event:rtc:dmIncoming',
   rtcDmRejected: 'server:event:rtc:dmRejected',
