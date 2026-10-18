@@ -476,6 +476,14 @@ export class ServerClient extends EventEmitter {
       console.log('[companyNotif] attendance:request:notification', d)
       this.emit('companyNotification', d)
     })
+    socket.on('expense:request:notification', (d: unknown) => {
+      console.log('[companyNotif] expense:request:notification', d)
+      this.emit('companyNotification', d)
+    })
+    socket.on('advance:request:notification', (d: unknown) => {
+      console.log('[companyNotif] advance:request:notification', d)
+      this.emit('companyNotification', d)
+    })
     // 月度考勤统计已生成 → 公司通知（仅 owner/admin 收到，提示财务/人事私聊发送）
     socket.on('attendance:stat:generated', (d: unknown) => {
       console.log('[companyNotif] attendance:stat:generated', d)
