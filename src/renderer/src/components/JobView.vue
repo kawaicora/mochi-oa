@@ -62,14 +62,14 @@ const isNew = ref(false)
 const fName = ref('')
 const fDesc = ref('')
 const fSort = ref(0)
-const fEnabled = ref(true)
+const fEnabled = ref(false)
 const err = ref('')
 const okMsg = ref('')
 
 function openNew(): void {
   isNew.value = true
   editing.value = null
-  fName.value = ''; fDesc.value = ''; fSort.value = jobs.value.length ? Math.max(...jobs.value.map((j) => j.sortOrder)) + 1 : 1; fEnabled.value = true
+  fName.value = ''; fDesc.value = ''; fSort.value = jobs.value.length ? Math.max(...jobs.value.map((j) => j.sortOrder)) + 1 : 1; fEnabled.value = false
   err.value = ''; okMsg.value = ''
 }
 function openEdit(j: JobItem): void {
