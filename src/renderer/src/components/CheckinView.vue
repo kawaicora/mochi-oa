@@ -105,7 +105,7 @@ async function loadStatus(): Promise<void> {
   if (!companyId.value) return
   try {
     const ack = await window.pantry.serverCheckinStatusGet({ companyId: companyId.value, date: todayStr })
-    if (ack.ok) dayStatus.value = (ack.data as DayStatus) ?? null
+    if (ack.ok) dayStatus.value = ((ack.data as { status?: DayStatus })?.status ?? null) as DayStatus | null
     else console.error('[打卡] 当天状态加载失败', ack.error)
   } catch (e) { console.error('[打卡] 当天状态加载异常', e) }
 }
@@ -133,7 +133,7 @@ async function openRules(): Promise<void> {
 async function saveRules(): Promise<void> {
   if (!companyId.value || !rulesForm.value) return
   try {
-    const ack = await window.pantry.serverCheckinRulesSave(toPlain({ companyId: companyId.value, rules: rulesForm.value }))
+    const ack = await window.pantry.serverCheckinRulesSave(toPlain({ companyId: companyId.value, ...rulesForm.value }))
     if (!ack.ok) { console.error('[打卡] 规则保存失败', ack.error); return }
     showRules.value = false
     await loadStatus()
@@ -267,10 +267,10 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
           <div class="ci-r-row">
             <label>模式</label>
             <select v-model="rulesForm.mode">
-              <option value="double">双休</option>
-              <option value="single">单休</option>
-              <option value="none">无休</option>
-              <option value="alternate">大小周</option>
+              <option value="standard">双休</option>
+              <option value="sixday">单休</option>
+              <option value="nosleep">无休</option>
+              <option value="bigsmall">大小周</option>
             </select>
           </div>
           <div class="ci-r-row">
@@ -285,7 +285,7 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
             <input v-if="!w.rest" type="time" v-model="w.start" />
             <input v-if="!w.rest" type="time" v-model="w.end" />
           </div>
-          <div v-if="rulesForm.mode === 'alternate' && rulesForm.alt_rule" class="ci-r-row">
+          <div v-if="rulesForm.mode === 'bigsmall' && rulesForm.alt_rule" class="ci-r-row">
             <label>大小周交替日</label>
             <select v-model="rulesForm.alt_rule.dow">
               <option v-for="(n, i) in WEEK_NAMES" :key="i" :value="i">{{ n }}</option>
