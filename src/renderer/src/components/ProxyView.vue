@@ -41,6 +41,7 @@ const okMsg = ref('')
 const list = ref<ProxyReq[]>([])
 const myTab = ref<'mine' | 'todo'>('mine')
 const proxyOn = ref(false)
+const lastProxy = ref<{ host: string; port: number } | null>(null)
 
 async function load(): Promise<void> {
   if (!companyId.value) return
@@ -87,13 +88,13 @@ async function reject(r: ProxyReq): Promise<void> {
 async function setProxy(r: ProxyReq): Promise<void> {
   if (!r.account) return
   try {
-    const ack = await window.pantry.systemProxySet(toPlain({ host: r.account.host, port: r.account.port }))
-    if (ack.ok) proxyOn.value = true; else alert('设置代理失败：' + (ack.error || ''))
+    const ack = await window.pantry.systemProxySet(toPlain({ host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password }))
+    if (ack.ok) { proxyOn.value = true; lastProxy.value = { host: r.account.host, port: r.account.port } } else alert('设置代理失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 设置失败', e); alert('设置代理异常') }
 }
 async function clearProxy(): Promise<void> {
   try {
-    const ack = await window.pantry.systemProxyClear()
+    const ack = await window.pantry.systemProxyClear(toPlain({ host: lastProxy.value?.host, port: lastProxy.value?.port }))
     if (ack.ok) proxyOn.value = false; else alert('断开失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 断开异常', e) }
 }

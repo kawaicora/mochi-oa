@@ -552,8 +552,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverAttendanceCc, (_e, payload) => serverClient.attendanceCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCcView, (_e, payload) => serverClient.attendanceCcView((payload as Record<string, unknown>) ?? {}))
   // 系统代理（本地操作）
-  ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number }))
-  ipcMain.handle(IpcChannels.systemProxyClear, () => clearSystemProxy())
+  ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number; username?: string; password?: string }))
+  ipcMain.handle(IpcChannels.systemProxyClear, (_e, target) => clearSystemProxy(target as { host?: string; port?: number } | undefined))
   // 取本机 MAC：遍历非 internal 接口取第一个 mac，全大写去冒号；异常回退空串
   ipcMain.handle(IpcChannels.getMac, () => {
     try {

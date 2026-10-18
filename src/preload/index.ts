@@ -351,7 +351,7 @@ const api = {
   serverAttendanceCc: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCc, payload),
   serverAttendanceCcView: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCcView, payload),
   systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
-  systemProxyClear: (): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear),
+  systemProxyClear: (target?: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear, target ?? null),
   // 取本机 MAC（返回大写无冒号字符串）
   getMac: (): Promise<string> => safeInvoke(IpcChannels.getMac),
   // 资产管理
