@@ -73,13 +73,13 @@ async function submit(): Promise<void> {
 
 async function approve(r: ProxyReq): Promise<void> {
   try {
-    const ack = await window.pantry.serverProxyApprove(r.id)
+    const ack = await window.pantry.serverProxyApprove(toPlain({ companyId: companyId.value, id: r.id }))
     if (ack.ok) await load(); else console.error('[代理] 审批失败', ack.error)
   } catch (e) { console.error('[代理] 审批异常', e) }
 }
 async function reject(r: ProxyReq): Promise<void> {
   try {
-    const ack = await window.pantry.serverProxyReject(r.id)
+    const ack = await window.pantry.serverProxyReject(toPlain({ companyId: companyId.value, id: r.id }))
     if (ack.ok) await load(); else console.error('[代理] 拒绝失败', ack.error)
   } catch (e) { console.error('[代理] 拒绝异常', e) }
 }

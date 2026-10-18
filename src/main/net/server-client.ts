@@ -1649,17 +1649,17 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'proxy:request:get', { id })
   }
-  async proxyApprove(id: number): Promise<Ack> {
+  async proxyApprove(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'proxy:request:approve', { id })
+    return emitWithAck(this.socket, 'proxy:request:approve', payload)
   }
-  async proxyReject(id: number, reason?: string): Promise<Ack> {
+  async proxyReject(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'proxy:request:reject', { id, reason })
+    return emitWithAck(this.socket, 'proxy:request:reject', payload)
   }
-  async proxyRenew(id: number, days: number): Promise<Ack> {
+  async proxyRenew(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'proxy:request:renew', { id, days })
+    return emitWithAck(this.socket, 'proxy:request:renew', payload)
   }
   async proxyAccountList(companyId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
