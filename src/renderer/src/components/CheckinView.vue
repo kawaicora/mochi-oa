@@ -58,24 +58,27 @@ const monthAtts = ref<MonthAtt[]>([])
 const p0 = (n: number) => String(n).padStart(2, '0')
 const todayStr = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`
 
-// 某日期状态点（可并排多个）：打卡点(蓝正常/黄异常) + 申请点(紫)。
-// 补卡规则：打卡异常在补卡通过前显示黄点；补卡通过后异常黄点被替换为紫点(黄消失)。
-// 请假/调休通过 → 另加紫点；正常打卡 + 有申请 → 蓝+紫并排。
+// 某日期状态点（可并排多个）。规则：
+// - 当天有通过的考勤申请(补卡/请假/调休) → 算正常，异常黄点不显示；显示紫点(申请)
+// - 整天申请(无正常打卡) → 只显示紫；正常打卡+申请 → 蓝+紫
+// - 无通过申请时按打卡：正常(>=2) → 蓝；异常(缺卡/迟到/早退) → 黄
+// - 异常记录如实保留：点日期弹窗可查看当天全部打卡与申请详情
 type DotKind = 'blue' | 'yellow' | 'purple'
 function dotsOf(dateStr: string): DotKind[] {
   const day = dayMap.value.get(dateStr)
   const atts = monthAtts.value.filter((a) => a.date === dateStr)
-  const makeupApproved = atts.some((a) => a.type === 'make_up' && a.status === 'approved')
-  const appApproved = atts.some((a) => (a.type === 'leave' || a.type === 'comp_time') && a.status === 'approved')
-  const hasPending = atts.some((a) => a.status !== 'rejected') // 有申请(通过或待审)
+  const approved = atts.filter((a) => a.status === 'approved')
+  const hasApprovedAtt = approved.some((a) => a.type === 'make_up' || a.type === 'leave' || a.type === 'comp_time')
   const out: DotKind[] = []
-  // 打卡点：补卡通过则异常黄点被替换(不显示黄，改由下方紫点代表补卡)
-  if (!makeupApproved) {
+  if (hasApprovedAtt) {
+    // 申请通过 → 算正常(不显示异常黄)；有正常打卡 → 蓝+紫；整天申请无打卡 → 只紫
+    if (day && day.count >= 2) out.push('blue')
+    out.push('purple')
+  } else {
     if (day && day.count >= 2) out.push('blue')
     else if ((day && day.count === 1) || rejectedDays.value.has(dateStr)) out.push('yellow')
+    if (atts.some((a) => a.status === 'pending')) out.push('purple') // 待审申请
   }
-  // 申请点：补卡通过 / 请假调休通过 / 有待审申请 → 紫
-  if (makeupApproved || appApproved || hasPending) out.push('purple')
   return out
 }
 
