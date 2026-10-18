@@ -432,18 +432,16 @@ export const useAppStore = defineStore('app', () => {
       await switchCompany(first)
       await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
       ready.value = true
-      // 启动代理生命周期检查：本地有未过期账号→重新建立本地转发；过期→清理
+      // 启动代理生命周期检查：只做日志断言，不自动改系统代理（避免误配置导致用户离线）
       try {
         const raw = localStorage.getItem('mochi:proxyActive')
         if (raw) {
-          const info = JSON.parse(raw) as { host: string; port: number; username: string; password: string; expiresAt?: string }
+          const info = JSON.parse(raw) as { host: string; port: number; expiresAt?: string }
           if (info.expiresAt && new Date(info.expiresAt).getTime() < Date.now()) {
-            console.log('[proxy] 启动检查：本地代理账号已过期，清理')
-            await window.pantry.systemProxyClear(toPlain({ host: info.host, port: info.port }))
+            console.log('[proxy] 启动检查：本地代理账号已过期，请手动断开代理')
             localStorage.removeItem('mochi:proxyActive')
           } else {
-            console.log('[proxy] 启动检查：本地有未过期账号，重新建立本地转发')
-            await window.pantry.systemProxySet(toPlain({ host: info.host, port: info.port, username: info.username, password: info.password }))
+            console.log('[proxy] 启动检查：本地有未过期账号（系统代理需用户手动重设，不自动修改）')
           }
         }
       } catch (e) { console.error('[proxy] 启动检查异常', e) }
