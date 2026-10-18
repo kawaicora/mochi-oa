@@ -68,11 +68,14 @@ async function load(): Promise<void> {
     const ack = await window.pantry.serverProxyList(toPlain({ companyId: companyId.value, mine: myTab.value === 'mine' }))
     if (ack.ok) {
       list.value = (ack.data as { requests?: ProxyReq[] })?.requests ?? []
-      // 待审批项注册进 1h 循环提醒集合
+      // 待审批项注册进 1h 循环提醒集合；服务端已标记 notifyStopped 或本地已停止的不重新注册
+      const stopped = new Set(stoppedIds.value)
       for (const r of list.value) {
-        if (r.status === 'pending') addPending('proxy:' + r.id)
-        else removePending('proxy:' + r.id)
+        if (r.notifyStopped) stopped.add(r.id)
+        if (r.status !== 'pending' || isStopped(r)) removePending('proxy:' + r.id)
+        else addPending('proxy:' + r.id)
       }
+      stoppedIds.value = stopped
     }
     else console.error('[代理] 列表加载失败', ack.error)
   } catch (e) { console.error('[代理] 列表加载异常', e) }

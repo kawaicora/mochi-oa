@@ -236,8 +236,14 @@ async function loadReceived(): Promise<void> {
     const d = (ack.data as { pending?: AttendanceRequest[]; processed?: AttendanceRequest[] }) ?? {}
     receivedPending.value = d.pending ?? []
     receivedDone.value = d.processed ?? []
-    // 注册待审进 1h 循环提醒
-    receivedPending.value.forEach((r) => addPending('att:' + r.id))
+    // 注册待审进 1h 循环提醒；服务端已标记 notifyStopped 的条不重新注册（用户/审批已停止）
+    const stopped = new Set(stoppedIds.value)
+    receivedPending.value.forEach((r) => {
+      if (r.notifyStopped) stopped.add(r.id)
+      if (isStopped(r)) removePending('att:' + r.id)
+      else addPending('att:' + r.id)
+    })
+    stoppedIds.value = stopped
     receivedDone.value.forEach((r) => removePending('att:' + r.id))
   } catch (e) { console.error('[考勤] 收到审批加载异常', e) }
 }
