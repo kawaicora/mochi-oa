@@ -349,7 +349,7 @@ const api = {
   serverProxyAccountList: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyAccountList, companyId),
   serverAttendanceReceived: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceReceived, payload),
   serverAttendanceCc: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCc, payload),
-  serverAttendanceCcView: (ids: number[]): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCcView, ids),
+  serverAttendanceCcView: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCcView, payload),
   systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
   systemProxyClear: (): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear),
   // 取本机 MAC（返回大写无冒号字符串）

@@ -12,6 +12,7 @@ import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 import { convKey } from '../utils/notify-manager'
 import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
+import { setProxyDeepLink } from '../utils/proxy-deeplink'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -238,11 +239,11 @@ function proxyCardSummary(content: string): string {
     return `${c.nick || c.applicant || ''}：${c.reason || ''}（${c.status || 'pending'}）`
   } catch { return content }
 }
-/** 点击卡片：切到网络申请页（深链留待 ProxyView 接收 requestId） */
+/** 点击卡片：深链到 ProxyView 并定位申请单 */
 function openProxyCard(content: string): void {
   try {
     const c = JSON.parse(content)
-    console.log('[proxy_card] requestId', c.requestId)
+    if (c.requestId) setProxyDeepLink(Number(c.requestId))
   } catch (e) { console.error('[proxy_card] 解析失败', e) }
 }
 

@@ -71,7 +71,14 @@ onMounted(async () => {
   alarmTimer = window.setInterval(() => fireDueAlarms(), 1000)
   // 点击闹钟通知 → 弹出选择窗口（停止/暂停）
   setAlarmActionHandler((a) => { alarmAction.value = a })
+  // 深链：消息卡片等外部请求切 tab
+  window.addEventListener('mochi:nav', onNavEvent)
 })
+function onNavEvent(e: Event): void {
+  const t = (e as CustomEvent).detail
+  if (typeof t === 'string') nav.value = t as typeof nav.value
+}
+onBeforeUnmount(() => window.removeEventListener('mochi:nav', onNavEvent))
 onBeforeUnmount(() => {
   if (alarmTimer !== null) window.clearInterval(alarmTimer)
   setAlarmActionHandler(null)

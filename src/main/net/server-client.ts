@@ -1673,9 +1673,9 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:cc:list', payload)
   }
-  async attendanceCcView(ids: number[]): Promise<Ack> {
+  async attendanceCcView(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'attendance:cc:view', { ids })
+    return emitWithAck(this.socket, 'attendance:cc:view', payload)
   }
 
   // ─── 资产管理（公司隔离）─────────

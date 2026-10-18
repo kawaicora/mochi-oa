@@ -6,6 +6,7 @@ import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
 import MemberPicker from './common/MemberPicker.vue'
 import { toPlain } from '../utils/plain'
+import { addPending, removePending } from '../utils/reminder'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time'
@@ -199,6 +200,8 @@ async function approve(r: AttendanceRequest): Promise<void> {
     if (!ack.ok) { console.error('[考勤] 通过失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
     await loadList()
+    await loadReceived()
+    removePending('att:' + r.id)
   } catch (e) { console.error('[考勤] 通过异常', e); err.value = '操作异常' }
 }
 async function reject(r: AttendanceRequest): Promise<void> {
@@ -208,6 +211,8 @@ async function reject(r: AttendanceRequest): Promise<void> {
     detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
     rejectNote.value = ''
     await loadList()
+    await loadReceived()
+    removePending('att:' + r.id)
   } catch (e) { console.error('[考勤] 驳回异常', e); err.value = '操作异常' }
 }
 
@@ -230,6 +235,9 @@ async function loadReceived(): Promise<void> {
     const d = (ack.data as { pending?: AttendanceRequest[]; processed?: AttendanceRequest[] }) ?? {}
     receivedPending.value = d.pending ?? []
     receivedDone.value = d.processed ?? []
+    // 注册待审进 1h 循环提醒
+    receivedPending.value.forEach((r) => addPending('att:' + r.id))
+    receivedDone.value.forEach((r) => removePending('att:' + r.id))
   } catch (e) { console.error('[考勤] 收到审批加载异常', e) }
 }
 async function loadCc(): Promise<void> {
@@ -242,9 +250,8 @@ async function loadCc(): Promise<void> {
 }
 async function openReceived(r: AttendanceRequest): Promise<void> {
   detail.value = r
-  // 抄送查看标记：若该请求在 ccList 且未查看，调 cc:view
   try {
-    await window.pantry.serverAttendanceCcView([r.id])
+    await window.pantry.serverAttendanceCcView(toPlain({ companyId: companyId.value, requestId: r.id }))
   } catch (e) { console.error('[考勤] 抄送标记查看失败', e) }
 }
 

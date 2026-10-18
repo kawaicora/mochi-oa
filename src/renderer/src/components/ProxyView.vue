@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/app'
 import MemberPicker from './common/MemberPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
+import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
 
 /**
  * 网络申请（代理）：员工申请 + admin 审批。
@@ -99,7 +100,18 @@ async function clearProxy(): Promise<void> {
 
 const statusLabel: Record<string, string> = { pending: '待审批', approved: '已通过', rejected: '已拒绝' }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // 深链：若来自消息卡片，切到对应 tab 并高亮
+  if (proxyDeepLinkId.value) {
+    const id = proxyDeepLinkId.value
+    clearProxyDeepLink()
+    myTab.value = 'mine'
+    await load()
+    const el = document.querySelector(`[data-req-id="${id}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+})
 </script>
 
 <template>
@@ -128,7 +140,7 @@ onMounted(load)
 
     <!-- 列表 -->
     <div class="pv-list">
-      <div v-for="r in list" :key="r.id" class="pv-item" :class="r.status">
+      <div v-for="r in list" :key="r.id" class="pv-item" :class="r.status" :data-req-id="r.id">
         <div class="pv-item-head">
           <span>#{{ r.id }} {{ r.nick || r.username }}</span>
           <span class="pv-status">{{ statusLabel[r.status] }}</span>
