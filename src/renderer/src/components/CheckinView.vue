@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
@@ -256,7 +256,15 @@ watch(companyId, async () => {
   if (!companyId.value) return
   await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 })
-onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()]) })
+onMounted(async () => {
+  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
+  window.addEventListener('mochi:checkin:openRules', onOpenRulesEvent)
+})
+onBeforeUnmount(() => window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent))
+// 通讯录企业菜单「考勤设置」→ 跳转打卡页后自动打开规则设置
+function onOpenRulesEvent(): void {
+  if (app.isAdmin) void openRules()
+}
 </script>
 
 <template>
@@ -287,7 +295,6 @@ onMounted(async () => { await Promise.all([loadMac(), loadData(), loadMonthAtts(
       <div v-if="dayStatus" class="ci-status" :class="statusCls[dayStatus.status]">
         <div class="ci-st-head">
           <span class="ci-st-title">{{ dayStatus.date }} · {{ statusLabel[dayStatus.status] }}</span>
-          <button v-if="app.isAdmin" class="ci-st-cfg" @click="openRules"><i class="fas fa-cog"></i> 规则设置</button>
         </div>
         <div class="ci-st-row">
           <span>上班：{{ dayStatus.workStart || '--' }}</span>
