@@ -240,11 +240,11 @@ const api = {
     safeInvoke(IpcChannels.serverConversationRead, conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null),
   serverChatHistory: (groupId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverChatHistory, groupId, beforeTs ?? null, limit ?? null),
-  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card'): Promise<Ack> =>
+  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card'): Promise<Ack> =>
     safeInvoke(IpcChannels.serverChatSend, groupId, content, kind ?? null),
   serverDmHistory: (withUserId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDmHistory, withUserId, beforeTs ?? null, limit ?? null),
-  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card'): Promise<Ack> =>
+  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card'): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDmSend, toUserId, content, kind ?? null),
   serverMessageDelete: (conversationId: number, messageId: string, content?: string): Promise<Ack> =>
     safeInvoke(IpcChannels.serverMessageDelete, conversationId, messageId, content ?? ''),
@@ -354,6 +354,26 @@ const api = {
   serverAttendanceCc: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCc, payload),
   serverAttendanceCcView: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCcView, payload),
   serverAttendanceNotifyStop: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceNotifyStop, payload),
+  // 报销申请（公司隔离）
+  serverCreateExpense: (payload: { category: string; amount: number; reason: string; evidence: string[]; approverIds: number[]; ccIds: number[]; companyId?: number }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverExpenseCreate, payload),
+  serverExpenseList: (params: { category?: string; page: number; pageSize: number; companyId?: number }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverExpenseList, params),
+  serverExpenseReceived: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReceived, companyId ?? 0),
+  serverExpenseCc: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCc, companyId ?? 0),
+  serverExpenseCcView: (requestId: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCcView, requestId),
+  serverExpenseApprove: (requestId: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseApprove, requestId, note ?? ''),
+  serverExpenseReject: (requestId: number, note: string): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReject, requestId, note),
+  // 备用金借款（公司隔离）
+  serverAdvanceCreate: (payload: { category: string; amount: number; reason: string; evidence: string[]; approverIds: number[]; ccIds: number[]; companyId?: number }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverAdvanceCreate, payload),
+  serverAdvanceList: (params: { category?: string; page: number; pageSize: number; companyId?: number }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverAdvanceList, params),
+  serverAdvanceReceived: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReceived, companyId ?? 0),
+  serverAdvanceCc: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceCc, companyId ?? 0),
+  serverAdvanceCcView: (requestId: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceCcView, requestId),
+  serverAdvanceApprove: (requestId: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceApprove, requestId, note ?? ''),
+  serverAdvanceReject: (requestId: number, note: string): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReject, requestId, note),
   systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
   systemProxyClear: (target?: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear, target ?? null),
   // 取本机 MAC（返回大写无冒号字符串）

@@ -202,6 +202,22 @@ export const IpcChannels = {
   serverAttendanceCc: 'server:attendance:cc',
   serverAttendanceCcView: 'server:attendance:cc:view',
   serverAttendanceNotifyStop: 'server:attendance:notify:stop',
+  // 报销（公司隔离，审批流同 attendance）
+  serverExpenseCreate: 'server:expense:create',
+  serverExpenseList: 'server:expense:list',
+  serverExpenseReceived: 'server:expense:received',
+  serverExpenseCc: 'server:expense:cc',
+  serverExpenseCcView: 'server:expense:cc:view',
+  serverExpenseApprove: 'server:expense:approve',
+  serverExpenseReject: 'server:expense:reject',
+  // 备用金借款（公司隔离，审批流同 attendance）
+  serverAdvanceCreate: 'server:advance:create',
+  serverAdvanceList: 'server:advance:list',
+  serverAdvanceReceived: 'server:advance:received',
+  serverAdvanceCc: 'server:advance:cc',
+  serverAdvanceCcView: 'server:advance:cc:view',
+  serverAdvanceApprove: 'server:advance:approve',
+  serverAdvanceReject: 'server:advance:reject',
   // 设置/断开系统代理（主进程本地操作，不走 socket）
   systemProxySet: 'system:proxy:set',
   systemProxyClear: 'system:proxy:clear',

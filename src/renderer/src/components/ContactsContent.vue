@@ -66,6 +66,18 @@ async function changeCompanyLogo(): Promise<void> {
   } catch (e) { console.error('[企业] 更新 logo 失败', e); alert('更新失败') }
 }
 
+async function copyJoinCode(): Promise<void> {
+  const c = app.activeCompany
+  if (!c?.code) return
+  try {
+    await window.pantry.writeClipboardText(c.code)
+    promptMsg.value = '加入码已复制'
+  } catch (e) {
+    console.error('[企业] 复制加入码失败', e)
+    promptMsg.value = '复制失败'
+  }
+}
+
 // 表单
 const newCompanyName = ref('')
 const joinCompanyCode = ref('')
@@ -163,24 +175,38 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
   <div class="c-content" @click="closeMenus">
     <!-- 组织架构：成员 -->
     <template v-if="scope === 'org'">
-      <div class="content-head" @contextmenu.prevent="openCompanyMenu($event)">
-        <i class="fas fa-briefcase"></i>
-        <img v-if="app.activeCompany?.avatar" class="company-logo" :src="srv.absFileUrl(app.activeCompany.avatar)" alt="" />
-        <span class="content-title">{{ app.activeCompany?.name || '未加入公司' }} · 组织架构</span>
-        <span v-if="deptId != null" class="crumb">/ {{ deptName }}</span>
-        <span v-if="app.activeCompany" class="company-join">
-          <button class="company-code-toggle" @click.stop="showJoinCode = !showJoinCode"><i class="fas fa-qrcode"></i> {{ showJoinCode ? '隐藏加入码' : '加入码' }}</button>
-          <span v-if="showJoinCode" class="company-code-val" @click.stop>{{ app.activeCompany.code || '—' }}</span>
-        </span>
-        <span v-if="app.activeCompany" class="company-gear">
-          <button class="company-code-toggle" @click.stop="openCompanyMenu()"><i class="fas fa-cog"></i></button>
-          <div v-if="companyMenu" class="company-menu" @click.stop>
-            <button v-if="app.isAdmin" class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
-            <button v-if="app.isAdmin" class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
-            <button v-if="app.isOwner" class="cm-item" @click="companyTransferPick = true; companyMenu = false"><i class="fas fa-share"></i> 转让</button>
-            <button v-if="app.isOwner" class="cm-item danger" @click="doDissolveCompany"><i class="fas fa-trash-alt"></i> 解散</button>
-          </div>
-        </span>
+      <div class="content-head head-company" @contextmenu.prevent="openCompanyMenu($event)">
+        <div class="ch-left">
+          <img v-if="app.activeCompany?.avatar" class="company-logo" :src="srv.absFileUrl(app.activeCompany.avatar)" alt="" />
+          <i v-else class="fas fa-briefcase ch-logo-fallback"></i>
+          <span class="content-title">{{ app.activeCompany?.name || '未加入公司' }}</span>
+          <span class="ch-sub">组织架构</span>
+          <span v-if="deptId != null" class="crumb">/ {{ deptName }}</span>
+        </div>
+        <div v-if="app.activeCompany" class="ch-center">
+          <span class="ch-dot"></span>
+          <button class="company-code-toggle" @click.stop="showJoinCode = !showJoinCode">
+            <i class="fas fa-qrcode"></i> {{ showJoinCode ? '隐藏加入码' : '加入码' }}
+          </button>
+          <span v-if="showJoinCode" class="company-code-val" :title="'点击复制加入码'" @click.stop="copyJoinCode">
+            {{ app.activeCompany.code || '—' }} <i class="fas fa-copy"></i>
+          </span>
+          <span class="ch-dot"></span>
+        </div>
+        <div class="ch-right">
+          <span v-if="app.activeCompany && app.isAdmin" class="company-gear">
+            <button class="gear-btn" :title="'企业设置（右键也可）'" @click.stop="openCompanyMenu()"><i class="fas fa-cog"></i></button>
+            <div v-if="companyMenu" class="company-menu" @click.stop>
+              <button class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
+              <button class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
+              <template v-if="app.isOwner">
+                <div class="cm-sep"></div>
+                <button class="cm-item" @click="companyTransferPick = true; companyMenu = false"><i class="fas fa-share"></i> 转让</button>
+                <button class="cm-item danger" @click="doDissolveCompany"><i class="fas fa-trash-alt"></i> 解散</button>
+              </template>
+            </div>
+          </span>
+        </div>
       </div>
       <div class="content-scroll">
         <DeptAdmin v-if="app.isAdmin" />
@@ -386,9 +412,21 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 }
 .content-title { font-weight: 600; color: var(--dt-text); }
 .company-logo { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex-shrink: 0; background: #f2f4f7; }
+.ch-logo-fallback { color: var(--dt-primary); font-size: 16px; flex-shrink: 0; }
+.ch-sub { font-size: 12px; color: var(--dt-text-4); font-weight: 400; }
 .crumb { font-weight: 400; color: var(--dt-text-3); font-size: 14px; }
+.head-company { justify-content: space-between; gap: 12px; }
+.ch-left { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.ch-center { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ch-right { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ch-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--dt-border, #e3e6eb); display: inline-block; }
 .company-join { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
 .company-gear { position: relative; display: inline-flex; align-items: center; }
+.gear-btn {
+  background: transparent; border: none; color: var(--dt-text-3); font-size: 16px;
+  cursor: pointer; padding: 4px 6px; border-radius: 6px; line-height: 1;
+}
+.gear-btn:hover { color: var(--dt-primary); background: var(--dt-hover, #f2f4f7); }
 .company-menu {
   position: absolute; right: 0; top: 30px; z-index: 50; min-width: 150px;
   background: #fff; border: 1px solid var(--dt-border); border-radius: 8px;
@@ -402,6 +440,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 .cm-item:hover { background: #f2f6ff; color: var(--dt-primary); }
 .cm-item.danger { color: var(--dt-danger, #e34d59); }
 .cm-item.danger:hover { background: #fff1f0; color: #d92b3a; }
+.cm-sep { height: 1px; background: var(--dt-border-light, #eee); margin: 4px 6px; }
 .company-code-toggle {
   background: #fff; border: 1px solid var(--dt-border); color: var(--dt-text-3);
   font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;

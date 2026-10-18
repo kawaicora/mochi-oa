@@ -557,6 +557,22 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverAttendanceCc, (_e, payload) => serverClient.attendanceCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCcView, (_e, payload) => serverClient.attendanceCcView((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceNotifyStop, (_e, payload) => serverClient.attendanceNotifyStop((payload as Record<string, unknown>) ?? {}))
+  // 报销（公司隔离）
+  ipcMain.handle(IpcChannels.serverExpenseCreate, (_e, payload) => serverClient.expenseCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseList, (_e, payload) => serverClient.expenseList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseReceived, (_e, payload) => serverClient.expenseReceived((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseCc, (_e, payload) => serverClient.expenseCcList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseCcView, (_e, payload) => serverClient.expenseCcView((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseApprove, (_e, requestId, note) => serverClient.expenseApprove(Number(requestId) || 0, typeof note === 'string' ? note : ''))
+  ipcMain.handle(IpcChannels.serverExpenseReject, (_e, requestId, note) => serverClient.expenseReject(Number(requestId) || 0, typeof note === 'string' ? note : ''))
+  // 备用金借款（公司隔离）
+  ipcMain.handle(IpcChannels.serverAdvanceCreate, (_e, payload) => serverClient.advanceCreate((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceList, (_e, payload) => serverClient.advanceList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceReceived, (_e, payload) => serverClient.advanceReceived((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceCc, (_e, payload) => serverClient.advanceCcList((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceCcView, (_e, payload) => serverClient.advanceCcView((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceApprove, (_e, requestId, note) => serverClient.advanceApprove(Number(requestId) || 0, typeof note === 'string' ? note : ''))
+  ipcMain.handle(IpcChannels.serverAdvanceReject, (_e, requestId, note) => serverClient.advanceReject(Number(requestId) || 0, typeof note === 'string' ? note : ''))
   // 系统代理（本地操作）
   ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number; username?: string; password?: string }))
   ipcMain.handle(IpcChannels.systemProxyClear, (_e, target) => clearSystemProxy(target as { host?: string; port?: number } | undefined))
