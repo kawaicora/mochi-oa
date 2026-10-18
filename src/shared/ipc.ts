@@ -52,6 +52,7 @@ export const IpcChannels = {
   serverCompanyAddMember: 'server:company:addMember',
   serverCompanyTransfer: 'server:company:transfer',
   serverCompanyDissolve: 'server:company:dissolve',
+  serverUpdateCompanyLogo: 'server:company:updateLogo',
   serverUserSearch: 'server:user:search',
   serverDepartments: 'server:departments',
   serverDepartmentCreate: 'server:department:create',

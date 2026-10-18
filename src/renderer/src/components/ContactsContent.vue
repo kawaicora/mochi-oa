@@ -30,7 +30,40 @@ async function doDissolveCompany(): Promise<void> {
   const c = app.activeCompany
   if (!c) return
   if (!window.confirm('解散该公司将删除其所有部门、群与消息且不可恢复，确定解散？')) return
+  companyMenu.value = false
   await run(() => app.dissolveCompany(c.id))
+}
+
+// 企业齿轮/右键菜单
+const companyMenu = ref(false)
+function openCompanyMenu(e?: MouseEvent): void {
+  if (e) e.preventDefault()
+  companyMenu.value = !companyMenu.value
+}
+function goCompanySettings(): void {
+  companyMenu.value = false
+  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: 'checkin' }))
+  // 打卡页挂载后自动打开规则设置弹窗
+  window.setTimeout(() => window.dispatchEvent(new CustomEvent('mochi:checkin:openRules')), 250)
+}
+async function changeCompanyLogo(): Promise<void> {
+  const c = app.activeCompany
+  if (!c) return
+  companyMenu.value = false
+  const filePath = await window.pantry.pickFile()
+  if (!filePath) return
+  let url = ''
+  try {
+    const ack = await window.pantry.serverUploadFile(filePath, 0)
+    const d = ack.data as { url?: string } | undefined
+    if (!ack.ok || !d?.url) { alert(ack.error || '上传失败'); return }
+    url = d.url
+  } catch (e) { console.error('[企业] logo 上传失败', e); alert('上传失败'); return }
+  try {
+    const r = await window.pantry.serverUpdateCompanyLogo(c.id, url)
+    if (!r.ok) { alert(r.error || '更新公司 logo 失败'); return }
+    await app.refreshCompanies()
+  } catch (e) { console.error('[企业] 更新 logo 失败', e); alert('更新失败') }
 }
 
 // 表单
@@ -130,17 +163,23 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
   <div class="c-content" @click="closeMenus">
     <!-- 组织架构：成员 -->
     <template v-if="scope === 'org'">
-      <div class="content-head">
+      <div class="content-head" @contextmenu.prevent="openCompanyMenu($event)">
         <i class="fas fa-briefcase"></i>
+        <img v-if="app.activeCompany?.avatar" class="company-logo" :src="srv.absFileUrl(app.activeCompany.avatar)" alt="" />
         <span class="content-title">{{ app.activeCompany?.name || '未加入公司' }} · 组织架构</span>
         <span v-if="deptId != null" class="crumb">/ {{ deptName }}</span>
-        <span v-if="app.isAdmin && app.activeCompany" class="company-join">
-          <button class="company-code-toggle" @click.stop="showJoinCode = !showJoinCode"><i class="fas fa-qrcode"></i> {{ showJoinCode ? '隐藏加入码' : '查看加入码' }}</button>
-          <span v-if="showJoinCode" class="company-code-val" @click.stop>{{ app.activeCompany?.code || '—' }}</span>
+        <span v-if="app.activeCompany" class="company-join">
+          <button class="company-code-toggle" @click.stop="showJoinCode = !showJoinCode"><i class="fas fa-qrcode"></i> {{ showJoinCode ? '隐藏加入码' : '加入码' }}</button>
+          <span v-if="showJoinCode" class="company-code-val" @click.stop>{{ app.activeCompany.code || '—' }}</span>
         </span>
-        <span v-if="app.isOwner && app.activeCompany" class="company-join">
-          <button class="company-code-toggle" @click.stop="companyTransferPick = true"><i class="fas fa-share"></i> 转让</button>
-          <button class="company-code-toggle danger" @click.stop="doDissolveCompany"><i class="fas fa-trash-alt"></i> 解散</button>
+        <span v-if="app.activeCompany" class="company-gear">
+          <button class="company-code-toggle" @click.stop="openCompanyMenu()"><i class="fas fa-cog"></i></button>
+          <div v-if="companyMenu" class="company-menu" @click.stop>
+            <button v-if="app.isAdmin" class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
+            <button v-if="app.isAdmin" class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
+            <button v-if="app.isOwner" class="cm-item" @click="companyTransferPick = true; companyMenu = false"><i class="fas fa-share"></i> 转让</button>
+            <button v-if="app.isOwner" class="cm-item danger" @click="doDissolveCompany"><i class="fas fa-trash-alt"></i> 解散</button>
+          </div>
         </span>
       </div>
       <div class="content-scroll">
@@ -346,8 +385,23 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
   color: var(--dt-primary); font-size: 15px;
 }
 .content-title { font-weight: 600; color: var(--dt-text); }
+.company-logo { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex-shrink: 0; background: #f2f4f7; }
 .crumb { font-weight: 400; color: var(--dt-text-3); font-size: 14px; }
 .company-join { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.company-gear { position: relative; display: inline-flex; align-items: center; }
+.company-menu {
+  position: absolute; right: 0; top: 30px; z-index: 50; min-width: 150px;
+  background: #fff; border: 1px solid var(--dt-border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 4px; display: flex; flex-direction: column;
+}
+.cm-item {
+  display: flex; align-items: center; gap: 8px; background: transparent; border: none;
+  padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--dt-text);
+  cursor: pointer; text-align: left; width: 100%;
+}
+.cm-item:hover { background: #f2f6ff; color: var(--dt-primary); }
+.cm-item.danger { color: var(--dt-danger, #e34d59); }
+.cm-item.danger:hover { background: #fff1f0; color: #d92b3a; }
 .company-code-toggle {
   background: #fff; border: 1px solid var(--dt-border); color: var(--dt-text-3);
   font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;

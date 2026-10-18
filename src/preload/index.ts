@@ -229,6 +229,7 @@ const api = {
   serverGroupDissolve: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDissolve, groupId),
   serverCompanyTransfer: (companyId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyTransfer, companyId, userId),
   serverCompanyDissolve: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyDissolve, companyId),
+  serverUpdateCompanyLogo: (companyId: number, logo: string): Promise<Ack> => safeInvoke(IpcChannels.serverUpdateCompanyLogo, companyId, logo),
 
   // 会话 / 聊天
   serverConversations: (type?: 'group' | 'dm'): Promise<Ack> =>

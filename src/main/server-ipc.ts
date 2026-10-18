@@ -349,6 +349,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverCompanyDissolve, (_e, companyId) =>
     serverClient.companyDissolve(Number(companyId) || 0)
   )
+  ipcMain.handle(IpcChannels.serverUpdateCompanyLogo, (_e, companyId, logo) =>
+    serverClient.updateCompanyLogo(Number(companyId) || 0, typeof logo === 'string' ? logo : '')
+  )
   ipcMain.handle(IpcChannels.serverUserSearch, (_e, keyword) =>
     serverClient.searchUsers(typeof keyword === 'string' ? keyword : '')
   )

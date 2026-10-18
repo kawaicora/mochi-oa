@@ -1014,6 +1014,10 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'company:dissolve', { companyId })
   }
+  async updateCompanyLogo(companyId: number, logo: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'company:updateLogo', { companyId, logo })
+  }
 
   // ─── 消息 ───────────────────────────────────────────────
 

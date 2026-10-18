@@ -97,6 +97,7 @@ export interface Company {
   name: string
   code?: string
   ownerId: number
+  avatar?: string
   createdAt?: string
 }
 
