@@ -221,6 +221,9 @@ export const IpcChannels = {
   // 设置/断开系统代理（主进程本地操作，不走 socket）
   systemProxySet: 'system:proxy:set',
   systemProxyClear: 'system:proxy:clear',
+  // TUN 全局代理（sing-box）：模式2
+  tunProxySet: 'system:tun:set',
+  tunProxyClear: 'system:tun:clear',
   // 资产管理（企业资源，公司隔离；增删改/流转=admin，列表/详情=成员可读）
   serverAssetCreate: 'server:asset:create',
   serverAssetList: 'server:asset:list',

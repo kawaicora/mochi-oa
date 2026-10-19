@@ -60,6 +60,7 @@ const okMsg = ref('')
 const list = ref<ProxyReq[]>([])
 const myTab = ref<'mine' | 'todo'>('mine')
 const proxyOn = ref(false)
+const proxyMode = ref<'proxy' | 'tun'>('proxy') // 1 纯代理 / 2 TUN(sing-box)
 const lastProxy = ref<{ host: string; port: number } | null>(null)
 
 async function load(): Promise<void> {
@@ -116,19 +117,28 @@ async function reject(r: ProxyReq): Promise<void> {
 
 async function setProxy(r: ProxyReq): Promise<void> {
   if (!r.account) return
+  const mode = proxyMode.value
   try {
-    const ack = await window.pantry.systemProxySet(toPlain({ host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password }))
+    const target = { host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password }
+    const ack = mode === 'tun'
+      ? await window.pantry.tunProxySet(toPlain(target))
+      : await window.pantry.systemProxySet(toPlain(target))
     if (ack.ok) {
       proxyOn.value = true
       lastProxy.value = { host: r.account.host, port: r.account.port }
-      // 持久化代理信息（含 expiresAt），供启动检查/到期自动断开
-      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
-    } else alert('设置代理失败：' + (ack.error || ''))
+      // 持久化代理信息（含 expiresAt 与模式），供启动检查/到期自动断开
+      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ mode, host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
+      // TUN 是全局接管，纯代理走系统代理——提示当前模式
+      console.log('[代理] 已开启', mode === 'tun' ? 'TUN(sing-box) 全局代理' : '系统纯代理', r.account.host + ':' + r.account.port)
+    } else alert('设置' + (mode === 'tun' ? 'TUN' : '代理') + '失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 设置失败', e); alert('设置代理异常') }
 }
 async function clearProxy(): Promise<void> {
+  const mode = proxyMode.value
   try {
-    const ack = await window.pantry.systemProxyClear(toPlain({ host: lastProxy.value?.host, port: lastProxy.value?.port }))
+    const ack = mode === 'tun'
+      ? await window.pantry.tunProxyClear()
+      : await window.pantry.systemProxyClear(toPlain({ host: lastProxy.value?.host, port: lastProxy.value?.port }))
     if (ack.ok) { proxyOn.value = false; try { localStorage.removeItem('mochi:proxyActive') } catch { /* ignore */ } } else alert('断开失败：' + (ack.error || ''))
   } catch (e) { console.error('[代理] 断开异常', e) }
 }
@@ -187,8 +197,14 @@ onMounted(async () => {
         <div class="pv-meta">{{ fmtHuman(r.createdAt) }}　时长 {{ r.durationDays }} 天</div>
         <div v-if="r.account" class="pv-acc">
           <div>服务器地址：{{ r.account.host }}:{{ r.account.port }}　账号：{{ r.account.username }} / {{ r.account.password }}</div>
+          <div class="pv-mode">
+            <span class="pv-mode-t">连接模式：</span>
+            <label><input type="radio" :value="'proxy'" v-model="proxyMode" :disabled="proxyOn" /> 纯代理</label>
+            <label><input type="radio" :value="'tun'" v-model="proxyMode" :disabled="proxyOn" /> TUN（sing-box 全局，含 UDP）</label>
+            <span v-if="proxyOn" class="pv-mode-on">当前：{{ proxyMode === 'tun' ? 'TUN 全局' : '系统纯代理' }}</span>
+          </div>
           <div class="pv-acc-btns">
-            <button v-if="!proxyOn" @click="setProxy(r)">设置系统代理</button>
+            <button v-if="!proxyOn" @click="setProxy(r)">设置代理</button>
             <button v-else @click="clearProxy">断开代理</button>
           </div>
         </div>
@@ -228,6 +244,11 @@ onMounted(async () => {
 .pv-reason { font-size: 13px; margin: 6px 0; }
 .pv-meta { font-size: 12px; color: var(--dt-text-3); }
 .pv-acc { margin-top: 8px; padding: 8px; background: #f6f8fb; border-radius: 4px; font-size: 13px; }
+.pv-mode { margin-top: 6px; display: flex; align-items: center; gap: 12px; font-size: 13px; flex-wrap: wrap; }
+.pv-mode-t { color: var(--dt-text-3); }
+.pv-mode label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.pv-mode input { margin: 0; }
+.pv-mode-on { color: #2fbb6b; font-weight: 600; }
 .pv-acc-btns { margin-top: 6px; }
 .pv-acc-btns button, .pv-acts button { margin-right: 8px; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
 .pv-approve { background: #2fbb6b; color: #fff; border: none; }

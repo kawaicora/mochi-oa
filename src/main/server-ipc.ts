@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import * as iconv from 'iconv-lite'
 import { setSystemProxy, clearSystemProxy } from './system-proxy'
+import { startTunProxy, stopTunProxy } from './tun-proxy'
 import { IpcChannels, IpcEvents, ScreenshotToolbar, type NotifKind } from '../shared/ipc'
 import { serverClient } from './net/server-client'
 import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './notif'
@@ -576,6 +577,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 系统代理（本地操作）
   ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number; username?: string; password?: string }))
   ipcMain.handle(IpcChannels.systemProxyClear, (_e, target) => clearSystemProxy(target as { host?: string; port?: number } | undefined))
+  // TUN 全局代理（sing-box）：需管理员/root，全局接管含 UDP
+  ipcMain.handle(IpcChannels.tunProxySet, (_e, target) => startTunProxy(target as { host: string; port: number; username?: string; password?: string }))
+  ipcMain.handle(IpcChannels.tunProxyClear, () => stopTunProxy())
   // 取本机 MAC：遍历非 internal 接口取第一个 mac，全大写去冒号；异常回退空串
   ipcMain.handle(IpcChannels.getMac, () => {
     try {

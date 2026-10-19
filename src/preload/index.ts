@@ -376,6 +376,8 @@ const api = {
   serverAdvanceReject: (requestId: number, note: string): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReject, requestId, note),
   systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
   systemProxyClear: (target?: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear, target ?? null),
+  tunProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.tunProxySet, target),
+  tunProxyClear: (target?: unknown): Promise<Ack> => safeInvoke(IpcChannels.tunProxyClear, target ?? null),
   // 取本机 MAC（返回大写无冒号字符串）
   getMac: (): Promise<string> => safeInvoke(IpcChannels.getMac),
   // 资产管理
