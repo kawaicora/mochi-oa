@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed, watch, provide } from 'vue'
 import { useServerStore } from './stores/server'
 import { useAppStore } from './stores/app'
 import { useRtcStore } from './stores/rtc'
@@ -36,6 +36,7 @@ function toast(text: string, kind: 'info' | 'warn' = 'info'): void {
     toasts.value = toasts.value.filter((t) => t.id !== id)
   }, 5000)
 }
+provide('toast', toast)
 function fmtAt(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`

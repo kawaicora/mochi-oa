@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue'
 import { useAppStore } from '../stores/app'
 import RichTextEditor from './common/RichTextEditor.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
+
+type ToastFn = (text: string, kind?: 'info' | 'warn') => void
+// 全局轻量提示（App.vue provide）：成功/提示信息短暂弹出，不常驻界面
+const showToast = inject<ToastFn>('toast', () => {})
 
 // ── 类型（与服务端冻结协议对齐，content 存 HTML）──
 type ReportType = 'daily' | 'weekly'
@@ -103,8 +107,6 @@ const recipients = ref<number[]>([])
 const saving = ref(false)
 const submitting = ref(false)
 const err = ref('')
-const okMsg = ref('')
-const submittedFlash = ref(false)
 
 // ── 草稿缓存（按日报/周报分 key，避免跨类型泄漏）──
 const draftKey = (t: ReportType) => `mochi:oa:report:draft:${t}`
@@ -168,7 +170,6 @@ async function doSave(): Promise<void> {
   if (!content.trim() && !title.value.trim()) { err.value = '标题或内容不能为空'; return }
   saving.value = true
   err.value = ''
-  okMsg.value = ''
   try {
     let ack
     // 接收人：update 传了则全量替换；create 带上。toPlain 剥掉 Vue Proxy 防 IPC 克隆错误。
@@ -180,7 +181,7 @@ async function doSave(): Promise<void> {
       console.warn('[报表] 已自动移除不在当前公司的接收人', {
         all: recipients.value, kept: validRecipients
       })
-      okMsg.value = '部分接收人不在当前公司，已自动移除'
+      showToast('部分接收人不在当前公司，已自动移除', 'warn')
     }
     if (current.value && current.value.id > 0) {
       ack = await window.pantry.serverReportUpdate(toPlain({
@@ -199,7 +200,7 @@ async function doSave(): Promise<void> {
     }
     if (!ack.ok) { console.error('[报表] 保存失败', ack.error); err.value = ack.error || '保存失败'; return }
     current.value = (ack.data as { report?: ReportItem })?.report ?? current.value
-    okMsg.value = '已保存'
+    showToast('已保存')
     clearDraft()
     await loadHistory()
   } catch (e) { console.error('[报表] 保存异常', e); err.value = '保存异常' }
@@ -214,7 +215,6 @@ function newReport(): void {
   templateId.value = 0
   recipients.value = []
   err.value = ''
-  okMsg.value = ''
   // 清空本地草稿，避免恢复旧内容
   clearDraft()
 }
@@ -229,14 +229,11 @@ async function doSubmit(): Promise<void> {
   }
   submitting.value = true
   err.value = ''
-  okMsg.value = ''
   try {
     const ack = await window.pantry.serverReportSubmit(companyId.value, current.value.id)
     if (!ack.ok) { console.error('[报表] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     current.value = (ack.data as { report?: ReportItem })?.report ?? current.value
-    okMsg.value = current.value?.submitted ? '已提交（可继续编辑后重新提交）' : '已提交'
-    submittedFlash.value = true
-    setTimeout(() => { submittedFlash.value = false }, 3000)
+    showToast(current.value?.submitted ? '已提交，可继续编辑后重新提交' : '已提交')
     await loadHistory()
   } catch (e) { console.error('[报表] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
@@ -405,7 +402,6 @@ onUnmounted(() => { offReminder?.() })
     </div>
 
     <div v-if="err" class="rp-err">{{ err }}</div>
-    <div v-if="okMsg" class="rp-ok">{{ okMsg }}<i v-if="submittedFlash" class="fas fa-check-circle"></i> 已提交</div>
 
     <!-- 上：我的编辑区（仅在 日报/周报 标签页显示） -->
     <div v-if="mainTab === 'daily' || mainTab === 'weekly'" class="rp-edit">
@@ -599,7 +595,6 @@ onUnmounted(() => { offReminder?.() })
 .rp-remind { margin: 8px 18px 0; padding: 8px 12px; background: #fff7e6; border: 1px solid #ffd591; color: #d46b08; border-radius: 8px; font-size: 13px; display: flex; align-items: center; }
 .rp-remind-x { margin-left: auto; border: none; background: transparent; cursor: pointer; color: #d46b08; }
 .rp-err { padding: 8px 18px; color: #d92b3a; font-size: 13px; }
-.rp-ok { padding: 8px 18px; color: #2fbb6b; font-size: 13px; }
 
 /* 上：编辑区（flex 占满剩余，固定行压缩，RichTextEditor 填中间） */
 .rp-edit { padding: 8px 18px; border-bottom: 1px solid var(--dt-border-light); flex: 1 1 auto; min-height: 280px; display: flex; flex-direction: column; overflow: hidden; }
