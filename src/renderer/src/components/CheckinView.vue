@@ -155,6 +155,42 @@ interface WeekRule { dow: number; start: string; end: string; rest: boolean }
 interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null }
 const rulesForm = ref<RulesForm | null>(null)
 const WEEK_NAMES = ['周日','周一','周二','周三','周四','周五','周六']
+
+// ── 可打卡 MAC 白名单（并入规则弹窗）──
+interface CheckinSettingsData { macEnabled?: boolean; macWhitelist?: string[]; ipWhitelist?: string[] }
+const macEnabled = ref(false)          // 只允许指定 MAC 打卡开关
+const macListText = ref('')            // MAC 列表文本（逗号/换行分隔）
+const ipWhitelist = ref<string[]>([])  // 保留既有 IP 白名单，不做界面编辑
+const showMacEditor = ref(false)       // MAC 列表编辑弹窗
+function parseMacText(text: string): string[] {
+  return text.split(/[\n,，;；]+/).map(s => s.trim()).filter(Boolean)
+}
+async function loadSettings(): Promise<void> {
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverCheckinSettingsGet(companyId.value)
+    if (!ack.ok) { console.error('[打卡] 白名单加载失败', ack.error); return }
+    const s = (ack.data as { settings?: CheckinSettingsData })?.settings
+    if (s) {
+      macEnabled.value = !!s.macEnabled
+      macListText.value = (s.macWhitelist ?? []).join(', ')
+      ipWhitelist.value = s.ipWhitelist ?? []
+    }
+  } catch (e) { console.error('[打卡] 白名单加载异常', e) }
+}
+async function saveSettings(): Promise<boolean> {
+  if (!companyId.value) return false
+  try {
+    const ack = await window.pantry.serverCheckinSettingsSave(toPlain({
+      companyId: companyId.value,
+      macEnabled: macEnabled.value,
+      macWhitelist: parseMacText(macListText.value),
+      ipWhitelist: ipWhitelist.value,
+    }))
+    if (!ack.ok) { console.error('[打卡] 白名单保存失败', ack.error); return false }
+    return true
+  } catch (e) { console.error('[打卡] 白名单保存异常', e); return false }
+}
 async function openRules(): Promise<void> {
   if (!companyId.value) return
   try {
@@ -170,6 +206,7 @@ async function openRules(): Promise<void> {
       if (!f.alt_rule) f.alt_rule = { dow: 6, altStart: '09:00', altEnd: '18:00' }
       rulesForm.value = f
     }
+    await loadSettings() // 一并加载 MAC 白名单开关与列表
     showRules.value = true
   } catch (e) { console.error('[打卡] 规则加载异常', e) }
 }
@@ -178,6 +215,8 @@ async function saveRules(): Promise<void> {
   try {
     const ack = await window.pantry.serverCheckinRulesSave(toPlain({ companyId: companyId.value, ...rulesForm.value }))
     if (!ack.ok) { console.error('[打卡] 规则保存失败', ack.error); return }
+    const saved = await saveSettings() // 保存 MAC 白名单开关与列表
+    if (!saved) return
     showRules.value = false
     await loadStatus()
   } catch (e) { console.error('[打卡] 规则保存异常', e) }
@@ -361,10 +400,31 @@ function onOpenRulesEvent(): void {
             <input v-model="rulesForm.alt_rule.altStart" type="time" />
             <input v-model="rulesForm.alt_rule.altEnd" type="time" />
           </div>
+          <div class="ci-r-row ci-r-mac">
+            <label>MAC 限制</label>
+            <label class="ci-r-chk"><input type="checkbox" v-model="macEnabled" /> 只允许指定 MAC 地址打卡</label>
+            <button class="dt-btn sm" @click="showMacEditor = true"><i class="fas fa-edit"></i> 编辑可打卡 MAC 列表</button>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="dt-btn" @click="showRules = false">取消</button>
           <button class="dt-btn primary" @click="saveRules">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 可打卡 MAC 地址列表编辑弹窗 -->
+    <div v-if="showMacEditor" class="modal-mask" @click.self="showMacEditor = false">
+      <div class="modal" style="width:480px">
+        <div class="modal-head">可打卡 MAC 地址列表</div>
+        <div class="modal-body">
+          <textarea v-model="macListText" rows="8" style="width:100%;box-sizing:border-box;font-size:13px;resize:vertical"
+            placeholder="每行一个 MAC，或用逗号分隔，例如：&#10;AA:BB:CC:DD:EE:FF&#10;11:22:33:44:55:66"></textarea>
+          <div style="color:var(--dt-text-3);font-size:11px;margin-top:6px">本机 MAC：{{ mac || '未知' }}（打卡时按此匹配；开启后仅列表内 MAC 可打卡）</div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn" @click="showMacEditor = false">取消</button>
+          <button class="dt-btn primary" @click="showMacEditor = false">确定</button>
         </div>
       </div>
     </div>
@@ -439,4 +499,6 @@ function onOpenRulesEvent(): void {
 .ci-r-row label { min-width: 90px; color: var(--dt-text-3); }
 .ci-r-row input[type="number"], .ci-r-row input[type="time"], .ci-r-row select { height: 28px; border: 1px solid var(--dt-border); border-radius: 4px; padding: 0 6px; font-size: 13px; }
 .ci-r-chk { min-width: 60px !important; display: flex; align-items: center; gap: 4px; }
+.ci-r-row.ci-r-mac { flex-wrap: wrap; }
+.ci-r-row .dt-btn.sm { height: 26px; font-size: 12px; }
 </style>
