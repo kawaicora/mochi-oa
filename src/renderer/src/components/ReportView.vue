@@ -172,7 +172,16 @@ async function doSave(): Promise<void> {
   try {
     let ack
     // 接收人：update 传了则全量替换；create 带上。toPlain 剥掉 Vue Proxy 防 IPC 克隆错误。
-    const recipientsPayload = hasCompany.value ? toPlain(recipients.value) : []
+    // 防御：仅保留当前公司成员，防止草稿/历史跨公司或已离职的 userId 导致服务端“接收人不在该公司”。
+    const companyUserIds = new Set((app.members || []).map((m) => m.userId))
+    const validRecipients = recipients.value.filter((id) => companyUserIds.has(id))
+    const recipientsPayload = hasCompany.value ? toPlain(validRecipients) : []
+    if (recipients.value.length !== validRecipients.length) {
+      console.warn('[报表] 已自动移除不在当前公司的接收人', {
+        all: recipients.value, kept: validRecipients
+      })
+      okMsg.value = '部分接收人不在当前公司，已自动移除'
+    }
     if (current.value && current.value.id > 0) {
       ack = await window.pantry.serverReportUpdate(toPlain({
         companyId: companyId.value, id: current.value.id,
