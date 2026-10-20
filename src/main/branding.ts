@@ -17,13 +17,25 @@ import { app } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+export interface BrandingRtc {
+  /** LiveKit SFU 信令地址，如 wss://live.kawaimoe.org */
+  url: string
+  /** LiveKit API key */
+  apiKey: string
+  /** LiveKit API secret（客户端本地签发 token 用） */
+  apiSecret: string
+  /** 房间名前缀，默认 oa（避免与其它业务房间冲突） */
+  roomPrefix: string
+}
+
 export interface Branding {
   name: string
   iconPath: string | null
   defaultServerUrl: string | null
+  rtc: BrandingRtc | null
 }
 
-const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null, defaultServerUrl: null }
+const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null, defaultServerUrl: null, rtc: null }
 
 let cached: Branding | null = null
 
@@ -82,6 +94,25 @@ export function readBranding(): Branding {
       }
       if (typeof raw['defaultServerUrl'] === 'string' && String(raw['defaultServerUrl']).trim()) {
         cached.defaultServerUrl = String(raw['defaultServerUrl']).trim().slice(0, 512)
+      }
+      // LiveKit SFU 配置（视频聊天/视频会议/视频连线使用）
+      const rtcRaw = raw['rtc']
+      if (rtcRaw && typeof rtcRaw === 'object') {
+        const r = rtcRaw as Record<string, unknown>
+        const url = typeof r['url'] === 'string' ? String(r['url']).trim() : ''
+        const apiKey = typeof r['apiKey'] === 'string' ? String(r['apiKey']).trim() : ''
+        const apiSecret = typeof r['apiSecret'] === 'string' ? String(r['apiSecret']).trim() : ''
+        if (url && apiKey && apiSecret) {
+          cached.rtc = {
+            url,
+            apiKey,
+            apiSecret,
+            roomPrefix:
+              typeof r['roomPrefix'] === 'string' && String(r['roomPrefix']).trim()
+                ? String(r['roomPrefix']).trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+                : 'oa'
+          }
+        }
       }
     }
   } catch {

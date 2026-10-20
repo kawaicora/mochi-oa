@@ -4,5 +4,11 @@
   "appId": "com.mochi.oa",
   "description": "麻薯-好用简洁的办公软件",
   "iconPath": "mochi_256.png",
-  "defaultServerUrl": "https://oa.kawaimoe.org:443"
+  "defaultServerUrl": "https://oa.kawaimoe.org:443",
+  "rtc": {
+    "url": "wss://live.kawaimoe.org",
+    "apiKey": "1CQ8ALah9oIGVMet",
+    "apiSecret": "d7f99163586f9ca06f05b18b432cf426ecc4ebdb4ccdd34c",
+    "roomPrefix": "oa"
+  }
 }

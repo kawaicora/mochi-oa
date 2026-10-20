@@ -87,6 +87,7 @@
     "iconv-lite": "^0.7.3",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.2",
+    "livekit-client": "^2.23.0",
     "lunar-javascript": "^1.7.7",
     "pdfjs-dist": "^4.10.38",
     "pinia": "^2.1.7",

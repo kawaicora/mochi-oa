@@ -73,7 +73,11 @@ const api = {
   // 主进程日志转发到渲染层控制台：主进程 console 广播 '__main_console'，渲染层 console.log 显示
   onMainConsole: (cb: (line: string) => void): (() => void) => subscribe('__main_console', cb),
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
-  getBranding: (): Promise<{ name: string; iconPath: string | null }> => safeInvoke(IpcChannels.brandingGet),
+  getBranding: (): Promise<{
+    name: string
+    iconPath: string | null
+    rtc: { url: string; apiKey: string; apiSecret: string; roomPrefix: string } | null
+  }> => safeInvoke(IpcChannels.brandingGet),
   minimizeWindow: (): Promise<void> => safeInvoke(IpcChannels.winMinimize),
   toggleMaximize: (): Promise<void> => safeInvoke(IpcChannels.winToggleMaximize),
   closeWindow: (): Promise<void> => safeInvoke(IpcChannels.winClose),
