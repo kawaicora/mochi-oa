@@ -30,6 +30,7 @@ function resolveSingBox(): string | null {
   ]
   for (const d of candidates) {
     const exe = path.join(d, plat === 'win32' ? 'sing-box.exe' : 'sing-box')
+    console.log("try get singbox path: " + exe)
     if (existsSync(exe)) { return exe }
   }
   return null

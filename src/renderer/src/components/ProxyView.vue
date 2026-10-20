@@ -127,7 +127,7 @@ async function setProxy(r: ProxyReq): Promise<void> {
       proxyOn.value = true
       lastProxy.value = { host: r.account.host, port: r.account.port }
       // 持久化代理信息（含 expiresAt 与模式），供启动检查/到期自动断开
-      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ mode, host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password, expiresAt: (r.account as any).expiresAt || '' })) } catch { /* ignore */ }
+      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ mode, host: r.account.host, port: r.account.port, username: r.account.username, password: r.account.password, expiresAt: (r.account as any).expiresAt || '' })) } catch { console.warn("设置代理配置到本地存储失败") }
       // TUN 是全局接管，纯代理走系统代理——提示当前模式
       console.log('[代理] 已开启', mode === 'tun' ? 'TUN(sing-box) 全局代理' : '系统纯代理', r.account.host + ':' + r.account.port)
     } else alert('设置' + (mode === 'tun' ? 'TUN' : '代理') + '失败：' + (ack.error || ''))
