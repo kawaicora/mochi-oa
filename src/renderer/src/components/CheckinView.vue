@@ -96,8 +96,8 @@ function dotsOf(dateStr: string): DotKind[] {
   const hasApprovedAtt = approved.some((a) => a.type === 'make_up' || a.type === 'leave' || a.type === 'comp_time')
   const out: DotKind[] = []
   if (hasApprovedAtt) {
-    // 申请通过 → 算正常(不显示异常黄)；有正常打卡 → 蓝+紫；整天申请无打卡 → 只紫
-    if (day && day.count >= 2) out.push('blue')
+    // 申请通过 → 算正常(不显示异常黄)；当天有打卡(含补卡落库) → 蓝+紫两圈；整天申请无打卡 → 只紫
+    if (day && day.count > 0) out.push('blue')
     out.push('purple')
   } else {
     if (day && day.count >= 2) out.push('blue')
