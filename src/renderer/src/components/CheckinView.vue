@@ -17,6 +17,7 @@ interface CheckinItem {
   mac: string
   workStart?: string // 打卡时排班快照
   workEnd?: string
+  state?: number // 位掩码：1上班 2下班 4缺卡 8补卡 16请假 32调休（补上班=9 补下班=10）
   createdAt: string
   nick?: string
   username?: string
@@ -92,22 +93,40 @@ const todayStr = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDat
 // - 无通过申请时按打卡：正常(>=2) → 蓝；异常(缺卡/迟到/早退) → 黄
 // - 异常记录如实保留：点日期弹窗可查看当天全部打卡与申请详情
 type DotKind = 'blue' | 'yellow' | 'purple'
+// state 位掩码（与服务端 checkins.state 一致）：1上班 2下班 4缺卡 8补卡 16请假 32调休。
+const S_WORK = 1
+const S_OFF = 2
+const S_MISS = 4
+const S_MAKEUP = 8
+const S_LEAVE = 16
+const S_COMP = 32
+// 聚合当天所有打卡记录的状态位（OR），识别已打上班/下班/补卡槽位。
+function dayStateOf(dateStr: string): number {
+  let s = 0
+  for (const r of dayMap.value.get(dateStr)?.records ?? []) s |= (r.state || 0)
+  return s
+}
+
 function dotsOf(dateStr: string): DotKind[] {
   const day = dayMap.value.get(dateStr)
+  const ds = dayStateOf(dateStr)
+  const hasWork = (ds & S_WORK) !== 0 // 已打/补上班卡
+  const hasOff = (ds & S_OFF) !== 0 // 已打/补下班卡
   const atts = monthAtts.value.filter((a) => a.date === dateStr)
   const approved = atts.filter((a) => a.status === 'approved')
   const hasApprovedAtt = approved.some((a) => a.type === 'make_up' || a.type === 'leave' || a.type === 'comp_time')
   const out: DotKind[] = []
   if (hasApprovedAtt) {
     // 申请通过 → 算正常(不显示异常黄)；当天有打卡(含补卡落库) → 蓝+紫两圈；整天申请无打卡 → 只紫
-    if (day && day.count > 0) out.push('blue')
+    if (day && (hasWork || hasOff)) out.push('blue')
     out.push('purple')
   } else {
-    // 无通过申请：按当天综合状态判定。迟到/早退/缺卡/单次只上班/被拦截 → 黄；正常(>=2 且 normal) → 蓝。
+    // 无通过申请：按当天综合状态判定。迟到/早退/缺卡/单次只上班/被拦截 → 黄；正常(上下班都打) → 蓝。
+    // 缺卡/单卡用 state 位判断（上班&下班位都齐才正常），不再按打卡次数硬分。
     const st = day?.status
-    const abnormal = (!!day && (st === 'late' || st === 'early' || st === 'late_early' || st === 'none' || day.count === 1))
+    const abnormal = (!!day && (st === 'late' || st === 'early' || st === 'late_early' || st === 'none' || !(hasWork && hasOff)))
       || rejectedDays.value.has(dateStr)
-    if (day && !abnormal && day.count >= 2) out.push('blue')
+    if (day && !abnormal) out.push('blue')
     else if (abnormal) out.push('yellow')
     if (atts.some((a) => a.status === 'pending')) out.push('purple') // 待审申请
   }
@@ -302,8 +321,8 @@ function canMakeup(date: string): boolean {
 }
 const hasInMeasure = computed(() => {
   const mi = measureInfo.value
-  const day = mi ? dayMap.value.get(mi.date) : null
-  return !!day && day.count > 0
+  // 当天已打/补上班卡（state 含 1 位）才视为已有上班卡，据此决定补上班还是补下班。
+  return mi ? (dayStateOf(mi.date) & S_WORK) !== 0 : false
 })
 // 正常日直接看详情；异常日（黄点：缺卡/迟到/早退/被拦截，且无通过申请）弹措施。
 function onSelectDay(dateStr: string): void {
