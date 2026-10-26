@@ -132,7 +132,7 @@ const punchLabel = computed(() => {
 
 // ── 当天状态（checkin:status:get）──
 type StatusKind = 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early'
-interface DayStatus { date: string; rest: boolean; workStart: string | null; workEnd: string | null; punchIn: string | null; punchOut: string | null; status: StatusKind; mode: string }
+interface DayStatus { date: string; rest: boolean; workStart: string | null; workEnd: string | null; punchIn: string | null; punchOut: string | null; status: StatusKind; mode: string; missingWork: boolean; missingOff: boolean }
 const dayStatus = ref<DayStatus | null>(null)
 const statusLabel: Record<StatusKind, string> = {
   rest: '休息日', none: '暂无打卡记录', normal: '正常', late: '迟到', early: '早退', late_early: '迟到+早退'
@@ -152,7 +152,7 @@ async function loadStatus(): Promise<void> {
 // ── 打卡规则弹窗（admin/owner）──
 const showRules = ref(false)
 interface WeekRule { dow: number; start: string; end: string; rest: boolean }
-interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null }
+interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null; offwork_deadline: string }
 const rulesForm = ref<RulesForm | null>(null)
 const WEEK_NAMES = ['周日','周一','周二','周三','周四','周五','周六']
 
@@ -204,6 +204,7 @@ async function openRules(): Promise<void> {
         try { f.week_rules = JSON.parse(f.week_rules) as WeekRule[] } catch { f.week_rules = [] }
       }
       if (!f.alt_rule) f.alt_rule = { dow: 6, altStart: '09:00', altEnd: '18:00' }
+      if (!f.offwork_deadline) f.offwork_deadline = '04:00'
       rulesForm.value = f
     }
     await loadSettings() // 一并加载 MAC 白名单开关与列表
@@ -255,6 +256,44 @@ async function doCheckin(): Promise<void> {
     punchErr.value = '打卡异常'
   }
   punching.value = false
+}
+
+// ── 异常/缺卡日期 → 措施弹窗（打卡 / 补卡 / 请假），按异常类型自动识别引导 ──
+const measureDate = ref<string>('')
+const measureInfo = ref<{ date: string; workStart: string; workEnd: string } | null>(null)
+const hasInMeasure = computed(() => {
+  const mi = measureInfo.value
+  const day = mi ? dayMap.value.get(mi.date) : null
+  return !!day && day.count > 0
+})
+// 正常日直接看详情；异常日（黄点：缺卡/迟到/早退/被拦截，且无通过申请）弹措施。
+function onSelectDay(dateStr: string): void {
+  if (dotsOf(dateStr).includes('yellow')) {
+    const st = dayStatus.value
+    measureDate.value = dateStr
+    measureInfo.value = { date: dateStr, workStart: st?.workStart || '09:00', workEnd: st?.workEnd || '18:00' }
+    return
+  }
+  selected.value = dateStr
+}
+function measureDoPunch(): void {
+  measureDate.value = ''
+  measureInfo.value = null
+  void doCheckin() // 实时打卡（打今天）
+}
+// 补卡/请假：跳到考勤申请并预填（补卡=该日期+正常上下班时间；请假=该日期区间）。
+function measureOpenApply(type: 'make_up' | 'leave'): void {
+  const mi = measureInfo.value
+  const pending = {
+    type,
+    date: mi?.date || todayStr,
+    time: type === 'make_up' && mi ? (hasInMeasure.value ? mi.workEnd : mi.workStart) : undefined,
+  }
+  ;(window as any).__pendingAttendanceApply = pending
+  measureDate.value = ''
+  measureInfo.value = null
+  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: 'apply' }))
+  window.dispatchEvent(new CustomEvent('mochi:attendance:openApply', { detail: pending }))
 }
 
 // ── 数据加载 ──
@@ -322,7 +361,7 @@ function onOpenRulesEvent(): void {
     </div>
 
     <!-- 月历（公共组件，状态点用插槽填充）-->
-    <CalendarMonth :year="cur.getFullYear()" :month="cur.getMonth() + 1" :today="todayStr" @select="(ds) => (selected = ds)">
+    <CalendarMonth :year="cur.getFullYear()" :month="cur.getMonth() + 1" :today="todayStr" @select="onSelectDay">
       <template #day="{ date }">
         <span class="ci-dots"><i v-for="(k, i) in dotsOf(date)" :key="i" class="dot" :class="k"></i></span>
       </template>
@@ -342,6 +381,9 @@ function onOpenRulesEvent(): void {
         <div class="ci-st-row">
           <span>下班：{{ dayStatus.workEnd || '--' }}</span>
           <span>打卡：{{ dayStatus.punchOut || '未打' }}</span>
+        </div>
+        <div v-if="dayStatus.missingWork || dayStatus.missingOff" class="ci-miss">
+          缺卡：<template v-if="dayStatus.missingWork">上班未打卡</template><template v-if="dayStatus.missingWork && dayStatus.missingOff">、</template><template v-if="dayStatus.missingOff">下班未打卡</template>
         </div>
       </div>
 
@@ -386,6 +428,11 @@ function onOpenRulesEvent(): void {
             <label>早退豁免（分钟）</label>
             <input type="number" v-model.number="rulesForm.grace_early_min" min="0" />
           </div>
+          <div class="ci-r-row">
+            <label>下班卡截止（次日）</label>
+            <input type="time" v-model="rulesForm.offwork_deadline" />
+            <span class="ci-r-hint">次日此刻前打的卡算当天/前天下班卡，超时记缺卡（默认 04:00）</span>
+          </div>
           <div v-for="(w, i) in rulesForm.week_rules" :key="i" class="ci-r-row">
             <label>{{ WEEK_NAMES[w.dow] }}</label>
             <label class="ci-r-chk"><input type="checkbox" v-model="w.rest" /> 休息</label>
@@ -426,6 +473,24 @@ function onOpenRulesEvent(): void {
           <button class="dt-btn" @click="showMacEditor = false">取消</button>
           <button class="dt-btn primary" @click="showMacEditor = false">确定</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 异常日期措施弹窗（打卡/补卡/请假） -->
+    <div v-if="measureDate && measureInfo" class="modal-mask" @click.self="measureDate = ''">
+      <div class="modal" style="width:440px">
+        <div class="modal-head">{{ measureInfo.date }} 打卡异常处理</div>
+        <div class="modal-body">
+          <div class="ci-meas-tip">该日存在打卡异常，请选择处理方式：</div>
+          <div class="ci-meas-btns">
+            <button class="dt-btn ci-meas-btn" @click="measureDoPunch"><i class="fas fa-clock"></i> 打卡（实时）</button>
+            <button class="dt-btn ci-meas-btn" @click="measureOpenApply('make_up')">
+              <i class="fas fa-pen"></i> 补卡（预填 {{ measureInfo.date }} {{ hasInMeasure ? measureInfo.workEnd : measureInfo.workStart }}）
+            </button>
+            <button class="dt-btn ci-meas-btn" @click="measureOpenApply('leave')"><i class="fas fa-bed"></i> 请假</button>
+          </div>
+        </div>
+        <div class="modal-foot"><button class="dt-btn" @click="measureDate = ''">取消</button></div>
       </div>
     </div>
 
@@ -501,4 +566,9 @@ function onOpenRulesEvent(): void {
 .ci-r-chk { min-width: 60px !important; display: flex; align-items: center; gap: 4px; }
 .ci-r-row.ci-r-mac { flex-wrap: wrap; }
 .ci-r-row .dt-btn.sm { height: 26px; font-size: 12px; }
+.ci-r-hint { color: var(--dt-text-3); font-size: 11px; margin-left: 8px; flex: 1; }
+.ci-miss { margin-top: 6px; padding: 6px 10px; background: #fff7ed; color: #d97706; border-radius: 6px; font-size: 12px; }
+.ci-meas-tip { margin-bottom: 12px; font-size: 13px; color: var(--dt-text-2); }
+.ci-meas-btns { display: flex; flex-direction: column; gap: 8px; }
+.ci-meas-btn { width: 100%; justify-content: flex-start; }
 </style>

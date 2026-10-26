@@ -484,6 +484,16 @@ export class ServerClient extends EventEmitter {
       console.log('[companyNotif] advance:request:notification', d)
       this.emit('companyNotification', d)
     })
+    // 打卡提醒（上班前/下班后 30 分钟，未打卡员工）→ 公司通知弹窗+响铃
+    socket.on('checkin:reminder', (d: unknown) => {
+      console.log('[companyNotif] checkin:reminder', d)
+      const p = (d ?? {}) as { title?: string; body?: string; companyId?: number; date?: string }
+      this.emit('companyNotification', {
+        title: p.title || '打卡提醒',
+        body: `${p.body ?? ''}${p.date ? `（${p.date}）` : ''}`,
+        companyId: p.companyId
+      })
+    })
     // 月度考勤统计已生成 → 公司通知（仅 owner/admin 收到，提示财务/人事私聊发送）
     socket.on('attendance:stat:generated', (d: unknown) => {
       console.log('[companyNotif] attendance:stat:generated', d)

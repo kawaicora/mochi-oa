@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import DateTimeInput from './common/DateTimePicker.vue'
@@ -290,7 +290,31 @@ watch(companyId, async () => {
 onMounted(async () => {
   loadDraft('make_up')
   await loadList()
+  // 打卡页异常日期 → 补卡/请假：接收待预填参数（date/time）并填充表单。
+  window.addEventListener('mochi:attendance:openApply', onOpenApply)
 })
+onBeforeUnmount(() => window.removeEventListener('mochi:attendance:openApply', onOpenApply))
+
+// 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, time?}。
+function onOpenApply(e: Event): void {
+  const p = (e as CustomEvent).detail as { type?: AttType; date?: string; time?: string } | undefined
+  if (!p || (p.type !== 'make_up' && p.type !== 'leave')) return
+  topTab.value = 'apply'
+  tab.value = p.type
+  if (p.type === 'make_up') {
+    // 补卡：预填该日期 + 正常上下班时间
+    const t = p.time && /^\d{2}:\d{2}$/.test(p.time) ? p.time : '09:00'
+    punchTime.value = `${p.date}T${t}`
+    okMsg.value = '已按该日期预填补卡时间，请补充事由并选择审批人'
+  } else if (p.type === 'leave') {
+    // 请假：预填该日期区间
+    startTime.value = p.date || ''
+    endTime.value = p.date || ''
+    okMsg.value = '已按该日期预填请假区间，请选择类型并补充事由'
+  }
+  err.value = ''
+  ;(window as any).__pendingAttendanceApply = null
+}
 </script>
 
 <template>

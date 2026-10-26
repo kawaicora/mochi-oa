@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import AttendanceView from './AttendanceView.vue'
 import ProxyView from './ProxyView.vue'
 import ExpenseView from './ExpenseView.vue'
@@ -20,6 +20,14 @@ const initialTab = ((): ApplyTab => {
   return 'attendance'
 })()
 const tab = ref<ApplyTab>(initialTab)
+
+// 打卡页异常日期 → 补卡/请假：切到考勤申请 tab（AttendanceView 收到 openApply 事件后自行预填）。
+function onOpenApply(e: Event): void {
+  const d = (e as CustomEvent).detail
+  if (d && (d.type === 'make_up' || d.type === 'leave')) tab.value = 'attendance'
+}
+onMounted(() => window.addEventListener('mochi:attendance:openApply', onOpenApply))
+onBeforeUnmount(() => window.removeEventListener('mochi:attendance:openApply', onOpenApply))
 </script>
 
 <template>
