@@ -149,8 +149,18 @@ async function loadStatus(): Promise<void> {
   if (!companyId.value) return
   try {
     const ack = await window.pantry.serverCheckinStatusGet({ companyId: companyId.value, date: todayStr })
-    if (ack.ok) dayStatus.value = ((ack.data as { status?: DayStatus })?.status ?? null) as DayStatus | null
-    else console.error('[打卡] 当天状态加载失败', ack.error)
+    if (ack.ok) {
+      const st = ((ack.data as { status?: DayStatus })?.status ?? null) as DayStatus | null
+      if (st) {
+        // 硬防御：下班=上班时间（仅打一次卡被旧数据/服务端把首末当同一次）→ 视为下班未打卡，不判早退。
+        if (st.punchIn && st.punchOut && st.punchIn === st.punchOut) {
+          st.punchOut = null
+          if (st.status === 'late_early') st.status = 'late'
+          else if (st.status === 'early') st.status = 'normal'
+        }
+      }
+      dayStatus.value = st
+    } else console.error('[打卡] 当天状态加载失败', ack.error)
   } catch (e) { console.error('[打卡] 当天状态加载异常', e) }
 }
 
