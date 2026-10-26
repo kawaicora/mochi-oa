@@ -142,6 +142,7 @@ async function submit(): Promise<void> {
   okMsg.value = ''
   if (tab.value === 'make_up' && !punchTime.value) { err.value = '请选择补卡时间'; return }
   if (tab.value !== 'make_up' && (!startTime.value || !endTime.value)) { err.value = '请选择开始与结束时间'; return }
+  if (!approverIds.value.length) { err.value = '请选择审批人'; return }
   if (!reason.value.trim()) { err.value = '请填写事由'; return }
   submitting.value = true
   try {

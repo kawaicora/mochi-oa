@@ -135,6 +135,7 @@ async function submit(): Promise<void> {
   err.value = ''; okMsg.value = ''
   if (!amount.value || !(amount.value > 0)) { err.value = '请输入大于 0 的金额'; return }
   if (!reason.value.trim()) { err.value = '请填写事由'; return }
+  if (!approverIds.value.length) { err.value = '请选择审批人'; return }
   submitting.value = true
   try {
     const ack = await window.pantry.serverAdvanceCreate({

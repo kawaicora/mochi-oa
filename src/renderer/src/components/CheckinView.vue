@@ -311,6 +311,13 @@ function canMakeup(date: string): boolean {
   if (date < todayStr) return true // 历史已定论，可补
   const mi = measureInfo.value, st = dayStatus.value
   if (!mi || !st) return false
+  const ds = dayStateOf(date)
+  const alreadyWorkMakeup = (ds & (S_WORK | S_MAKEUP)) === (S_WORK | S_MAKEUP) // 补上班卡(9)已存在
+  const alreadyOffMakeup = (ds & (S_OFF | S_MAKEUP)) === (S_OFF | S_MAKEUP) // 补下班卡(10)已存在
+  const targetOff = !(mi.date === todayStr && st.status === 'late') && (ds & S_WORK) !== 0
+  // 目标槽位已补过 → 不能再补（防止一个迟到无限补卡）。
+  if (targetOff && alreadyOffMakeup) return false
+  if (!targetOff && alreadyWorkMakeup) return false
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes()
   const ws = hm(mi.stdStart || '09:00')
   const we = hm(mi.stdEnd || '18:00')
