@@ -24,6 +24,7 @@ interface CheckinDay {
   count: number
   firstTime: string | null
   lastTime: string | null
+  status?: 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early' | string
   records: CheckinItem[]
 }
 // 当月考勤申请（用于日历紫点判断）
@@ -100,8 +101,12 @@ function dotsOf(dateStr: string): DotKind[] {
     if (day && day.count > 0) out.push('blue')
     out.push('purple')
   } else {
-    if (day && day.count >= 2) out.push('blue')
-    else if ((day && day.count === 1) || rejectedDays.value.has(dateStr)) out.push('yellow')
+    // 无通过申请：按当天综合状态判定。迟到/早退/缺卡/单次只上班/被拦截 → 黄；正常(>=2 且 normal) → 蓝。
+    const st = day?.status
+    const abnormal = (!!day && (st === 'late' || st === 'early' || st === 'late_early' || st === 'none' || day.count === 1))
+      || rejectedDays.value.has(dateStr)
+    if (day && !abnormal && day.count >= 2) out.push('blue')
+    else if (abnormal) out.push('yellow')
     if (atts.some((a) => a.status === 'pending')) out.push('purple') // 待审申请
   }
   return out
