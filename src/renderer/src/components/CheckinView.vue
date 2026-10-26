@@ -15,8 +15,8 @@ interface CheckinItem {
   checkTime: string // YYYY-MM-DD HH:mm:ss
   ip: string
   mac: string
-  workStart?: string // 打卡时排班快照
-  workEnd?: string
+  stdStart?: string // 打卡时排班快照
+  stdEnd?: string
   state?: number // 位掩码：1上班 2下班 4缺卡 8补卡 16请假 32调休（补上班=9 补下班=10）
   createdAt: string
   nick?: string
@@ -158,7 +158,7 @@ const punchLabel = computed(() => {
 
 // ── 当天状态（checkin:status:get）──
 type StatusKind = 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early'
-interface DayStatus { date: string; rest: boolean; workStart: string | null; workEnd: string | null; punchIn: string | null; punchOut: string | null; status: StatusKind; mode: string; missingWork: boolean; missingOff: boolean }
+interface DayStatus { date: string; rest: boolean; stdStart: string | null; stdEnd: string | null; punchIn: string | null; punchOut: string | null; status: StatusKind; mode: string; missingWork: boolean; missingOff: boolean }
 const dayStatus = ref<DayStatus | null>(null)
 const statusLabel: Record<StatusKind, string> = {
   rest: '休息日', none: '暂无打卡记录', normal: '正常', late: '迟到', early: '早退', late_early: '迟到+早退'
@@ -296,7 +296,7 @@ async function doCheckin(): Promise<void> {
 
 // ── 异常/缺卡日期 → 措施弹窗（打卡 / 补卡 / 请假），按异常类型自动识别引导 ──
 const measureDate = ref<string>('')
-const measureInfo = ref<{ date: string; workStart: string; workEnd: string } | null>(null)
+const measureInfo = ref<{ date: string; stdStart: string; stdEnd: string } | null>(null)
 
 // "HH:MM" → 当天分钟数。
 function hm(t: string): number { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0) }
@@ -312,8 +312,8 @@ function canMakeup(date: string): boolean {
   const mi = measureInfo.value, st = dayStatus.value
   if (!mi || !st) return false
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes()
-  const ws = hm(mi.workStart || '09:00')
-  const we = hm(mi.workEnd || '18:00')
+  const ws = hm(mi.stdStart || '09:00')
+  const we = hm(mi.stdEnd || '18:00')
   if (st.status === 'late') return true // 迟到已过上班时间 → 可补上班卡
   if (st.missingWork) return nowMin > ws // 缺上班卡已过上班时间 → 可补上班卡
   if (st.missingOff || st.status === 'early' || st.status === 'late_early') return nowMin > we // 缺下班/早退已过下班时间 → 可补下班卡
@@ -333,8 +333,8 @@ function onSelectDay(dateStr: string): void {
     measureDate.value = dateStr
     measureInfo.value = {
       date: dateStr,
-      workStart: snap?.workStart || todaySt?.workStart || '09:00',
-      workEnd: snap?.workEnd || todaySt?.workEnd || '18:00',
+      stdStart: snap?.stdStart || todaySt?.stdStart || '09:00',
+      stdEnd: snap?.stdEnd || todaySt?.stdEnd || '18:00',
     }
     return
   }
@@ -356,7 +356,7 @@ function measureOpenApply(type: 'make_up' | 'leave'): void {
       // 今天迟到 → 补上班卡（把迟到补成正常上班时间）；当天无上班卡 → 补上班卡；有上班卡缺下班 → 补下班卡。
       const st = dayStatus.value
       const lateToday = mi.date === todayStr && !!st && st.status === 'late'
-      return lateToday ? mi.workStart : (hasInMeasure.value ? mi.workEnd : mi.workStart)
+      return lateToday ? mi.stdStart : (hasInMeasure.value ? mi.stdEnd : mi.stdStart)
     })(),
   }
   ;(window as any).__pendingAttendanceApply = pending
@@ -445,11 +445,11 @@ function onOpenRulesEvent(): void {
           <span class="ci-st-title">{{ dayStatus.date }} · {{ statusLabel[dayStatus.status] }}</span>
         </div>
         <div class="ci-st-row">
-          <span>上班：{{ dayStatus.workStart || '--' }}</span>
+          <span>上班：{{ dayStatus.stdStart || '--' }}</span>
           <span>打卡：{{ dayStatus.punchIn || '未打' }}</span>
         </div>
         <div class="ci-st-row">
-          <span>下班：{{ dayStatus.workEnd || '--' }}</span>
+          <span>下班：{{ dayStatus.stdEnd || '--' }}</span>
           <span>打卡：{{ dayStatus.punchOut || '未打' }}</span>
         </div>
         <div v-if="dayStatus.missingWork || dayStatus.missingOff" class="ci-miss">
@@ -555,7 +555,7 @@ function onOpenRulesEvent(): void {
           <div class="ci-meas-btns">
             <button class="dt-btn ci-meas-btn" @click="measureDoPunch"><i class="fas fa-clock"></i> 打卡（实时）</button>
             <button v-if="canMakeup(measureInfo.date)" class="dt-btn ci-meas-btn" @click="measureOpenApply('make_up')">
-              <i class="fas fa-pen"></i> 补卡（预填 {{ measureInfo.date }} {{ hasInMeasure ? measureInfo.workEnd : measureInfo.workStart }}）
+              <i class="fas fa-pen"></i> 补卡（预填 {{ measureInfo.date }} {{ hasInMeasure ? measureInfo.stdEnd : measureInfo.stdStart }}）
             </button>
             <button class="dt-btn ci-meas-btn" @click="measureOpenApply('leave')"><i class="fas fa-bed"></i> 请假</button>
           </div>
