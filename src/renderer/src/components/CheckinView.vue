@@ -308,7 +308,18 @@ function hm(t: string): number { const [h, m] = t.split(':').map(Number); return
 //   - 今天缺下班卡/早退且已过下班时间 → 可补下班卡；
 //   - 今天未到对应时间（如正常上班但还没到下班时间）→ 不提供补卡。
 function canMakeup(date: string): boolean {
-  if (date < todayStr) return true // 历史已定论，可补
+  if (date < todayStr) {
+    // 历史已定论，可补；但目标槽位已补过则不能再补（补上班/补下班各一次，防无限补）。
+    const ds = dayStateOf(date)
+    const hasWork = (ds & S_WORK) !== 0
+    const hasOff = (ds & S_OFF) !== 0
+    const targetOff = hasWork && !hasOff
+    const alreadyWorkMakeup = (ds & (S_WORK | S_MAKEUP)) === (S_WORK | S_MAKEUP) // 补上班卡(9)已存在
+    const alreadyOffMakeup = (ds & (S_OFF | S_MAKEUP)) === (S_OFF | S_MAKEUP) // 补下班卡(10)已存在
+    if (targetOff && alreadyOffMakeup) return false
+    if (!targetOff && alreadyWorkMakeup) return false
+    return true
+  }
   const mi = measureInfo.value, st = dayStatus.value
   if (!mi || !st) return false
   const ds = dayStateOf(date)
