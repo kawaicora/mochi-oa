@@ -276,6 +276,26 @@ async function doCheckin(): Promise<void> {
 // ── 异常/缺卡日期 → 措施弹窗（打卡 / 补卡 / 请假），按异常类型自动识别引导 ──
 const measureDate = ref<string>('')
 const measureInfo = ref<{ date: string; workStart: string; workEnd: string } | null>(null)
+// 公司下班卡截止（次日，默认 04:00）；普通成员也可静默读取。
+const offDeadline = ref('04:00')
+async function loadOffDeadline(): Promise<void> {
+  try {
+    const ack = await window.pantry.serverCheckinRulesGet(companyId.value)
+    if (ack.ok) {
+      const r = (ack.data as { rules?: { offwork_deadline?: string } })?.rules
+      if (r?.offwork_deadline) offDeadline.value = r.offwork_deadline
+    }
+  } catch (e) { console.error('[打卡] 下班截止读取异常', e) }
+}
+// 补卡资格：当前时间已过该日期次日的下班卡截止时刻（默认 04:00）才提供补卡；
+// 当天未到截止 → 不提供补卡（防止入职就把当/未来卡全补掉）。
+function canMakeup(date: string): boolean {
+  const [h, m] = (offDeadline.value || '04:00').split(':').map(Number)
+  const cutoff = new Date(date + 'T00:00:00')
+  cutoff.setDate(cutoff.getDate() + 1)
+  cutoff.setHours(h || 0, m || 0, 0, 0)
+  return Date.now() > cutoff.getTime()
+}
 const hasInMeasure = computed(() => {
   const mi = measureInfo.value
   const day = mi ? dayMap.value.get(mi.date) : null
@@ -347,10 +367,10 @@ function nextMonth(): void { cur.value = new Date(cur.value.getFullYear(), cur.v
 watch(monthStr, async () => { await Promise.all([loadData(), loadMonthAtts()]) })
 watch(companyId, async () => {
   if (!companyId.value) return
-  await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
+  await Promise.all([loadData(), loadMonthAtts(), loadStatus(), loadOffDeadline()])
 })
 onMounted(async () => {
-  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
+  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles(), loadOffDeadline()])
   window.addEventListener('mochi:checkin:openRules', onOpenRulesEvent)
 })
 onBeforeUnmount(() => window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent))
@@ -499,7 +519,7 @@ function onOpenRulesEvent(): void {
           <div class="ci-meas-tip">该日存在打卡异常，请选择处理方式：</div>
           <div class="ci-meas-btns">
             <button class="dt-btn ci-meas-btn" @click="measureDoPunch"><i class="fas fa-clock"></i> 打卡（实时）</button>
-            <button class="dt-btn ci-meas-btn" @click="measureOpenApply('make_up')">
+            <button v-if="canMakeup(measureInfo.date)" class="dt-btn ci-meas-btn" @click="measureOpenApply('make_up')">
               <i class="fas fa-pen"></i> 补卡（预填 {{ measureInfo.date }} {{ hasInMeasure ? measureInfo.workEnd : measureInfo.workStart }}）
             </button>
             <button class="dt-btn ci-meas-btn" @click="measureOpenApply('leave')"><i class="fas fa-bed"></i> 请假</button>
