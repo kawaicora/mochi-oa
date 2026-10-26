@@ -414,11 +414,19 @@ watch(companyId, async () => {
 onMounted(async () => {
   await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
   window.addEventListener('mochi:checkin:openRules', onOpenRulesEvent)
+  window.addEventListener('mochi:checkin:refresh', onRefreshCheckin)
 })
-onBeforeUnmount(() => window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent))
+onBeforeUnmount(() => {
+  window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent)
+  window.removeEventListener('mochi:checkin:refresh', onRefreshCheckin)
+})
 // 通讯录企业菜单「考勤设置」→ 跳转打卡页后自动打开规则设置
 function onOpenRulesEvent(): void {
   if (app.isAdmin) void openRules()
+}
+// 考勤审批通过/驳回后刷新打卡页：重载当天打卡、月度申请状态、打卡状态，使状态点黄→紫即时生效。
+function onRefreshCheckin(): void {
+  void Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 }
 </script>
 

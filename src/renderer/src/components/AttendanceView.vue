@@ -204,6 +204,8 @@ async function approve(r: AttendanceRequest): Promise<void> {
     await loadList()
     await loadReceived()
     removePending('att:' + r.id)
+    // 审批结果落库后通知打卡页刷新（补卡/请假/调休通过 → 状态点黄→紫）。
+    window.dispatchEvent(new CustomEvent('mochi:checkin:refresh'))
   } catch (e) { console.error('[考勤] 通过异常', e); err.value = '操作异常' }
 }
 async function reject(r: AttendanceRequest): Promise<void> {
@@ -215,6 +217,8 @@ async function reject(r: AttendanceRequest): Promise<void> {
     await loadList()
     await loadReceived()
     removePending('att:' + r.id)
+    // 驳回也可能影响状态点（如驳回后异常未处理仍为黄），同步刷新打卡页。
+    window.dispatchEvent(new CustomEvent('mochi:checkin:refresh'))
   } catch (e) { console.error('[考勤] 驳回异常', e); err.value = '操作异常' }
 }
 
