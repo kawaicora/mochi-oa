@@ -276,25 +276,27 @@ async function doCheckin(): Promise<void> {
 // ── 异常/缺卡日期 → 措施弹窗（打卡 / 补卡 / 请假），按异常类型自动识别引导 ──
 const measureDate = ref<string>('')
 const measureInfo = ref<{ date: string; workStart: string; workEnd: string } | null>(null)
-// 公司下班卡截止（次日，默认 04:00）；普通成员也可静默读取。
-const offDeadline = ref('04:00')
-async function loadOffDeadline(): Promise<void> {
-  try {
-    const ack = await window.pantry.serverCheckinRulesGet(companyId.value)
-    if (ack.ok) {
-      const r = (ack.data as { rules?: { offwork_deadline?: string } })?.rules
-      if (r?.offwork_deadline) offDeadline.value = r.offwork_deadline
-    }
-  } catch (e) { console.error('[打卡] 下班截止读取异常', e) }
-}
-// 补卡资格：当前时间已过该日期次日的下班卡截止时刻（默认 04:00）才提供补卡；
-// 当天未到截止 → 不提供补卡（防止入职就把当/未来卡全补掉）。
+
+// "HH:MM" → 当天分钟数。
+function hm(t: string): number { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+
+// 补卡资格：只有「已定论的异常」才提供补卡——
+//   - 历史日期（< 今天）：已过上班+下班，可补；
+//   - 今天迟到（上班异常，已过上班时间）→ 可补上班卡；
+//   - 今天缺上班卡且已过上班时间 → 可补上班卡；
+//   - 今天缺下班卡/早退且已过下班时间 → 可补下班卡；
+//   - 今天未到对应时间（如正常上班但还没到下班时间）→ 不提供补卡。
 function canMakeup(date: string): boolean {
-  const [h, m] = (offDeadline.value || '04:00').split(':').map(Number)
-  const cutoff = new Date(date + 'T00:00:00')
-  cutoff.setDate(cutoff.getDate() + 1)
-  cutoff.setHours(h || 0, m || 0, 0, 0)
-  return Date.now() > cutoff.getTime()
+  if (date < todayStr) return true // 历史已定论，可补
+  const mi = measureInfo.value, st = dayStatus.value
+  if (!mi || !st) return false
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes()
+  const ws = hm(mi.workStart || '09:00')
+  const we = hm(mi.workEnd || '18:00')
+  if (st.status === 'late') return true // 迟到已过上班时间 → 可补上班卡
+  if (st.missingWork) return nowMin > ws // 缺上班卡已过上班时间 → 可补上班卡
+  if (st.missingOff || st.status === 'early' || st.status === 'late_early') return nowMin > we // 缺下班/早退已过下班时间 → 可补下班卡
+  return false
 }
 const hasInMeasure = computed(() => {
   const mi = measureInfo.value
@@ -322,7 +324,13 @@ function measureOpenApply(type: 'make_up' | 'leave'): void {
   const pending = {
     type,
     date: mi?.date || todayStr,
-    time: type === 'make_up' && mi ? (hasInMeasure.value ? mi.workEnd : mi.workStart) : undefined,
+    time: (() => {
+      if (type !== 'make_up' || !mi) return undefined
+      // 今天迟到 → 补上班卡（把迟到补成正常上班时间）；当天无上班卡 → 补上班卡；有上班卡缺下班 → 补下班卡。
+      const st = dayStatus.value
+      const lateToday = mi.date === todayStr && !!st && st.status === 'late'
+      return lateToday ? mi.workStart : (hasInMeasure.value ? mi.workEnd : mi.workStart)
+    })(),
   }
   ;(window as any).__pendingAttendanceApply = pending
   measureDate.value = ''
@@ -367,10 +375,10 @@ function nextMonth(): void { cur.value = new Date(cur.value.getFullYear(), cur.v
 watch(monthStr, async () => { await Promise.all([loadData(), loadMonthAtts()]) })
 watch(companyId, async () => {
   if (!companyId.value) return
-  await Promise.all([loadData(), loadMonthAtts(), loadStatus(), loadOffDeadline()])
+  await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 })
 onMounted(async () => {
-  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles(), loadOffDeadline()])
+  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
   window.addEventListener('mochi:checkin:openRules', onOpenRulesEvent)
 })
 onBeforeUnmount(() => window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent))
