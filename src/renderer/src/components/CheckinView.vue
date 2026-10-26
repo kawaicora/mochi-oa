@@ -15,6 +15,8 @@ interface CheckinItem {
   checkTime: string // YYYY-MM-DD HH:mm:ss
   ip: string
   mac: string
+  workStart?: string // 打卡时排班快照
+  workEnd?: string
   createdAt: string
   nick?: string
   username?: string
@@ -306,9 +308,15 @@ const hasInMeasure = computed(() => {
 // 正常日直接看详情；异常日（黄点：缺卡/迟到/早退/被拦截，且无通过申请）弹措施。
 function onSelectDay(dateStr: string): void {
   if (dotsOf(dateStr).includes('yellow')) {
-    const st = dayStatus.value
+    // 上下班时间优先取该日打卡记录固化快照（历史判定与补卡预填按该日规则，而非今天的规则）。
+    const snap = dayMap.value.get(dateStr)?.records?.[0]
+    const todaySt = dayStatus.value
     measureDate.value = dateStr
-    measureInfo.value = { date: dateStr, workStart: st?.workStart || '09:00', workEnd: st?.workEnd || '18:00' }
+    measureInfo.value = {
+      date: dateStr,
+      workStart: snap?.workStart || todaySt?.workStart || '09:00',
+      workEnd: snap?.workEnd || todaySt?.workEnd || '18:00',
+    }
     return
   }
   selected.value = dateStr
