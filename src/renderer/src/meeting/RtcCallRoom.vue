@@ -12,7 +12,8 @@ import type {
   RtcKind,
   RtcPeer,
   RtcRoom,
-  RtcSignalPayload
+  RtcSignalPayload,
+  RtcSfuInfo
 } from '@shared/server-types'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent } from '@renderer/utils/notify-manager'
@@ -410,7 +411,7 @@ async function notifyIfUnfocused(title: string, body: string, target?: NotifTarg
 }
 
 // ─── 进入房间 ─────────────────────────────────────────────
-async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: RtcIceServer[], _kind: RtcKind): Promise<void> {
+async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: RtcIceServer[], _kind: RtcKind, sfu?: RtcSfuInfo): Promise<void> {
   console.log(
     '[RTC] 通话开始 enterRoom',
     'kind=' + _kind,
@@ -467,13 +468,14 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   VideoStream.stream = localStream
   localPreview.value = localStream
 
-  // 2. WebRTC 引擎
+  // 2. LiveKit SFU 引擎（token 由服务端 rtc:join/create 签发下发）
   engine = new RtcEngine({
     roomId: roomInfo.id,
     // 本端 userId：引擎用它和信令里的 to 做收件人过滤，
     // 并用 myUserId < 对端 userId 确定性地决定每对 peer 谁发 offer（避免两端同时发起）
     myUserId: myUserId.value,
     iceServers,
+    sfu,
     localStream,
     onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
     onRemoteStream: (userId, stream) => { remoteStreams[userId] = stream },
@@ -766,12 +768,12 @@ onMounted(async () => {
     if (mode === 'create') {
       const ack = await window.pantry.rtcCreateMeeting({ kind })
       if (!ack.ok || !ack.data?.meeting) throw new Error(ack.error || '创建会议失败')
-      await enterRoom(ack.data.meeting, ack.data.peers ?? [], ack.data.iceServers ?? [], kind)
+      await enterRoom(ack.data.meeting, ack.data.peers ?? [], ack.data.iceServers ?? [], kind, ack.data.sfu)
     } else {
       if (!meetingNo) throw new Error('缺少会议号')
       const ack = await window.pantry.rtcJoin(meetingNo, password || undefined, kind)
       if (!ack.ok || !ack.data?.room) throw new Error(ack.error || '加入会议失败')
-      await enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, kind)
+      await enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, kind, ack.data.sfu)
     }
   }
   lastRetryAction = enterMeeting
