@@ -545,6 +545,7 @@ export const useRtcStore = defineStore('rtc', () => {
     // 2. 创建 RtcEngine（SFU：服务端签发 token 下发，客户端不再本地签发）
     engine = new RtcEngine({
       roomId: room.id,
+      kind: room.kind,
       iceServers,
       sfu,
       localStream,

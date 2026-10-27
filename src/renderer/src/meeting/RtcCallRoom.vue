@@ -468,12 +468,13 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   VideoStream.stream = localStream
   localPreview.value = localStream
 
-  // 2. LiveKit SFU 引擎（token 由服务端 rtc:join/create 签发下发）
+  // 2. LiveKit SFU 引擎（token 由服务端 rtc:join/create 签发下发；未传 sfu 时引擎主动向服务端申请）
   engine = new RtcEngine({
     roomId: roomInfo.id,
     // 本端 userId：引擎用它和信令里的 to 做收件人过滤，
     // 并用 myUserId < 对端 userId 确定性地决定每对 peer 谁发 offer（避免两端同时发起）
     myUserId: myUserId.value,
+    kind: _kind,
     iceServers,
     sfu,
     localStream,

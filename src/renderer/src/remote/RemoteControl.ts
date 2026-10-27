@@ -12,7 +12,8 @@
  * LiveKit room，控制端订阅；键鼠走 LiveKit data（服务端 dev:view 已签发双方 token）。
  * 轨道替换：发布同名轨道（screen / system-audio）实现摄像头/麦克风/屏幕切换。
  */
-import { Room, RoomEvent, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
+import { RoomEvent, type Room } from 'livekit-client'
+import { connectSfu, publishOrReplace } from '../rtc/livekitClient'
 import VideoStream from '../media/VideoStream'
 
 interface DevStartPayload {
@@ -99,51 +100,42 @@ class RemoteControl {
     }
     if (this.room) return // 已连接
     this.activeDeviceId = d.deviceId ?? ''
-    const room = new Room()
-    this.room = room
+    let room: Room
     try {
-      await room.connect(d.url, d.token)
+      room = await connectSfu({ url: d.url!, token: d.token!, roomName: d.roomName! }, {
+        onDisconnected: () => {
+          console.log('[remote] SFU 断开')
+          this.room = null
+          this.activeVideo = null
+          this.activeAudio = null
+        }
+      })
     } catch (e) {
       console.warn('[remote] 连接 SFU 失败', e)
       this.room = null
       return
     }
+    this.room = room
     console.log(`[remote] 已连接 SFU room=${d.roomName}`)
-    // 发布占位轨，保证控制端有画面；后续 dev:start 按 kind 替换
+    // 发布占位轨，保证控制端有画面；后续 dev:start 按 kind 替换（通用 publishOrReplace）
     try {
       const vp = this.placeholderVideoTrack()
       const ap = this.placeholderAudioTrack()
-      await room.localParticipant.publishTrack(new LocalVideoTrack(vp, {}, true), { name: 'screen' })
-      await room.localParticipant.publishTrack(new LocalAudioTrack(ap, undefined, true), { name: 'system-audio' })
+      await publishOrReplace(room, 'screen', 'video', vp)
+      await publishOrReplace(room, 'system-audio', 'audio', ap)
       this.activeVideo = vp
       this.activeAudio = ap
     } catch (e) {
       console.warn('[remote] 发布占位轨失败', e)
     }
-    room.on(RoomEvent.Disconnected, () => {
-      console.log('[remote] SFU 断开')
-      this.room = null
-      this.activeVideo = null
-      this.activeAudio = null
-    })
   }
 
-  // ── 替换对应 kind 的 SFU 轨道（同名发布，先 unpublish 旧的更稳） ──
+  // ── 替换对应 kind 的 SFU 轨道（通用 publishOrReplace：先 unpublish 旧的再发，杜绝重复） ──
   private async replaceTrack(kind: 'video' | 'audio', name: string, track: MediaStreamTrack | null): Promise<void> {
     const room = this.room
     if (!room) return
     try {
-      for (const pub of room.localParticipant.trackPublications.values()) {
-        if (pub.trackName === name) {
-          const t = pub.track
-          if (t) await room.localParticipant.unpublishTrack(t)
-          try { t?.stop() } catch { /* ignore */ }
-        }
-      }
-      if (track) {
-        const t = kind === 'video' ? new LocalVideoTrack(track, {}, true) : new LocalAudioTrack(track, undefined, true)
-        await room.localParticipant.publishTrack(t, { name })
-      }
+      await publishOrReplace(room, name, kind, track)
     } catch (e) {
       console.warn(`[remote] 替换${kind}轨 ${name} 失败`, e)
     }

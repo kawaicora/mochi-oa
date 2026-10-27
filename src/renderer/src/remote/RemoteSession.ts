@@ -22,8 +22,9 @@
  *  被控端 → 控制端：{t:'meta',w,h,mode,input}
  */
 
-import { Room, RoomEvent, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
+import { RoomEvent, type Room } from 'livekit-client'
 import type { RtcSfuInfo } from '@shared/server-types'
+import { connectSfu, sendData, publishOrReplace } from '../rtc/livekitClient'
 import { rlog, rwarn, rlogThrottled, newTraceId } from '../../../shared/remote-log'
 
 export type RemoteRole = 'master' | 'slave'
@@ -105,15 +106,12 @@ class RemoteSession {
     return String(this.peerId)
   }
 
-  /** 通过 LiveKit data 消息发给对端（destination 限定，可靠投递） */
+  /** 通过 LiveKit data 消息发给对端（通用 sendData，destination 限定对端） */
   private dataToPeer(msg: ControlMsg): void {
     const room = this.room
     if (!room || this.closed) return
     try {
-      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), {
-        reliable: true,
-        destinationIdentities: [this.peerIdentity()]
-      })
+      sendData(room, this.peerIdentity(), msg)
     } catch (e) {
       rwarn(`session/${this.role}`, `发送 data 失败 t=${msg.t}：${(e as Error)?.message ?? e}`)
     }
@@ -132,16 +130,23 @@ class RemoteSession {
     this.trace = newTraceId('slave')
     this.say(`被控端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
-    // 1. 连接 LiveKit SFU room（服务端签发的被控端 token）
-    const room = new Room()
-    this.room = room
+    // 1. 连接 LiveKit SFU room（通用 connectSfu；Disconnected 自动收场）
+    let room: Room
     try {
-      await room.connect(opts.sfu.url, opts.sfu.token)
+      room = await connectSfu(opts.sfu, {
+        onDisconnected: () => {
+          if (!this.closed) {
+            this.sayErr('SFU 断开 → 结束会话')
+            this.stop('sfu-disconnected')
+          }
+        }
+      })
     } catch (e) {
       this.onError(`连接 SFU 失败：${(e as Error)?.message ?? e}`)
       this.stop('sfu-connect-failed')
       return false
     }
+    this.room = room
     this.say(`已连接 SFU room=${opts.sfu.roomName}`)
 
     // 2. 采集屏幕 + 系统声音（48kHz / 2ch / 高音质）
@@ -164,8 +169,8 @@ class RemoteSession {
     // 3. 发布屏幕/声音轨道到 SFU（控制端订阅）
     try {
       for (const t of screen.getTracks()) {
-        if (t.kind === 'video') await room.localParticipant.publishTrack(new LocalVideoTrack(t, {}, true), { name: 'screen' })
-        else if (t.kind === 'audio') await room.localParticipant.publishTrack(new LocalAudioTrack(t, undefined, true), { name: 'system-audio' })
+        if (t.kind === 'video') await publishOrReplace(room, 'screen', 'video', t)
+        else if (t.kind === 'audio') await publishOrReplace(room, 'system-audio', 'audio', t)
       }
       this.say('屏幕/声音已发布到 SFU')
     } catch (e) {
@@ -205,12 +210,6 @@ class RemoteSession {
       rlogThrottled(`session/${this.role}`, 'ctrl', `收到控制指令 t=${msg.t}`, 1000, msg.t === 'move' ? undefined : msg)
       void window.pantry.remoteInputEvent(msg as unknown as Record<string, unknown>)
     })
-    room.on(RoomEvent.Disconnected, () => {
-      if (!this.closed) {
-        this.sayErr('SFU 断开 → 结束会话')
-        this.stop('sfu-disconnected')
-      }
-    })
 
     // 6. 上报屏幕尺寸/模式/注入能力给控制端
     this.sendMeta()
@@ -237,15 +236,22 @@ class RemoteSession {
     this.trace = newTraceId('master')
     this.say(`控制端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
-    const room = new Room()
-    this.room = room
+    let room: Room
     try {
-      await room.connect(opts.sfu.url, opts.sfu.token)
+      room = await connectSfu(opts.sfu, {
+        onDisconnected: () => {
+          if (!this.closed) {
+            this.sayErr('SFU 断开 → 结束会话')
+            this.stop('sfu-disconnected')
+          }
+        }
+      })
     } catch (e) {
       this.onError(`连接 SFU 失败：${(e as Error)?.message ?? e}`)
       this.stop('sfu-connect-failed')
       return false
     }
+    this.room = room
     this.say(`已连接 SFU room=${opts.sfu.roomName}`)
 
     // 订阅被控端屏幕/声音
@@ -286,12 +292,6 @@ class RemoteSession {
         this.say('收到对端 bye → 结束会话')
         this.stop('peer-bye')
         return
-      }
-    })
-    room.on(RoomEvent.Disconnected, () => {
-      if (!this.closed) {
-        this.sayErr('SFU 断开 → 结束会话')
-        this.stop('sfu-disconnected')
       }
     })
     return true

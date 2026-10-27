@@ -19,13 +19,16 @@
  * 客户端不再持有 apiSecret、不再本地签发 token。
  */
 
-import type { RtcIceServer, RtcSignalPayload, RtcSfuInfo } from '@shared/server-types'
+import type { RtcIceServer, RtcSignalPayload, RtcSfuInfo, RtcKind } from '@shared/server-types'
 import { Room, LocalVideoTrack, LocalAudioTrack, RoomEvent } from 'livekit-client'
+import { connectSfu, publishOrReplace } from './livekitClient'
 
 export interface RtcEngineOptions {
   roomId: string
   /** 本端 userId（LiveKit 参与者 identity = String(myUserId)） */
   myUserId?: number
+  /** 通话/会议类型（无 sfu 时需要主动向服务端 rtc:join 申请 token 时用） */
+  kind?: RtcKind
   /** 兼容字段：LiveKit 房间由 SFU 下发 ICE/TURN，本字段不再使用 */
   iceServers: RtcIceServer[]
   /** SFU 连接信息（服务端 rtc:join/dmCall 等统一签发下发；有则用服务端 token，不再本地签发） */
@@ -43,6 +46,7 @@ export interface RtcEngineOptions {
 class RtcEngine {
   private roomId: string
   private myUserId: number
+  private kind?: RtcKind
   private sfu?: RtcSfuInfo
   private localStream: MediaStream
   private onRemoteStream: (userId: number, stream: MediaStream) => void
@@ -68,6 +72,7 @@ class RtcEngine {
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
     this.myUserId = opts.myUserId ?? 0
+    this.kind = opts.kind
     this.sfu = opts.sfu
     this.localStream = opts.localStream
     this.onRemoteStream = opts.onRemoteStream
@@ -86,88 +91,93 @@ class RtcEngine {
   // ─── 建立连接（LiveKit） ───────────────────────────────
 
   private async _connect(): Promise<void> {
-    // SFU 化：token 一律由服务端 rtc:join/dmCall 等签发下发，客户端不再持有 apiSecret、
-    // 不再本地签发（旧 livekit.ts 的本地签发已移除）。未下发 sfu 视为服务端未启用 LiveKit。
-    if (!this.sfu) {
-      console.error('[RtcEngine] 无服务端下发的 sfu 信息（服务端未启用 LiveKit / 未配置 LIVEKIT_*），视频链路不可用')
+    // 启动先获取：优先用调用方传入的 sfu；未传入则主动向服务端申请 token（rtc:join 返回），
+    // 绝不因为构造时 sfu 未就绪就放弃连接。
+    let sfu = this.sfu
+    if (!sfu) {
+      try {
+        const ack = await window.pantry.rtcJoin(this.roomId, undefined, this.kind)
+        if (ack.ok && ack.data?.sfu) {
+          sfu = ack.data.sfu
+          this.sfu = sfu
+        }
+      } catch (e) {
+        console.error('[RtcEngine] 主动获取 SFU 信息失败', e)
+      }
+    }
+    if (!sfu) {
+      console.error('[RtcEngine] 无法获取 SFU 信息（服务端未启用 LiveKit / 未配置 LIVEKIT_*），视频链路不可用')
       return
     }
-    const url = this.sfu.url
-    const token = this.sfu.token
-    const roomName = this.sfu.roomName
+    const roomName = sfu.roomName
 
     try {
-      const room = new Room()
+      // 统一连接（connectSfu）：事件订阅在 onRoomCreated 里完成（需在 connect 前绑定才不会错过）
+      const room = await connectSfu(sfu, {
+        onRoomCreated: (r) => {
+          this.room = r
+
+          r.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+            const uid = Number(participant.identity)
+            if (!Number.isFinite(uid) || !track.mediaStreamTrack) return
+            this.remoteTracks.set(track.sid ?? `${uid}-${track.mediaStreamTrack.id}`, track.mediaStreamTrack)
+            const list = this.remoteTracksByUser.get(uid) ?? []
+            if (!list.includes(track.mediaStreamTrack)) list.push(track.mediaStreamTrack)
+            this.remoteTracksByUser.set(uid, list)
+            console.log(`[RtcEngine] [subscribe] user=${uid} kind=${track.mediaStreamTrack.kind}`)
+            // 重新构建 MediaStream：<video srcObject> 在轨道变化后需要重绑才能播放新轨
+            this.onRemoteStream(uid, new MediaStream(list.slice()))
+            if (!this.connectedOnce.has(uid)) {
+              this.connectedOnce.add(uid)
+              this.onPeerConnected?.(uid)
+            }
+          })
+
+          r.on(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
+            const uid = Number(participant.identity)
+            if (!track.mediaStreamTrack) return
+            const list = this.remoteTracksByUser.get(uid) ?? []
+            const next = list.filter((t) => t !== track.mediaStreamTrack)
+            if (next.length) this.remoteTracksByUser.set(uid, next)
+            else this.remoteTracksByUser.delete(uid)
+            this.remoteTracks.delete(track.sid ?? '')
+            this.onRemoteStream(uid, new MediaStream(next.slice()))
+          })
+
+          r.on(RoomEvent.ParticipantDisconnected, (participant) => {
+            const uid = Number(participant.identity)
+            if (!Number.isFinite(uid)) return
+            console.log(`[RtcEngine] [disconnect] user=${uid}`)
+            this.remoteTracksByUser.delete(uid)
+            this.connectedOnce.delete(uid)
+            this.onPeerDisconnected(uid)
+          })
+
+          r.on(RoomEvent.Reconnecting, () => {
+            console.log('[RtcEngine] LiveKit 重连中…')
+          })
+          r.on(RoomEvent.Reconnected, () => {
+            console.log('[RtcEngine] LiveKit 重连成功')
+            for (const uid of this.remoteTracksByUser.keys()) {
+              if (!this.connectedOnce.has(uid)) {
+                this.connectedOnce.add(uid)
+                this.onPeerConnected?.(uid)
+              }
+            }
+          })
+        },
+        onDisconnected: () => {
+          console.log('[RtcEngine] LiveKit 连接断开')
+        }
+      })
       this.room = room
+      console.log('[RtcEngine] LiveKit 已连接', roomName, 'url=' + sfu.url)
 
-      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-        const uid = Number(participant.identity)
-        if (!Number.isFinite(uid) || !track.mediaStreamTrack) return
-        this.remoteTracks.set(track.sid ?? `${uid}-${track.mediaStreamTrack.id}`, track.mediaStreamTrack)
-        const list = this.remoteTracksByUser.get(uid) ?? []
-        if (!list.includes(track.mediaStreamTrack)) list.push(track.mediaStreamTrack)
-        this.remoteTracksByUser.set(uid, list)
-        console.log(`[RtcEngine] [subscribe] user=${uid} kind=${track.mediaStreamTrack.kind}`)
-        // 重新构建 MediaStream：<video srcObject> 在轨道变化后需要重绑才能播放新轨
-        this.onRemoteStream(uid, new MediaStream(list.slice()))
-        if (!this.connectedOnce.has(uid)) {
-          this.connectedOnce.add(uid)
-          this.onPeerConnected?.(uid)
-        }
-      })
-
-      room.on(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
-        const uid = Number(participant.identity)
-        if (!track.mediaStreamTrack) return
-        const list = this.remoteTracksByUser.get(uid) ?? []
-        const next = list.filter((t) => t !== track.mediaStreamTrack)
-        if (next.length) this.remoteTracksByUser.set(uid, next)
-        else this.remoteTracksByUser.delete(uid)
-        this.remoteTracks.delete(track.sid ?? '')
-        this.onRemoteStream(uid, new MediaStream(next.slice()))
-      })
-
-      room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-        const uid = Number(participant.identity)
-        if (!Number.isFinite(uid)) return
-        console.log(`[RtcEngine] [disconnect] user=${uid}`)
-        this.remoteTracksByUser.delete(uid)
-        this.connectedOnce.delete(uid)
-        this.onPeerDisconnected(uid)
-      })
-
-      room.on(RoomEvent.Disconnected, () => {
-        console.log('[RtcEngine] LiveKit 连接断开')
-      })
-      room.on(RoomEvent.Reconnecting, () => {
-        console.log('[RtcEngine] LiveKit 重连中…')
-      })
-      room.on(RoomEvent.Reconnected, () => {
-        console.log('[RtcEngine] LiveKit 重连成功')
-        for (const uid of this.remoteTracksByUser.keys()) {
-          if (!this.connectedOnce.has(uid)) {
-            this.connectedOnce.add(uid)
-            this.onPeerConnected?.(uid)
-          }
-        }
-      })
-
-      await room.connect(url!, token!)
-      console.log('[RtcEngine] LiveKit 已连接', roomName, 'url=' + url)
-
-      // 发布本地轨道
+      // 发布本地轨道（通用 publishOrReplace）
       const videoTrack = this.localStream.getVideoTracks()[0] ?? null
       const audioTrack = this.localStream.getAudioTracks()[0] ?? null
-      if (videoTrack) {
-        const t = new LocalVideoTrack(videoTrack, {}, true)
-        await room.localParticipant.publishTrack(t, { name: 'camera' })
-        this.publishedVideo = t
-      }
-      if (audioTrack) {
-        const t = new LocalAudioTrack(audioTrack, undefined, true)
-        await room.localParticipant.publishTrack(t, { name: 'microphone' })
-        this.publishedAudio = t
-      }
+      if (videoTrack) this.publishedVideo = (await publishOrReplace(room, 'camera', 'video', videoTrack)) as LocalVideoTrack | null
+      if (audioTrack) this.publishedAudio = (await publishOrReplace(room, 'microphone', 'audio', audioTrack)) as LocalAudioTrack | null
       console.log('[RtcEngine] 本地轨道已发布 video=' + !!videoTrack + ' audio=' + !!audioTrack)
     } catch (e) {
       console.error('[RtcEngine] LiveKit 连接失败:', e instanceof Error ? e.message : String(e))
