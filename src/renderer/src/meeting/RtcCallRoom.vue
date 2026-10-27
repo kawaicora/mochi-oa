@@ -15,6 +15,7 @@ import type {
   RtcSignalPayload,
   RtcSfuInfo
 } from '@shared/server-types'
+import { sfuFromAck } from '@shared/sfu'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent } from '@renderer/utils/notify-manager'
 
@@ -769,12 +770,12 @@ onMounted(async () => {
     if (mode === 'create') {
       const ack = await window.pantry.rtcCreateMeeting({ kind })
       if (!ack.ok || !ack.data?.meeting) throw new Error(ack.error || '创建会议失败')
-      await enterRoom(ack.data.meeting, ack.data.peers ?? [], ack.data.iceServers ?? [], kind, ack.data.sfu)
+      await enterRoom(ack.data.meeting, ack.data.peers ?? [], ack.data.iceServers ?? [], kind, sfuFromAck(ack))
     } else {
       if (!meetingNo) throw new Error('缺少会议号')
       const ack = await window.pantry.rtcJoin(meetingNo, password || undefined, kind)
       if (!ack.ok || !ack.data?.room) throw new Error(ack.error || '加入会议失败')
-      await enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, kind, ack.data.sfu)
+      await enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, kind, sfuFromAck(ack))
     }
   }
   lastRetryAction = enterMeeting

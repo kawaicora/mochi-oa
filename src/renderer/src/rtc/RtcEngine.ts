@@ -22,6 +22,7 @@
 import type { RtcIceServer, RtcSignalPayload, RtcSfuInfo, RtcKind } from '@shared/server-types'
 import { Room, LocalVideoTrack, LocalAudioTrack, RoomEvent } from 'livekit-client'
 import { connectSfu, publishOrReplace } from './livekitClient'
+import { sfuFromAck } from '@shared/sfu'
 
 export interface RtcEngineOptions {
   roomId: string
@@ -82,7 +83,7 @@ class RtcEngine {
       '[RtcEngine] 初始化（LiveKit）',
       'room=' + this.roomId,
       'identity=' + String(this.myUserId),
-      'sfu=' + (opts.sfu ? 'server-token' : 'brand'),
+      'sfu=' + (opts.sfu ? 'server-token' : 'none'),
       'localTracks=' + this.localStream.getTracks().length
     )
     void this._connect()
@@ -97,9 +98,10 @@ class RtcEngine {
     if (!sfu) {
       try {
         const ack = await window.pantry.rtcJoin(this.roomId, undefined, this.kind)
-        if (ack.ok && ack.data?.sfu) {
-          sfu = ack.data.sfu
-          this.sfu = sfu
+        const got = sfuFromAck(ack)
+        if (got) {
+          sfu = got
+          this.sfu = got
         }
       } catch (e) {
         console.error('[RtcEngine] 主动获取 SFU 信息失败', e)
