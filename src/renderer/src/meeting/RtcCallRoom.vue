@@ -134,6 +134,26 @@ function quitFromDialog(): void {
 const peerWaiters = new Map<number, () => void>()
 /** 每个对端各自的连续失败次数（用于判断该对端是否已放弃） */
 const peerFailStreak = new Map<number, number>()
+
+// ─── SFU 对端离开处理 ────────────────────────────────────────
+/** 防止「peerLeft 事件 + LiveKit ParticipantDisconnected」双路触发重复自动关窗 */
+let autoClosing = false
+/** 对端离开后清理本地状态（对端已不在 SFU 房间，绝不重试） */
+function handlePeerGone(userId: number): void {
+  delete remoteStreams[userId]
+  peers.value = peers.value.filter((p) => p.userId !== userId)
+  maybeAutoCloseIfAlone()
+}
+/** 对端全部离开（只剩本端一人）→ 自动结束通话并关闭窗口（1 对 1 场景核心） */
+function maybeAutoCloseIfAlone(): void {
+  if (autoClosing) return
+  const remaining = peers.value.filter((p) => p.userId !== myUserId.value)
+  if (remaining.length === 0) {
+    autoClosing = true
+    console.log('[RTC] 对端全部离开，自动结束通话')
+    void leaveCall()
+  }
+}
 /** 正在重连的对端，避免同一对端并发重连 */
 const recoveringPeers = new Set<number>()
 
@@ -489,9 +509,9 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
       peerWaiters.delete(userId)
     },
     onPeerDisconnected: (userId) => {
-      delete remoteStreams[userId]
-      // 会中意外掉线：不把人踢出会议，先自动重连；连续 3 次失败才弹窗
-      void recoverPeer(userId)
+      // SFU 模式：对端已离开房间（正常退/关窗/断电均由 SFU 判定断开）。
+      // 本端不重试（对端不在房间，重建连接无意义）；清理本地状态并判定是否自动关窗。
+      handlePeerGone(userId)
     }
   })
 
@@ -542,6 +562,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
         engine?.closePeer(peer.userId)
         delete remoteStreams[peer.userId]
         peers.value = peers.value.filter((p) => p.socketId !== d.peerId)
+        maybeAutoCloseIfAlone()
       }
     }),
     window.pantry.onRtcSignal((d) => {
