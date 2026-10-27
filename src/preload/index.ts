@@ -32,6 +32,7 @@ import type {
   SessionRevokedEvent,
   UserProfileUpdateAck
 } from '../shared/server-types'
+import type { SfuAckFields } from '../shared/sfu'
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   const wrapped = (_e: unknown, payload: T): void => listener(payload)
@@ -427,11 +428,11 @@ const api = {
   writeTempImage: (dataUrl: string): Promise<string | null> => safeInvoke(IpcChannels.fileWriteTempImage, dataUrl),
 
   // RTC 信令
-  rtcCreateMeeting: (opts: { title?: string; startAt?: string; password?: string; kind: RtcKind }): Promise<Ack & { url?: string; token?: string; roomName?: string; data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }> =>
+  rtcCreateMeeting: (opts: { title?: string; startAt?: string; password?: string; kind: RtcKind }): Promise<Ack & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcCreateMeeting, opts),
   rtcGetMeeting: (meetingNo: string): Promise<Ack & { data?: { meeting: RtcRoom } }> =>
     safeInvoke(IpcChannels.rtcGetMeeting, meetingNo),
-  rtcJoin: (roomId: string, password?: string, kind?: RtcKind): Promise<Ack & { url?: string; token?: string; roomName?: string; data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } }> =>
+  rtcJoin: (roomId: string, password?: string, kind?: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcJoin, roomId, password ?? null, kind ?? null),
   rtcSignal: (roomId: string, signal: RtcSignalPayload): Promise<Ack> =>
     safeInvoke(IpcChannels.rtcSignal, roomId, signal),
@@ -439,11 +440,11 @@ const api = {
     safeInvoke(IpcChannels.rtcLeave, roomId),
   rtcEnd: (roomId: string): Promise<Ack> =>
     safeInvoke(IpcChannels.rtcEnd, roomId),
-  rtcDmCall: (userId: number, kind: RtcKind, password?: string): Promise<Ack & { url?: string; token?: string; roomName?: string; data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> =>
+  rtcDmCall: (userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcDmCall, userId, kind, password ?? undefined),
-  rtcDmAnswer: (roomId: string, accept: boolean): Promise<Ack & { url?: string; token?: string; roomName?: string; data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
+  rtcDmAnswer: (roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcDmAnswer, roomId, accept),
-  rtcGroupCall: (groupId: number, kind: RtcKind): Promise<Ack & { url?: string; token?: string; roomName?: string; data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> =>
+  rtcGroupCall: (groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcGroupCall, groupId, kind),
   rtcChatMessage: (roomId: string, content: string): Promise<Ack> =>
     safeInvoke(IpcChannels.rtcChatSend, roomId, content),

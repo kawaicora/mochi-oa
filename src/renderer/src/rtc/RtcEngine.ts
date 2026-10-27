@@ -98,7 +98,7 @@ class RtcEngine {
     if (!sfu) {
       try {
         const ack = await window.pantry.rtcJoin(this.roomId, undefined, this.kind)
-        const got = sfuFromAck(ack)
+        const got = sfuFromAck(ack.data)
         if (got) {
           sfu = got
           this.sfu = got

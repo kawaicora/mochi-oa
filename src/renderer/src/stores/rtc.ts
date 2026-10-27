@@ -27,13 +27,13 @@ interface RtcPantryApi {
     startAt?: string
     password?: string
     kind: RtcKind
-  }): Promise<Ack & SfuAckFields & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }>
+  }): Promise<Ack & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } & SfuAckFields }>
   rtcGetMeeting(meetingNo: string): Promise<Ack & { data?: { meeting: RtcRoom } }>
   rtcJoin(
     roomId: string,
     password?: string,
     kind?: RtcKind
-  ): Promise<Ack & SfuAckFields & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } & SfuAckFields }>
   rtcSignal(roomId: string, signal: import('@shared/server-types').RtcSignalPayload): Promise<Ack>
   rtcLeave(roomId: string): Promise<Ack>
   rtcEnd(roomId: string): Promise<Ack>
@@ -41,15 +41,15 @@ interface RtcPantryApi {
     userId: number,
     kind: RtcKind,
     password?: string
-  ): Promise<Ack & SfuAckFields & { data?: { room: RtcRoom; kind: RtcKind; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } & SfuAckFields }>
   rtcDmAnswer(
     roomId: string,
     accept: boolean
-  ): Promise<Ack & SfuAckFields & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } & SfuAckFields }>
   rtcGroupCall(
     groupId: number,
     kind: RtcKind
-  ): Promise<Ack & SfuAckFields & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } & SfuAckFields }>
 
   onRtcDmIncoming(l: (d: RtcDmIncomingEvent) => void): () => void
   onRtcDmRejected(l: (d: import('@shared/server-types').RtcDmRejectedEvent) => void): () => void
@@ -214,7 +214,7 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       if (kind === 'remote') {
         // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制，SFU token 由服务端签发）
-        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId, sfu: sfuFromAck(ack) })
+        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId, sfu: sfuFromAck(ack.data) })
         return {}
       }
       // 统一走通用通话窗口（与会议同一组件 RtcCallRoom）
@@ -245,7 +245,7 @@ export const useRtcStore = defineStore('rtc', () => {
       incomingDm.value = null
       if (kind === 'remote') {
         // 被控端：同意后启动被控会话（采集屏幕 + 系统声音 + 键鼠注入，SFU token 服务端下发）
-        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId, sfu: sfuFromAck(ack) })
+        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId, sfu: sfuFromAck(ack.data) })
         return
       }
       // 统一走通用通话窗口
@@ -324,7 +324,7 @@ export const useRtcStore = defineStore('rtc', () => {
         error.value = ack.error || '加入会议失败'
         return
       }
-      await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind, sfuFromAck(ack))
+      await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind, sfuFromAck(ack.data))
     } catch (e) {
       console.error('[rtc] 调用失败', e)
       error.value = String(e)

@@ -1,6 +1,6 @@
 {
   "name": "mochi-oa",
-  "version": "10.2.21",
+  "version": "10.2.22",
   "description": "麻薯-好用简洁的办公软件",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
