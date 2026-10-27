@@ -138,19 +138,23 @@ const peerFailStreak = new Map<number, number>()
 // ─── SFU 对端离开处理 ────────────────────────────────────────
 /** 防止「peerLeft 事件 + LiveKit ParticipantDisconnected」双路触发重复自动关窗 */
 let autoClosing = false
+/** 当前房间类型（'dm' 单聊 / 'group' 群聊 / 'conf' 会议）；仅单聊在对端退出后自动关窗 */
+let currentRoomType: string = ''
 /** 对端离开后清理本地状态（对端已不在 SFU 房间，绝不重试） */
 function handlePeerGone(userId: number): void {
   delete remoteStreams[userId]
   peers.value = peers.value.filter((p) => p.userId !== userId)
   maybeAutoCloseIfAlone()
 }
-/** 对端全部离开（只剩本端一人）→ 自动结束通话并关闭窗口（1 对 1 场景核心） */
+/** 单聊（1 对 1）对端离开 → 自动结束通话并关闭窗口。
+ * 会议/群聊里人可能暂时离开、之后再加回，绝不能因当前人走光就自动收窗。 */
 function maybeAutoCloseIfAlone(): void {
   if (autoClosing) return
+  if (currentRoomType !== 'dm') return
   const remaining = peers.value.filter((p) => p.userId !== myUserId.value)
   if (remaining.length === 0) {
     autoClosing = true
-    console.log('[RTC] 对端全部离开，自动结束通话')
+    console.log('[RTC] 单聊对端已离开，自动结束通话')
     void leaveCall()
   }
 }
@@ -443,6 +447,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   )
   room.value = roomInfo
   peers.value = [...roomPeers]
+  currentRoomType = roomInfo.type
 
   // 0. 【抢在采集媒体之前就订阅信令】
   //
