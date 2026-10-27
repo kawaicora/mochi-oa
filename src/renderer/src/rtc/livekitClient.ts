@@ -32,8 +32,19 @@ export async function connectSfu(sfu: RtcSfuInfo, opts: SfuConnectOpts = {}): Pr
   if (opts.onDisconnected) {
     room.on(RoomEvent.Disconnected, () => opts.onDisconnected?.())
   }
-  await room.connect(sfu.url, sfu.token)
-  return room
+  try {
+    await room.connect(sfu.url, sfu.token)
+    return room
+  } catch (e) {
+    // 连接失败：必须彻底断开再抛错。Room 默认 autoReconnect 会一直在后台重连，
+    // 若不 disconnect，调用方虽然 catch 了失败，room 仍无限重试（表现为「退出后还在重试」）。
+    try {
+      room.disconnect()
+    } catch {
+      /* ignore */
+    }
+    throw e
+  }
 }
 
 /**

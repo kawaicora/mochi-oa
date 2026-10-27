@@ -175,6 +175,18 @@ class RtcEngine {
       this.room = room
       console.log('[RtcEngine] LiveKit 已连接', roomName, 'url=' + sfu.url)
 
+      // 竞态兜底：closeAll 可能在 connect 期间被调用（用户快速退出）。此时已 disposed，
+      // 迟到的连接成功必须立即断开，否则 Room 会一直保持连接/重连（表现为「退出后还在重试」）。
+      if (this.disposed) {
+        try {
+          room.disconnect()
+        } catch {
+          /* ignore */
+        }
+        console.log('[RtcEngine] 连接期间已退出，断开刚建立的 LiveKit 连接')
+        return
+      }
+
       // 发布本地轨道（通用 publishOrReplace）
       const videoTrack = this.localStream.getVideoTracks()[0] ?? null
       const audioTrack = this.localStream.getAudioTracks()[0] ?? null
