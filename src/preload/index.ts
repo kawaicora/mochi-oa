@@ -89,9 +89,9 @@ const api = {
     safeInvoke(IpcChannels.openTaskWindow, taskId),
   openPreviewWindow: (params: { kind: 'pdf' | 'word' | 'excel'; path: string; name: string }): Promise<{ ok: boolean; error?: string }> =>
     safeInvoke(IpcChannels.openPreviewWindow, params),
-  openRemoteWindow: (params: { room: string; iceServers: unknown[]; mode: 'remote' | 'local'; peerId: number; peerName?: string; meId: number }): Promise<{ ok: boolean; error?: string }> =>
+  openRemoteWindow: (params: { room: string; iceServers: unknown[]; mode: 'remote' | 'local'; peerId: number; peerName?: string; meId: number; sfu?: { url: string; token: string; roomName: string } }): Promise<{ ok: boolean; error?: string }> =>
     safeInvoke(IpcChannels.openRemoteWindow, params),
-  remoteGetParams: (): Promise<{ room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null> =>
+  remoteGetParams: (): Promise<{ room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number; sfu?: { url: string; token: string; roomName: string } } | null> =>
     safeInvoke(IpcChannels.remoteGetParams),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     safeInvoke(IpcChannels.openScreenshotWindow, payload),
@@ -466,6 +466,9 @@ const api = {
     safeInvoke(IpcChannels.devDevices, deviceId, cams, mics),
   devSignal: (deviceId: string, signal: unknown): Promise<Ack> =>
     safeInvoke(IpcChannels.devSignal, deviceId, signal),
+  /** 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发 */
+  devView: (deviceId: string): Promise<Ack & { data?: { deviceId?: string; url?: string; token?: string; roomName?: string } }> =>
+    safeInvoke(IpcChannels.devView, deviceId),
 
   // 推送订阅
   onServerState: (l: (s: ServerClientState) => void) => subscribe<ServerClientState>(IpcEvents.serverState, l),
@@ -496,7 +499,7 @@ const api = {
   onRtcGroupCall: (l: (d: RtcGroupCallEvent) => void) => subscribe<RtcGroupCallEvent>(IpcEvents.rtcGroupCall, l),
   onRtcChatMessage: (l: (d: RtcChatMessageEvent) => void) => subscribe<RtcChatMessageEvent>(IpcEvents.rtcChatMessage, l),
   // 远程设备控制（被控端）事件订阅
-  onDevView: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devView, l),
+  onDevView: (l: (d: { deviceId?: string; url?: string; token?: string; roomName?: string }) => void) => subscribe<{ deviceId?: string; url?: string; token?: string; roomName?: string }>(IpcEvents.devView, l),
   onDevEnumerate: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devEnumerate, l),
   onDevStart: (l: (d: { deviceId?: string; kind?: string; device?: unknown }) => void) => subscribe<{ deviceId?: string; kind?: string; device?: unknown }>(IpcEvents.devStart, l),
   onDevStop: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devStop, l),

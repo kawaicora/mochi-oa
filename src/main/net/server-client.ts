@@ -37,6 +37,7 @@ import type {
   RtcPeerJoinedEvent,
   RtcPeerLeftEvent,
   RtcRoom,
+  RtcSfuInfo,
   RtcSignalEvent,
   RtcSignalPayload,
   RtcChatMessageEvent,
@@ -548,7 +549,7 @@ export class ServerClient extends EventEmitter {
     socket.on('doc:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('docsUpdated', d))
     socket.on('wiki:updated', (d: { companyId?: number; projectId?: number | null }) => this.emit('wikiUpdated', d))
     // 远程设备控制：服务端 → 被控端（渲染层 RemoteControl 消费）
-    socket.on('dev:view', (d: { deviceId?: string }) => this.emit('devView', d))
+    socket.on('dev:view', (d: { deviceId?: string; url?: string; token?: string; roomName?: string }) => this.emit('devView', d))
     socket.on('dev:enumerate', (d: { deviceId?: string }) => this.emit('devEnumerate', d))
     socket.on('dev:start', (d: { deviceId?: string; kind?: string; device?: unknown }) => this.emit('devStart', d))
     socket.on('dev:stop', (d: { deviceId?: string }) => this.emit('devStop', d))
@@ -1266,12 +1267,12 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ meeting: RtcRoom }>(this.socket, 'rtc:getMeeting', { meetingNo })
   }
 
-  async rtcJoin(roomId: string, password?: string, kind?: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } }> {
+  async rtcJoin(roomId: string, password?: string, kind?: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean; sfu?: RtcSfuInfo } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     const payload: Record<string, unknown> = { roomId }
     if (password) payload.password = password
     if (kind) payload.kind = kind
-    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean }>(this.socket, 'rtc:join', payload)
+    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean; sfu?: RtcSfuInfo }>(this.socket, 'rtc:join', payload)
   }
 
   async rtcSignal(roomId: string, signal: RtcSignalPayload): Promise<Ack> {
@@ -1289,24 +1290,31 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'rtc:end', { roomId })
   }
 
-  async rtcDmCall(userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] } }> {
+  async rtcDmCall(userId: number, kind: RtcKind, password?: string): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[]; sfu?: RtcSfuInfo } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck<{ room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[] }>(this.socket, 'rtc:dmCall', { userId, kind, password })
+    return emitWithAck<{ room: RtcRoom; kind: RtcKind; iceServers?: RtcIceServer[]; sfu?: RtcSfuInfo }>(this.socket, 'rtc:dmCall', { userId, kind, password })
   }
 
-  async rtcDmAnswer(roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> {
+  async rtcDmAnswer(roomId: string, accept: boolean): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] }>(this.socket, 'rtc:dmAnswer', { roomId, accept })
+    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo }>(this.socket, 'rtc:dmAnswer', { roomId, accept })
   }
 
-  async rtcGroupCall(groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }> {
+  async rtcGroupCall(groupId: number, kind: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo } }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] }>(this.socket, 'rtc:groupCall', { groupId, kind })
+    return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo }>(this.socket, 'rtc:groupCall', { groupId, kind })
   }
 
   async rtcChatMessage(roomId: string, content: string): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'rtc:chatMessage', { roomId, content })
+  }
+
+  // ─── 远程设备控制 ───────────────────────
+  // 控制端发起查看远程设备（SERVER_ADMIN）：服务端为控制端/被控端签发同一 SFU room 的 token。
+  async devView(deviceId: string): Promise<Ack & { data?: { deviceId: string; url?: string; token?: string; roomName?: string } }> {
+    if (!this.socket) return { ok: false, error: '未连接服务器' }
+    return emitWithAck<{ deviceId: string; url?: string; token?: string; roomName?: string }>(this.socket, 'dev:view', { deviceId })
   }
 
   // ─── 远程设备控制（被控端上报/信令） ───────────────────────

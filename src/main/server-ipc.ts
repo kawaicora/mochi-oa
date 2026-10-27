@@ -664,6 +664,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   })
   ipcMain.handle(IpcChannels.devDevices, (_e, deviceId, cams, mics) => serverClient.devDevices(String(deviceId ?? ''), cams as Array<{ id: string; label: string }>, mics as Array<{ id: string; label: string }>))
   ipcMain.handle(IpcChannels.devSignal, (_e, deviceId, signal) => serverClient.devSignal(String(deviceId ?? ''), signal))
+  // 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发
+  ipcMain.handle(IpcChannels.devView, (_e, deviceId) => serverClient.devView(String(deviceId ?? '')))
   // 本机信息（deviceId/hostname/os/ip），供被控端注册用
   ipcMain.handle(IpcChannels.devGetInfo, () => {
     const os = require('node:os') as typeof import('node:os')
@@ -1111,19 +1113,23 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   })
 
   // 打开独立远程控制窗口（控制端）：无边框 + 主窗口样式 + 可缩放。
-  // 会话参数先暂存，远程窗口 ready 后经 remoteGetParams 取回，再由远程窗口内建 WebRTC 会话。
-  let pendingRemote: { room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number } | null = null
+  // 会话参数先暂存，远程窗口 ready 后经 remoteGetParams 取回，再由远程窗口内建 LiveKit SFU 会话。
+  let pendingRemote: { room: string; iceServers: unknown[]; mode: string; peerId: number; peerName: string; meId: number; sfu?: { url: string; token: string; roomName: string } } | null = null
   ipcMain.handle(IpcChannels.openRemoteWindow, (_e, params) => {
-    const p = (params ?? {}) as { room?: unknown; iceServers?: unknown; mode?: unknown; peerId?: unknown; peerName?: unknown; meId?: unknown }
+    const p = (params ?? {}) as { room?: unknown; iceServers?: unknown; mode?: unknown; peerId?: unknown; peerName?: unknown; meId?: unknown; sfu?: unknown }
     const room = String(p.room ?? '')
     if (!room) return { ok: false, error: '缺少会话标识' }
+    const pSfu = p.sfu as { url?: unknown; token?: unknown; roomName?: unknown } | undefined
     pendingRemote = {
       room,
       iceServers: Array.isArray(p.iceServers) ? p.iceServers : [],
       mode: p.mode === 'local' ? 'local' : 'remote',
       peerId: Number(p.peerId) || 0,
       peerName: String(p.peerName ?? ''),
-      meId: Number(p.meId) || 0
+      meId: Number(p.meId) || 0,
+      sfu: pSfu && pSfu.url && pSfu.token && pSfu.roomName
+        ? { url: String(pSfu.url), token: String(pSfu.token), roomName: String(pSfu.roomName) }
+        : undefined
     }
     const win = new BrowserWindow({
       width: 1240, height: 820, minWidth: 800, minHeight: 560,

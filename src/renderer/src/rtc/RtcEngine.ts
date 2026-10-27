@@ -15,12 +15,12 @@
  *       onPeerDisconnected(userId)      — 该参与者离开（LiveKit 内部自动重连，不会误报掉线）
  *   - handleSignal / addPeer 变为空操作（LiveKit 自动订阅，无需 P2P 信令）
  *
- * 配置来源：resources/brand.json 的 rtc 段（见 rtc/livekit.ts）。
+ * 配置来源：服务端统一签发下发 sfu{url,token,roomName}（.env 的 LIVEKIT_*），
+ * 客户端不再持有 apiSecret、不再本地签发 token。
  */
 
-import type { RtcIceServer, RtcSignalPayload } from '@shared/server-types'
+import type { RtcIceServer, RtcSignalPayload, RtcSfuInfo } from '@shared/server-types'
 import { Room, LocalVideoTrack, LocalAudioTrack, RoomEvent } from 'livekit-client'
-import { getRtcConfig, signLiveKitToken, toLiveKitRoomName } from './livekit'
 
 export interface RtcEngineOptions {
   roomId: string
@@ -28,6 +28,8 @@ export interface RtcEngineOptions {
   myUserId?: number
   /** 兼容字段：LiveKit 房间由 SFU 下发 ICE/TURN，本字段不再使用 */
   iceServers: RtcIceServer[]
+  /** SFU 连接信息（服务端 rtc:join/dmCall 等统一签发下发；有则用服务端 token，不再本地签发） */
+  sfu?: RtcSfuInfo
   localStream: MediaStream
   /** 兼容字段：LiveKit 无需 P2P 信令，本回调不再触发 */
   onSignal: (signal: RtcSignalPayload) => void
@@ -41,6 +43,7 @@ export interface RtcEngineOptions {
 class RtcEngine {
   private roomId: string
   private myUserId: number
+  private sfu?: RtcSfuInfo
   private localStream: MediaStream
   private onRemoteStream: (userId: number, stream: MediaStream) => void
   private onPeerDisconnected: (userId: number) => void
@@ -65,6 +68,7 @@ class RtcEngine {
   constructor(opts: RtcEngineOptions) {
     this.roomId = opts.roomId
     this.myUserId = opts.myUserId ?? 0
+    this.sfu = opts.sfu
     this.localStream = opts.localStream
     this.onRemoteStream = opts.onRemoteStream
     this.onPeerDisconnected = opts.onPeerDisconnected
@@ -73,6 +77,7 @@ class RtcEngine {
       '[RtcEngine] 初始化（LiveKit）',
       'room=' + this.roomId,
       'identity=' + String(this.myUserId),
+      'sfu=' + (opts.sfu ? 'server-token' : 'brand'),
       'localTracks=' + this.localStream.getTracks().length
     )
     void this._connect()
@@ -81,16 +86,17 @@ class RtcEngine {
   // ─── 建立连接（LiveKit） ───────────────────────────────
 
   private async _connect(): Promise<void> {
-    const cfg = await getRtcConfig()
-    if (!cfg) {
-      console.error('[RtcEngine] brand.json 未配置 rtc（LiveKit），视频链路不可用')
+    // SFU 化：token 一律由服务端 rtc:join/dmCall 等签发下发，客户端不再持有 apiSecret、
+    // 不再本地签发（旧 livekit.ts 的本地签发已移除）。未下发 sfu 视为服务端未启用 LiveKit。
+    if (!this.sfu) {
+      console.error('[RtcEngine] 无服务端下发的 sfu 信息（服务端未启用 LiveKit / 未配置 LIVEKIT_*），视频链路不可用')
       return
     }
-    const identity = String(this.myUserId)
-    const roomName = toLiveKitRoomName(cfg, this.roomId)
+    const url = this.sfu.url
+    const token = this.sfu.token
+    const roomName = this.sfu.roomName
 
     try {
-      const token = await signLiveKitToken(cfg, identity, roomName)
       const room = new Room()
       this.room = room
 
@@ -146,8 +152,8 @@ class RtcEngine {
         }
       })
 
-      await room.connect(cfg.url, token)
-      console.log('[RtcEngine] LiveKit 已连接', roomName, 'url=' + cfg.url)
+      await room.connect(url!, token!)
+      console.log('[RtcEngine] LiveKit 已连接', roomName, 'url=' + url)
 
       // 发布本地轨道
       const videoTrack = this.localStream.getVideoTracks()[0] ?? null

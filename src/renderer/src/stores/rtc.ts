@@ -7,7 +7,8 @@ import type {
   RtcIceServer,
   RtcKind,
   RtcPeer,
-  RtcRoom
+  RtcRoom,
+  RtcSfuInfo
 } from '@shared/server-types'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent, stopRing } from '@renderer/utils/notify-manager'
@@ -25,13 +26,13 @@ interface RtcPantryApi {
     startAt?: string
     password?: string
     kind: RtcKind
-  }): Promise<Ack & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }>
+  }): Promise<Ack & { data?: { meeting: RtcRoom; scheduled: boolean; peers?: RtcPeer[]; iceServers?: RtcIceServer[]; sfu?: RtcSfuInfo } }>
   rtcGetMeeting(meetingNo: string): Promise<Ack & { data?: { meeting: RtcRoom } }>
   rtcJoin(
     roomId: string,
     password?: string,
     kind?: RtcKind
-  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean; sfu?: RtcSfuInfo } }>
   rtcSignal(roomId: string, signal: import('@shared/server-types').RtcSignalPayload): Promise<Ack>
   rtcLeave(roomId: string): Promise<Ack>
   rtcEnd(roomId: string): Promise<Ack>
@@ -39,15 +40,15 @@ interface RtcPantryApi {
     userId: number,
     kind: RtcKind,
     password?: string
-  ): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; peers?: RtcPeer[]; iceServers?: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; kind: RtcKind; peers?: RtcPeer[]; iceServers?: RtcIceServer[]; sfu?: RtcSfuInfo } }>
   rtcDmAnswer(
     roomId: string,
     accept: boolean
-  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo } }>
   rtcGroupCall(
     groupId: number,
     kind: RtcKind
-  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[] } }>
+  ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; sfu?: RtcSfuInfo } }>
 
   onRtcDmIncoming(l: (d: RtcDmIncomingEvent) => void): () => void
   onRtcDmRejected(l: (d: import('@shared/server-types').RtcDmRejectedEvent) => void): () => void
@@ -211,8 +212,8 @@ export const useRtcStore = defineStore('rtc', () => {
         return {}
       }
       if (kind === 'remote') {
-        // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制）
-        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId })
+        // 远程控制：打开独立远程窗口（控制端查看 + 键鼠控制，SFU token 由服务端签发）
+        await RemoteUi.openMaster({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId: userId, sfu: ack.data.sfu })
         return {}
       }
       // 统一走通用通话窗口（与会议同一组件 RtcCallRoom）
@@ -242,8 +243,8 @@ export const useRtcStore = defineStore('rtc', () => {
       }
       incomingDm.value = null
       if (kind === 'remote') {
-        // 被控端：同意后启动被控会话（采集屏幕 + 系统声音 + 键鼠注入）
-        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId })
+        // 被控端：同意后启动被控会话（采集屏幕 + 系统声音 + 键鼠注入，SFU token 服务端下发）
+        void RemoteUi.openSlave({ room: ack.data.room.id, kind, iceServers: ack.data.iceServers, mode: 'remote', peerId, sfu: ack.data.sfu })
         return
       }
       // 统一走通用通话窗口
@@ -322,7 +323,7 @@ export const useRtcStore = defineStore('rtc', () => {
         error.value = ack.error || '加入会议失败'
         return
       }
-      await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind)
+      await _enterRoom(ack.data.room, ack.data.peers, ack.data.iceServers, ack.data.room.kind, ack.data.sfu)
     } catch (e) {
       console.error('[rtc] 调用失败', e)
       error.value = String(e)
@@ -497,7 +498,8 @@ export const useRtcStore = defineStore('rtc', () => {
     room: RtcRoom,
     peers: RtcPeer[],
     iceServers: RtcIceServer[],
-    kind: RtcKind
+    kind: RtcKind,
+    sfu?: RtcSfuInfo
   ): Promise<void> {
     // 一旦真的进房间，就绝不该还有铃声在响（接听/加入/被拉进会议都会走到这里）
     stopRing()
@@ -540,10 +542,11 @@ export const useRtcStore = defineStore('rtc', () => {
     // 把本地流写入 VideoStream.stream，供 UI 绑定和后续 replaceTrack 使用
     VideoStream.stream = localStream
 
-    // 2. 创建 RtcEngine
+    // 2. 创建 RtcEngine（SFU：服务端签发 token 下发，客户端不再本地签发）
     engine = new RtcEngine({
       roomId: room.id,
       iceServers,
+      sfu,
       localStream,
       onSignal: (signal) => {
         void rtcPantry.rtcSignal(room.id, signal)

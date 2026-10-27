@@ -364,11 +364,26 @@ export interface RtcSignalIce extends RtcSignalTarget {
 
 export type RtcSignalPayload = RtcSignalSdp | RtcSignalIce
 
+/**
+ * LiveKit SFU 连接信息（服务端用 .env 的 LIVEKIT_API_SECRET 统一签发 token 下发；
+ * 客户端不再持有 apiSecret，token 一律来自服务端）。
+ */
+export interface RtcSfuInfo {
+  /** LiveKit 服务器地址，如 wss://live.kawaimoe.org */
+  url: string
+  /** 该用户在指定房间的 access token（已含 canPublishData:true，供远程键鼠 data 使用） */
+  token: string
+  /** 业务房间对应的 LiveKit 房间名（已带前缀） */
+  roomName: string
+}
+
 export interface RtcDmIncomingEvent {
   room: string
   kind: RtcKind
   from: { userId: number; nick: string; avatar?: string }
   ts: number
+  /** 被控端/被叫方收到的 SFU 连接信息（服务端为双方签发同一 room 的 token） */
+  sfu?: RtcSfuInfo
 }
 
 export type HolidayType = 'legal' | 'workday' | 'custom'

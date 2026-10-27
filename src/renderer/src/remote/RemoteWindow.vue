@@ -2,8 +2,8 @@
 /**
  * 独立远程控制窗口（控制端）。
  * 无边框 + 主窗口样式 + 可缩放（缩放不压缩内部布局，画面 object-fit: contain）。
- * 窗口内建立 WebRTC 会话：屏幕 + 系统声音（48kHz/2ch）+ PeerConnection 自带 DataChannel
- * 传输键鼠控制。窗口关闭自动结束会话并复位/解冻被控端鼠标。
+ * 窗口内建立 LiveKit SFU 会话：订阅被控端屏幕 + 系统声音（48kHz/2ch），键鼠经
+ * LiveKit data 消息发送。窗口关闭自动结束会话并复位/解冻被控端鼠标。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability } from './RemoteSession'
@@ -16,6 +16,7 @@ const props = defineProps<{
   peerId: number
   peerName: string
   meId: number
+  sfu?: { url: string; token: string; roomName: string }
 }>()
 
 const videoEl = ref<HTMLVideoElement | null>(null)
@@ -27,7 +28,7 @@ const inputCap = ref<RemoteInputCapability | null>(null)
 const connected = ref(false)
 const errMsg = ref('')
 
-// ── 键鼠采集 → DataChannel ──
+// ── 键鼠采集 → LiveKit data ──
 function screenOf(e: MouseEvent): { x: number; y: number } | null {
   const m = meta.value
   const holder = holderEl.value
@@ -75,14 +76,13 @@ onMounted(() => {
   // 窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时也要收场：
   // 渲染层来得及就自己 stop（会发 bye）；来不及则由主进程在 close 时补发（见 server-ipc）
   window.addEventListener('beforeunload', onBeforeUnload)
-  // 建立会话（控制端等被控 offer）
-  RemoteSession.startMaster({
+  // 建立会话（控制端订阅被控端 SFU 屏幕/声音，键鼠走 LiveKit data）
+  void RemoteSession.startMaster({
     room: props.room,
-    iceServers: props.iceServers,
+    sfu: props.sfu!,
     mode: props.mode,
     meId: props.meId,
     peerId: props.peerId,
-    sendSignal: (s) => window.pantry.rtcSignal(props.room, s as never),
     callbacks: {
       onRemoteStream: (s) => {
         rlog('window', `收到远程画面 tracks=${s.getTracks().map((t) => t.kind).join('+')}`)

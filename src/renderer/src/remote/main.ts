@@ -7,7 +7,7 @@ import '../styles/base.css'
  * 独立远程控制窗口（控制端）入口。
  * 由 main 进程 openRemoteWindow IPC 打开 remote.html，会话参数经 remoteGetParams
  * 从 main 暂存区取回，然后由 RemoteWindow 壳（无边框标题栏 + 主窗口样式 + 可缩放）
- * 在窗口内建立 WebRTC 会话（屏幕+系统声音 + DataChannel 键鼠控制）。
+ * 在窗口内建立 LiveKit SFU 会话（屏幕+系统声音 + data 键鼠控制）。
  */
 async function boot(): Promise<void> {
   const params = await window.pantry.remoteGetParams()
@@ -21,7 +21,8 @@ async function boot(): Promise<void> {
     mode: params.mode === 'local' ? ('local' as const) : ('remote' as const),
     peerId: params.peerId,
     peerName: params.peerName || '对端',
-    meId: params.meId || 0
+    meId: params.meId || 0,
+    sfu: params.sfu
   })
   app.mount('#app')
 }

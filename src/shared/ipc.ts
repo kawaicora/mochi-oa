@@ -21,6 +21,8 @@ export const IpcChannels = {
   devDevices: 'dev:devices',
   devSignal: 'dev:signal',
   devGetInfo: 'dev:info',
+  /** 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发 */
+  devView: 'server:dev:view',
 
   // 账号
   serverRegister: 'server:register',
