@@ -332,12 +332,15 @@ onMounted(async () => {
   await loadList()
   // 打卡页异常日期 → 补卡/请假：接收待预填参数（date/time）并填充表单。
   window.addEventListener('mochi:attendance:openApply', onOpenApply)
+  // 兜底：组件挂载可能晚于事件派发（切页异步），事件已丢但 __pendingAttendanceApply 仍在 → 消费恢复预填，
+  // 避免补卡/请假跳转后时间丢失需重新手填。
+  applyPrefill((window as any).__pendingAttendanceApply as Prefill | undefined)
 })
 onBeforeUnmount(() => window.removeEventListener('mochi:attendance:openApply', onOpenApply))
 
 // 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, slot?, time?}。
-function onOpenApply(e: Event): void {
-  const p = (e as CustomEvent).detail as { type?: AttType; date?: string; slot?: 'work' | 'off'; time?: string } | undefined
+type Prefill = { type?: AttType; date?: string; slot?: 'work' | 'off'; time?: string }
+function applyPrefill(p: Prefill | undefined): void {
   if (!p || (p.type !== 'make_up' && p.type !== 'leave')) return
   topTab.value = 'apply'
   tab.value = p.type
@@ -359,6 +362,9 @@ function onOpenApply(e: Event): void {
   }
   err.value = ''
   ;(window as any).__pendingAttendanceApply = null
+}
+function onOpenApply(e: Event): void {
+  applyPrefill((e as CustomEvent).detail as Prefill | undefined)
 }
 </script>
 

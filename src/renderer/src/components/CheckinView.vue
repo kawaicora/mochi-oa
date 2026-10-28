@@ -431,10 +431,12 @@ async function loadMonthAtts(): Promise<void> {
     const dateEnd = `${y}-${p(m + 1)}-${new Date(y, m + 1, 0).getDate()}`
     const ack = await window.pantry.serverAttendanceList({ companyId: companyId.value, dateStart, dateEnd, page: 1, pageSize: 100 })
     if (!ack.ok) { console.error('[打卡] 当月申请加载失败', ack.error); return }
-    const reqs = (ack.data as { requests?: Array<{ startTime?: string | null; createdAt: string; type: string; status: string }> })?.requests ?? []
+    const reqs = (ack.data as { requests?: Array<{ makeupDate?: string | null; startTime?: string | null; createdAt: string; type: string; status: string }> })?.requests ?? []
     const out: MonthAtt[] = []
     for (const r of reqs) {
-      const ds = r.startTime ? fmtDate(r.startTime) : fmtDate(r.createdAt)
+      // 补卡(make_up)无 startTime，用目标日期 makeupDate（补卡落到被补那天，跨天补下班也正确匹配）；
+      // 无 makeupDate/startTime 才回退 createdAt。
+      const ds = r.makeupDate ? fmtDate(r.makeupDate) : (r.startTime ? fmtDate(r.startTime) : fmtDate(r.createdAt))
       out.push({ date: ds, type: r.type, status: r.status })
     }
     monthAtts.value = out
