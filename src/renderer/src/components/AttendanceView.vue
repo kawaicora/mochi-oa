@@ -66,6 +66,9 @@ const tab = ref<AttType>('make_up')
 
 // ── 表单 ──
 const punchTime = ref('')
+// 从打卡页进入的补卡锁定「被补日期」（YYYY-MM-DD）：补卡日期固定为该天，只允许选时分，
+// 防止补下班卡时把日期选成次日凌晨导致落错日期/槽位（如补 10-27 下班卡却选 10-28 2:00）。
+const makeupDate = ref('')
 const leaveType = ref(LEAVE_TYPES[0])
 const compType = ref(COMP_TYPES[0])
 const startTime = ref('')
@@ -103,8 +106,11 @@ function applyDraft(d: Draft): void {
 function loadDraft(t: AttType): void {
   try {
     const raw = localStorage.getItem(draftKey(t))
-    if (raw) applyDraft(JSON.parse(raw) as Draft)
-    else applyDraft({ punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] })
+    const d = raw ? (JSON.parse(raw) as Draft) : null
+    const base = d ?? { punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] }
+    // 从打卡页预填进入（makeupDate 非空）：保留已预填的补卡时间，避免被草稿覆盖丢失。
+    if (makeupDate.value) base.punchTime = punchTime.value
+    applyDraft(base)
   } catch (e) { console.error('[考勤] 草稿读取失败', e) }
   // 新发起/未选抄送时预填公司默认审批抄送人（可替换/清空，非强制）
   void prefetchDefaultCc()
@@ -162,7 +168,15 @@ async function submit(): Promise<void> {
       companyId: companyId.value, type: tab.value, reason: reason.value,
       approverIds: approverIds.value, ccIds: ccIds.value
     }
-    if (tab.value === 'make_up') payload.punchTime = punchTime.value
+    if (tab.value === 'make_up') {
+      // 补卡日期锁定为被补那天（打卡页进入时），用户只能决定时分；兜底防止把日期选成别的天。
+      if (makeupDate.value && punchTime.value) {
+        const m = punchTime.value.match(/(\d{2}:\d{2})(?::\d{2})?/)
+        payload.punchTime = `${makeupDate.value}T${m ? m[1] : '00:00'}`
+      } else {
+        payload.punchTime = punchTime.value
+      }
+    }
     else {
       payload.startTime = startTime.value
       payload.endTime = endTime.value
@@ -177,7 +191,7 @@ async function submit(): Promise<void> {
     // 提交成功 → 清空该类型草稿并重置表单
     clearDraft(tab.value)
     punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
-    approverIds.value = []; ccIds.value = []
+    approverIds.value = []; ccIds.value = []; makeupDate.value = ''
     await loadList()
   } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
@@ -322,10 +336,12 @@ function onOpenApply(e: Event): void {
   if (p.type === 'make_up') {
     // 补卡：预填该日期 + 正常上下班时间
     const t = p.time && /^\d{2}:\d{2}$/.test(p.time) ? p.time : '09:00'
+    makeupDate.value = p.date || ''
     punchTime.value = `${p.date}T${t}`
     okMsg.value = '已按该日期预填补卡时间，请补充事由并选择审批人'
   } else if (p.type === 'leave') {
     // 请假：预填该日期区间
+    makeupDate.value = ''
     startTime.value = p.date || ''
     endTime.value = p.date || ''
     okMsg.value = '已按该日期预填请假区间，请选择类型并补充事由'
@@ -360,7 +376,7 @@ function onOpenApply(e: Event): void {
       <!-- 补卡 -->
       <template v-if="tab === 'make_up'">
         <label class="at-lab">补卡时间 <i class="req">*</i></label>
-        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" />
+        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" :min="makeupDate || undefined" :max="makeupDate || undefined" />
       </template>
       <!-- 请假 / 调休 / 加班（共用时间段表单） -->
       <template v-else>
