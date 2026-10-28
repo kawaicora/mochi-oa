@@ -389,6 +389,13 @@ function measureOpenApply(type: 'make_up' | 'leave'): void {
   const pending = {
     type,
     date: mi?.date || todayStr,
+    slot: (() => {
+      if (type !== 'make_up' || !mi) return undefined
+      // 补上班还是补下班：今天迟到→补上班；无上班卡→补上班；有上班卡缺下班→补下班。
+      const st = dayStatus.value
+      const lateToday = mi.date === todayStr && !!st && st.status === 'late'
+      return lateToday || !hasInMeasure.value ? 'work' : 'off'
+    })(),
     time: (() => {
       if (type !== 'make_up' || !mi) return undefined
       // 今天迟到 → 补上班卡（把迟到补成正常上班时间）；当天无上班卡 → 补上班卡；有上班卡缺下班 → 补下班卡。

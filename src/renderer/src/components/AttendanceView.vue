@@ -66,9 +66,13 @@ const tab = ref<AttType>('make_up')
 
 // ── 表单 ──
 const punchTime = ref('')
-// 从打卡页进入的补卡锁定「被补日期」（YYYY-MM-DD）：补卡日期固定为该天，只允许选时分，
-// 防止补下班卡时把日期选成次日凌晨导致落错日期/槽位（如补 10-27 下班卡却选 10-28 2:00）。
+// 从打卡页进入的补卡锁定「被补日期」（YYYY-MM-DD）：落库/槽位以它为准，
+// 允许补卡时刻跨天到次日凌晨（下班区间 = 当天下班 ~ 次日 4 点，补 10-27 下班卡可选 10-28 02:00）。
 const makeupDate = ref('')
+// 补卡槽位：work(补上班)|off(补下班)；打卡页进入时确定，服务端据此落槽位（补下班跨天也算下班）。
+const makeupSlot = ref<'work' | 'off' | ''>('')
+// 标记本次 tab 切换是否由打卡页预填触发（是则保留 makeupDate/makeupSlot，否则手动切 tab 清空防残留）。
+let prefilled = false
 const leaveType = ref(LEAVE_TYPES[0])
 const compType = ref(COMP_TYPES[0])
 const startTime = ref('')
@@ -169,13 +173,12 @@ async function submit(): Promise<void> {
       approverIds: approverIds.value, ccIds: ccIds.value
     }
     if (tab.value === 'make_up') {
-      // 补卡日期锁定为被补那天（打卡页进入时），用户只能决定时分；兜底防止把日期选成别的天。
-      if (makeupDate.value && punchTime.value) {
-        const m = punchTime.value.match(/(\d{2}:\d{2})(?::\d{2})?/)
-        payload.punchTime = `${makeupDate.value}T${m ? m[1] : '00:00'}`
-      } else {
-        payload.punchTime = punchTime.value
-      }
+      // PunchTime 为实际打卡时刻（允许跨天到次日凌晨补下班卡，如补 10-27 卡选 10-28 02:00）。
+      payload.punchTime = punchTime.value
+      // 目标日期 + 槽位由打卡页预填携带：服务端据此落库（checkDate=被补那天，槽位=补上班/补下班），
+      // 而非按 PunchTime 字面日期/时刻邻近判定——从而跨天补下班卡也能正确落到被补那天。
+      if (makeupDate.value) payload.makeupDate = makeupDate.value
+      if (makeupSlot.value) payload.makeupSlot = makeupSlot.value
     }
     else {
       payload.startTime = startTime.value
@@ -191,7 +194,7 @@ async function submit(): Promise<void> {
     // 提交成功 → 清空该类型草稿并重置表单
     clearDraft(tab.value)
     punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
-    approverIds.value = []; ccIds.value = []; makeupDate.value = ''
+    approverIds.value = []; ccIds.value = []; makeupDate.value = ''; makeupSlot.value = ''
     await loadList()
   } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
@@ -312,7 +315,12 @@ async function snoozeRemind(r: AttendanceRequest): Promise<void> {
 
 watch(tab, () => { okMsg.value = ''; err.value = '' })
 // 切申请类型 → 载入该类型草稿
-watch(tab, (t) => loadDraft(t))
+watch(tab, (t) => {
+  // 手动切 tab（非打卡页预填）：清空补卡锁定，防残留误传。
+  if (!prefilled) { makeupDate.value = ''; makeupSlot.value = '' }
+  prefilled = false
+  loadDraft(t)
+})
 // 切历史类型 → 重置分页并加载
 watch(historyType, () => { histPage.value = 1; loadList() })
 watch(companyId, async () => {
@@ -327,21 +335,24 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => window.removeEventListener('mochi:attendance:openApply', onOpenApply))
 
-// 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, time?}。
+// 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, slot?, time?}。
 function onOpenApply(e: Event): void {
-  const p = (e as CustomEvent).detail as { type?: AttType; date?: string; time?: string } | undefined
+  const p = (e as CustomEvent).detail as { type?: AttType; date?: string; slot?: 'work' | 'off'; time?: string } | undefined
   if (!p || (p.type !== 'make_up' && p.type !== 'leave')) return
   topTab.value = 'apply'
   tab.value = p.type
+  prefilled = true // 本次 tab 切换由打卡页预填触发，不清空补卡锁定
   if (p.type === 'make_up') {
     // 补卡：预填该日期 + 正常上下班时间
     const t = p.time && /^\d{2}:\d{2}$/.test(p.time) ? p.time : '09:00'
     makeupDate.value = p.date || ''
+    makeupSlot.value = p.slot === 'off' ? 'off' : 'work'
     punchTime.value = `${p.date}T${t}`
     okMsg.value = '已按该日期预填补卡时间，请补充事由并选择审批人'
   } else if (p.type === 'leave') {
     // 请假：预填该日期区间
     makeupDate.value = ''
+    makeupSlot.value = ''
     startTime.value = p.date || ''
     endTime.value = p.date || ''
     okMsg.value = '已按该日期预填请假区间，请选择类型并补充事由'
@@ -376,7 +387,7 @@ function onOpenApply(e: Event): void {
       <!-- 补卡 -->
       <template v-if="tab === 'make_up'">
         <label class="at-lab">补卡时间 <i class="req">*</i></label>
-        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" :min="makeupDate || undefined" :max="makeupDate || undefined" />
+        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" />
       </template>
       <!-- 请假 / 调休 / 加班（共用时间段表单） -->
       <template v-else>
