@@ -221,6 +221,8 @@ function newReport(): void {
 
 // ── 提交 ──
 async function doSubmit(): Promise<void> {
+  // 需求1：无接收人禁止提交（提交给了谁？）
+  if (recipients.value.length === 0) { err.value = '请先选择接收人'; return }
   // 没保存过的新内容先自动保存（创建/update），再提交
   if (!current.value || !current.value.id) {
     // 还没 id → 先保存（create）
@@ -232,9 +234,10 @@ async function doSubmit(): Promise<void> {
   try {
     const ack = await window.pantry.serverReportSubmit(companyId.value, current.value.id)
     if (!ack.ok) { console.error('[报表] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
-    current.value = (ack.data as { report?: ReportItem })?.report ?? current.value
-    showToast(current.value?.submitted ? '已提交，可继续编辑后重新提交' : '已提交')
-    await loadHistory()
+    // 需求2：提交成功后清空编辑框与接收人、切到提交历史并刷新，避免基于旧内容重复提交
+    showToast('已提交，已加入提交历史')
+    newReport() // 清空 标题/内容/接收人/草稿
+    setMainTab('history') // 内部已 reset 分页并 loadHistory('all')
   } catch (e) { console.error('[报表] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
 }
