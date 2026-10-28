@@ -18,9 +18,15 @@ interface CheckinItem {
   stdStart?: string // 打卡时排班快照
   stdEnd?: string
   state?: number // 位掩码：1上班 2下班 4缺卡 8补卡 16请假 32调休（补上班=9 补下班=10）
+  label?: string // 逐条类型标签：上班/下班/迟到/早退/补上班/补下班/请假/调休
   createdAt: string
   nick?: string
   username?: string
+}
+interface OvertimeItem {
+  startTime: string // 完整 YYYY-MM-DD HH:mm:ss
+  endTime: string
+  durationHours: number
 }
 interface CheckinDay {
   date: string // YYYY-MM-DD
@@ -29,6 +35,7 @@ interface CheckinDay {
   lastTime: string | null
   status?: 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early' | string
   records: CheckinItem[]
+  overtimes?: OvertimeItem[] // 当天通过加班申请（申请通过才显示）
 }
 // 当月考勤申请（用于日历紫点判断）
 interface MonthAtt { date: string; type: string; status: string }
@@ -162,6 +169,19 @@ interface DayStatus { date: string; rest: boolean; stdStart: string | null; stdE
 const dayStatus = ref<DayStatus | null>(null)
 const statusLabel: Record<StatusKind, string> = {
   rest: '休息日', none: '暂无打卡记录', normal: '正常', late: '迟到', early: '早退', late_early: '迟到+早退'
+}
+// 记录标签着色：迟到/早退红、补卡蓝、请假/调休紫、上班/下班灰。
+function recCls(label?: string): string {
+  if (!label) return 'ci-rec-lbl'
+  if (label === '迟到' || label === '早退') return 'ci-rec-lbl warn'
+  if (label === '补上班' || label === '补下班') return 'ci-rec-lbl make'
+  if (label === '请假' || label === '调休') return 'ci-rec-lbl leave'
+  return 'ci-rec-lbl'
+}
+// 当天通过加班申请 → "加班 21:00 - 22:00 1小时"（仅申请通过才显示）。
+function fmtOvertime(o: OvertimeItem): string {
+  const h = Math.round(o.durationHours * 100) / 100
+  return `加班 ${fmtTime(o.startTime)} - ${fmtTime(o.endTime)} ${h}小时`
 }
 const statusCls: Record<StatusKind, string> = {
   rest: 'rest', none: 'none', normal: 'ok', late: 'warn', early: 'warn', late_early: 'warn'
@@ -608,15 +628,21 @@ function onRefreshCheckin(): void {
           <div v-if="selectedDay && selectedDay.records.length">
             <div v-for="r in selectedDay.records" :key="r.id" class="ci-rec">
               <span class="ci-rec-time">{{ fmtTime(r.checkTime) }}</span>
+              <span v-if="r.label" :class="recCls(r.label)">{{ r.label }}</span>
               <span class="ci-rec-ip">{{ r.ip }}</span>
             </div>
             <div class="ci-rec-summary">共 {{ selectedDay.count }} 次　首 {{ fmtTime(selectedDay.firstTime) }}　末 {{ fmtTime(selectedDay.lastTime) }}</div>
           </div>
           <div v-else class="ci-rec-empty">当天无打卡记录</div>
+          <!-- 当天通过加班申请（加班申请通过才显示，不靠打卡时间晚推断） -->
+          <div v-if="selectedDay && selectedDay.overtimes && selectedDay.overtimes.length" class="ci-day-att ci-ot">
+            <div class="ci-att-t">当天加班</div>
+            <div v-for="(o, i) in selectedDay.overtimes" :key="'ot'+i" class="ci-ot-item">{{ fmtOvertime(o) }}</div>
+          </div>
           <div v-if="selectedAtts.length" class="ci-day-att">
             <div class="ci-att-t">当天考勤申请</div>
             <div v-for="(a, i) in selectedAtts" :key="i" class="ci-att-item">
-              {{ a.type === 'make_up' ? '补卡' : a.type === 'leave' ? '请假' : '调休' }}
+              {{ a.type === 'make_up' ? '补卡' : a.type === 'leave' ? '请假' : a.type === 'comp_time' ? '调休' : '加班' }}
             </div>
           </div>
         </div>
@@ -652,7 +678,13 @@ function onRefreshCheckin(): void {
 .ci-stat-item:last-child { border-bottom: none; }
 .ci-stat-name { word-break: break-all; }
 .ci-stat-tip { margin-top: 6px; color: var(--dt-text-3); font-size: 11px; }
-.ci-rec { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--dt-border-light); font-size: 13px; }
+.ci-rec { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--dt-border-light); font-size: 13px; }
+.ci-rec-lbl { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #f0f2f5; color: var(--dt-text-3); white-space: nowrap; }
+.ci-rec-lbl.warn { background: #fdf0f1; color: #d92b3a; }
+.ci-rec-lbl.make { background: #eef4ff; color: #2f6bff; }
+.ci-rec-lbl.leave { background: #f3eefe; color: #8b5cf6; }
+.ci-ot { border-top: 1px dashed var(--dt-border-light); padding-top: 6px; }
+.ci-ot-item { font-size: 13px; padding: 2px 0; color: #d97706; }
 .ci-rec-summary { margin-top: 6px; font-size: 12px; color: var(--dt-text-3); }
 .ci-rec-empty { color: var(--dt-text-4); font-size: 13px; }
 .ci-day-att { margin-top: 10px; }

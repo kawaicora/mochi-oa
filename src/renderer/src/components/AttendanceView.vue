@@ -9,7 +9,7 @@ import { toPlain } from '../utils/plain'
 import { addPending, removePending } from '../utils/reminder'
 
 // ── 类型（与服务端冻结协议对齐）──
-type AttType = 'make_up' | 'leave' | 'comp_time'
+type AttType = 'make_up' | 'leave' | 'comp_time' | 'overtime'
 type AttStatus = 'pending' | 'approved' | 'rejected'
 interface AttendanceRequest {
   id: number
@@ -54,7 +54,7 @@ const companyId = computed(() => app.activeCompanyId)
 const isAdmin = computed(() => app.isAdmin)
 const meId = computed(() => server.state.userId ?? 0)
 
-const TYPE_LABEL: Record<AttType, string> = { make_up: '补卡', leave: '请假', comp_time: '调休' }
+const TYPE_LABEL: Record<AttType, string> = { make_up: '补卡', leave: '请假', comp_time: '调休', overtime: '加班' }
 const STATUS_LABEL: Record<AttStatus, string> = { pending: '待审批', approved: '已通过', rejected: '已驳回' }
 const LEAVE_TYPES = ['事假', '病假', '年假', '婚假', '产假', '其他']
 const COMP_TYPES = ['加班调休', '其他']
@@ -168,7 +168,8 @@ async function submit(): Promise<void> {
       payload.endTime = endTime.value
       payload.durationHours = durationHours.value
       if (tab.value === 'leave') payload.leaveType = leaveType.value
-      else payload.compType = compType.value
+      else if (tab.value === 'comp_time') payload.compType = compType.value
+      // overtime：只传时间段，时长由服务端计算；不设请假/调休类型
     }
     const ack = await window.pantry.serverAttendanceCreate(toPlain(payload))
     if (!ack.ok) { console.error('[考勤] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
@@ -353,6 +354,7 @@ function onOpenApply(e: Event): void {
         <button :class="{ on: tab === 'make_up' }" @click="tab = 'make_up'">补卡</button>
         <button :class="{ on: tab === 'leave' }" @click="tab = 'leave'">请假</button>
         <button :class="{ on: tab === 'comp_time' }" @click="tab = 'comp_time'">调休</button>
+        <button :class="{ on: tab === 'overtime' }" @click="tab = 'overtime'">加班</button>
       </div>
 
       <!-- 补卡 -->
@@ -360,7 +362,7 @@ function onOpenApply(e: Event): void {
         <label class="at-lab">补卡时间 <i class="req">*</i></label>
         <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" />
       </template>
-      <!-- 请假 / 调休 -->
+      <!-- 请假 / 调休 / 加班（共用时间段表单） -->
       <template v-else>
         <div class="at-row">
           <div v-if="tab === 'leave'">
@@ -369,17 +371,18 @@ function onOpenApply(e: Event): void {
               <option v-for="t in LEAVE_TYPES" :key="t" :value="t">{{ t }}</option>
             </select>
           </div>
-          <div v-else>
+          <div v-else-if="tab === 'comp_time'">
             <label class="at-lab">调休类型 <i class="req">*</i></label>
             <select v-model="compType" class="srv-select">
               <option v-for="t in COMP_TYPES" :key="t" :value="t">{{ t }}</option>
             </select>
           </div>
+          <!-- 加班：只选时间段，不设类型 -->
         </div>
         <div class="at-row">
           <div><label class="at-lab">开始时间 <i class="req">*</i></label><DateTimeInput v-model="startTime" time /></div>
           <div><label class="at-lab">结束时间 <i class="req">*</i></label><DateTimeInput v-model="endTime" time /></div>
-          <div><label class="at-lab">时长（小时）</label><input v-model.number="durationHours" type="number" step="0.5" class="srv-input" /></div>
+          <div v-if="tab !== 'overtime'"><label class="at-lab">时长（小时）</label><input v-model.number="durationHours" type="number" step="0.5" class="srv-input" /></div>
         </div>
       </template>
 
@@ -413,6 +416,7 @@ function onOpenApply(e: Event): void {
           <button :class="{ on: historyType === 'make_up' }" @click="historyType = 'make_up'">补卡</button>
           <button :class="{ on: historyType === 'leave' }" @click="historyType = 'leave'">请假</button>
           <button :class="{ on: historyType === 'comp_time' }" @click="historyType = 'comp_time'">调休</button>
+          <button :class="{ on: historyType === 'overtime' }" @click="historyType = 'overtime'">加班</button>
         </div>
       </div>
       <div class="at-table-wrap">
