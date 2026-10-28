@@ -377,11 +377,6 @@ function onSelectDay(dateStr: string): void {
   }
   selected.value = dateStr
 }
-function measureDoPunch(): void {
-  measureDate.value = ''
-  measureInfo.value = null
-  void doCheckin() // 实时打卡（打今天）
-}
 // 补卡/请假：跳到考勤申请并预填（补卡=该日期+正常上下班时间；请假=该日期区间）。
 function measureOpenApply(type: 'make_up' | 'leave'): void {
   const mi = measureInfo.value
@@ -618,7 +613,6 @@ function onRefreshCheckin(): void {
         <div class="modal-body">
           <div class="ci-meas-tip">该日存在打卡异常，请选择处理方式：</div>
           <div class="ci-meas-btns">
-            <button class="dt-btn ci-meas-btn" @click="measureDoPunch"><i class="fas fa-clock"></i> 打卡（实时）</button>
             <button v-if="canMakeup(measureInfo.date)" class="dt-btn ci-meas-btn" @click="measureOpenApply('make_up')">
               <i class="fas fa-pen"></i> 补卡（预填 {{ measureInfo.date }} {{ hasInMeasure ? measureInfo.stdEnd : measureInfo.stdStart }}）
             </button>
