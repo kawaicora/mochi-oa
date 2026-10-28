@@ -202,7 +202,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('rtcDmRejected', (d) => broadcastToAllWindows(IpcEvents.rtcDmRejected, d))
   serverClient.on('rtcPeerJoined', (d) => broadcastToAllWindows(IpcEvents.rtcPeerJoined, d))
   serverClient.on('rtcPeerLeft', (d) => broadcastToAllWindows(IpcEvents.rtcPeerLeft, d))
-  serverClient.on('rtcSignal', (d) => broadcastToAllWindows(IpcEvents.rtcSignal, d))
   serverClient.on('rtcEnded', (d) => broadcastToAllWindows(IpcEvents.rtcEnded, d))
   serverClient.on('rtcGroupCall', (d) => {
     broadcastToAllWindows(IpcEvents.rtcGroupCall, d)
@@ -240,7 +239,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('devEnumerate', (d) => broadcastToAllWindows(IpcEvents.devEnumerate, d ?? {}))
   serverClient.on('devStart', (d) => broadcastToAllWindows(IpcEvents.devStart, d ?? {}))
   serverClient.on('devStop', (d) => broadcastToAllWindows(IpcEvents.devStop, d ?? {}))
-  serverClient.on('devSignal', (d) => broadcastToAllWindows(IpcEvents.devSignal, d ?? {}))
   // 控制端请求在被控端执行命令：主进程用所选 shell 执行（Windows: cmd/powershell；Linux: 默认 sh），结果回传
   serverClient.on('devExec', (d) => {
     const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown; cmd?: unknown }
@@ -642,7 +640,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.rtcCreateMeeting, (_e, opts) => serverClient.rtcCreateMeeting(opts as { title?: string; startAt?: string; password?: string; kind: 'video' | 'voice' }))
   ipcMain.handle(IpcChannels.rtcGetMeeting, (_e, meetingNo) => serverClient.rtcGetMeeting(String(meetingNo)))
   ipcMain.handle(IpcChannels.rtcJoin, (_e, roomId, password, kind) => serverClient.rtcJoin(String(roomId), typeof password === 'string' ? password : undefined, kind === 'voice' ? 'voice' : kind === 'video' ? 'video' : undefined))
-  ipcMain.handle(IpcChannels.rtcSignal, (_e, roomId, signal) => serverClient.rtcSignal(String(roomId), signal as import('../shared/server-types').RtcSignalPayload))
   ipcMain.handle(IpcChannels.rtcLeave, (_e, roomId) => serverClient.rtcLeave(String(roomId)))
   ipcMain.handle(IpcChannels.rtcEnd, (_e, roomId) => serverClient.rtcEnd(String(roomId)))
   ipcMain.handle(IpcChannels.rtcDmCall, (_e, userId, kind, password) => serverClient.rtcDmCall(Number(userId) || 0, kind === 'voice' ? 'voice' : kind === 'remote' ? 'remote' : 'video', typeof password === 'string' ? password : undefined))
@@ -665,7 +662,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     return Promise.resolve()
   })
   ipcMain.handle(IpcChannels.devDevices, (_e, deviceId, cams, mics) => serverClient.devDevices(String(deviceId ?? ''), cams as Array<{ id: string; label: string }>, mics as Array<{ id: string; label: string }>))
-  ipcMain.handle(IpcChannels.devSignal, (_e, deviceId, signal) => serverClient.devSignal(String(deviceId ?? ''), signal))
   // 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发
   ipcMain.handle(IpcChannels.devView, (_e, deviceId) => serverClient.devView(String(deviceId ?? '')))
   // 本机信息（deviceId/hostname/os/ip），供被控端注册用
@@ -1145,10 +1141,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     }
     // 兜底：远程窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时，渲染层可能已经来不及发 bye
     // ——那样被控端会一直挂着「正在被 [对方] 控制」。这里在主进程补一发：
-    // 信令 bye（让被控端立刻收场）+ rtc:leave（把本端移出房间，对端还会收到 peerLeft）。
+    // rtc:leave（把本端移出房间，对端还会收到 peerLeft）。
     win.on('closed', () => {
-      console.log(`[remote] 远程窗口已关闭 room=${room} → 补发 bye 信令 + rtc:leave`)
-      void serverClient.rtcSignal(room, { type: 'bye' } as never).catch(() => { /* 已断开就算了 */ })
+      console.log(`[remote] 远程窗口已关闭 room=${room} → 补发 rtc:leave`)
       void serverClient.rtcLeave(room).catch(() => { /* 已断开就算了 */ })
     })
     return { ok: true }

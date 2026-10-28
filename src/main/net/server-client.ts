@@ -38,8 +38,6 @@ import type {
   RtcPeerLeftEvent,
   RtcRoom,
   RtcSfuInfo,
-  RtcSignalEvent,
-  RtcSignalPayload,
   RtcChatMessageEvent,
   ServerChatMessage,
   ServerClientState,
@@ -525,7 +523,6 @@ export class ServerClient extends EventEmitter {
     socket.on('rtc:dmRejected', (d: RtcDmRejectedEvent) => this.emit('rtcDmRejected', d))
     socket.on('rtc:peerJoined', (d: RtcPeerJoinedEvent) => this.emit('rtcPeerJoined', d))
     socket.on('rtc:peerLeft', (d: RtcPeerLeftEvent) => this.emit('rtcPeerLeft', d))
-    socket.on('rtc:signal', (d: RtcSignalEvent) => this.emit('rtcSignal', d))
     socket.on('rtc:ended', (d: RtcEndedEvent) => this.emit('rtcEnded', d))
     socket.on('rtc:groupCall', (d: RtcGroupCallEvent) => this.emit('rtcGroupCall', d))
     socket.on('rtc:chatMessage', (d: RtcChatMessageEvent) => this.emit('rtcChatMessage', d))
@@ -554,7 +551,6 @@ export class ServerClient extends EventEmitter {
     socket.on('dev:enumerate', (d: { deviceId?: string }) => this.emit('devEnumerate', d))
     socket.on('dev:start', (d: { deviceId?: string; kind?: string; device?: unknown }) => this.emit('devStart', d))
     socket.on('dev:stop', (d: { deviceId?: string }) => this.emit('devStop', d))
-    socket.on('dev:signal', (d: { deviceId?: string; signal?: unknown }) => this.emit('devSignal', d))
     // 控制端请求在被控端执行命令 → 主进程执行后经 devExecResult 回传
     socket.on('dev:exec', (d: { deviceId?: string; shell?: string; cmd?: string }) => this.emit('devExec', d))
     // 交互终端：控制端输入 → 主进程写入常驻 shell stdin；输出经 devTermOut 回传
@@ -1276,11 +1272,6 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } & SfuAckFields>(this.socket, 'rtc:join', payload)
   }
 
-  async rtcSignal(roomId: string, signal: RtcSignalPayload): Promise<Ack> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck(this.socket, 'rtc:signal', { roomId, signal })
-  }
-
   async rtcLeave(roomId: string): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'rtc:leave', { roomId })
@@ -1331,10 +1322,6 @@ export class ServerClient extends EventEmitter {
   async devDevices(deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }
     return emitWithAck(this.socket, 'dev:devices', { deviceId, cams, mics })
-  }
-  async devSignal(deviceId: string, signal: unknown): Promise<Ack> {
-    if (!this.socket) return { ok: false, error: '未连接服务器' }
-    return emitWithAck(this.socket, 'dev:signal', { deviceId, signal })
   }
   async devSys(payload: { deviceId: string; info: Record<string, unknown>; perf: Record<string, unknown> }): Promise<Ack & { status?: string }> {
     if (!this.socket) return { ok: false, error: '未连接服务器' }

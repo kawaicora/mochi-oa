@@ -19,7 +19,6 @@ export const IpcChannels = {
   devRegister: 'dev:register',
   devHeartbeat: 'dev:heartbeat',
   devDevices: 'dev:devices',
-  devSignal: 'dev:signal',
   devGetInfo: 'dev:info',
   /** 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发 */
   devView: 'server:dev:view',
@@ -274,7 +273,6 @@ export const IpcChannels = {
   rtcCreateMeeting: 'server:rtc:createMeeting',
   rtcGetMeeting: 'server:rtc:getMeeting',
   rtcJoin: 'server:rtc:join',
-  rtcSignal: 'server:rtc:signal',
   rtcLeave: 'server:rtc:leave',
   rtcEnd: 'server:rtc:end',
   rtcDmCall: 'server:rtc:dmCall',
@@ -427,7 +425,6 @@ export const IpcEvents = {
   rtcDmRejected: 'server:event:rtc:dmRejected',
   rtcPeerJoined: 'server:event:rtc:peerJoined',
   rtcPeerLeft: 'server:event:rtc:peerLeft',
-  rtcSignal: 'server:event:rtc:signal',
   rtcEnded: 'server:event:rtc:ended',
   rtcGroupCall: 'server:event:rtc:groupCall',
   /** 会议内聊天消息推送 */
@@ -471,8 +468,7 @@ export const IpcEvents = {
   devView: 'dev:event:view',
   devEnumerate: 'dev:event:enumerate',
   devStart: 'dev:event:start',
-  devStop: 'dev:event:stop',
-  devSignal: 'dev:event:signal'
+  devStop: 'dev:event:stop'
 } as const
 
 /** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */

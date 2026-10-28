@@ -20,8 +20,6 @@ import type {
   MainMailInfo,
   MainMailInput,
   RtcRoom,
-  RtcSignalEvent,
-  RtcSignalPayload,
   RtcSfuInfo,
   ServerChatMessage,
   ServerClientState,
@@ -436,8 +434,6 @@ const api = {
     safeInvoke(IpcChannels.rtcGetMeeting, meetingNo),
   rtcJoin: (roomId: string, password?: string, kind?: RtcKind): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } & SfuAckFields }> =>
     safeInvoke(IpcChannels.rtcJoin, roomId, password ?? null, kind ?? null),
-  rtcSignal: (roomId: string, signal: RtcSignalPayload): Promise<Ack> =>
-    safeInvoke(IpcChannels.rtcSignal, roomId, signal),
   rtcLeave: (roomId: string): Promise<Ack> =>
     safeInvoke(IpcChannels.rtcLeave, roomId),
   rtcEnd: (roomId: string): Promise<Ack> =>
@@ -468,8 +464,6 @@ const api = {
   devHeartbeat: (info: { deviceId: string; name?: string; os?: string; ip?: string; username?: string }): Promise<void> => safeInvoke(IpcChannels.devHeartbeat, info),
   devDevices: (deviceId: string, cams: Array<{ id: string; label: string }>, mics: Array<{ id: string; label: string }>): Promise<Ack> =>
     safeInvoke(IpcChannels.devDevices, deviceId, cams, mics),
-  devSignal: (deviceId: string, signal: unknown): Promise<Ack> =>
-    safeInvoke(IpcChannels.devSignal, deviceId, signal),
   /** 控制端发起查看远程设备（SERVER_ADMIN）：服务端签发 SFU token 下发 */
   devView: (deviceId: string): Promise<Ack & { data?: { deviceId?: string; url?: string; token?: string; roomName?: string } }> =>
     safeInvoke(IpcChannels.devView, deviceId),
@@ -498,7 +492,6 @@ const api = {
   onRtcDmRejected: (l: (d: RtcDmRejectedEvent) => void) => subscribe<RtcDmRejectedEvent>(IpcEvents.rtcDmRejected, l),
   onRtcPeerJoined: (l: (d: RtcPeerJoinedEvent) => void) => subscribe<RtcPeerJoinedEvent>(IpcEvents.rtcPeerJoined, l),
   onRtcPeerLeft: (l: (d: RtcPeerLeftEvent) => void) => subscribe<RtcPeerLeftEvent>(IpcEvents.rtcPeerLeft, l),
-  onRtcSignal: (l: (d: RtcSignalEvent) => void) => subscribe<RtcSignalEvent>(IpcEvents.rtcSignal, l),
   onRtcEnded: (l: (d: RtcEndedEvent) => void) => subscribe<RtcEndedEvent>(IpcEvents.rtcEnded, l),
   onRtcGroupCall: (l: (d: RtcGroupCallEvent) => void) => subscribe<RtcGroupCallEvent>(IpcEvents.rtcGroupCall, l),
   onRtcChatMessage: (l: (d: RtcChatMessageEvent) => void) => subscribe<RtcChatMessageEvent>(IpcEvents.rtcChatMessage, l),
@@ -507,7 +500,6 @@ const api = {
   onDevEnumerate: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devEnumerate, l),
   onDevStart: (l: (d: { deviceId?: string; kind?: string; device?: unknown }) => void) => subscribe<{ deviceId?: string; kind?: string; device?: unknown }>(IpcEvents.devStart, l),
   onDevStop: (l: (d: { deviceId?: string }) => void) => subscribe<{ deviceId?: string }>(IpcEvents.devStop, l),
-  onDevSignal: (l: (d: { deviceId?: string; signal?: unknown }) => void) => subscribe<{ deviceId?: string; signal?: unknown }>(IpcEvents.devSignal, l),
   onGroupMembersUpdated: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupMembersUpdated, l),
   onGroupInvite: (l: (d: GroupInviteEvent) => void) => subscribe<GroupInviteEvent>(IpcEvents.groupInvite, l),
   onGroupDissolved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupDissolved, l),

@@ -34,7 +34,6 @@ interface RtcPantryApi {
     password?: string,
     kind?: RtcKind
   ): Promise<Ack & { data?: { room: RtcRoom; peers: RtcPeer[]; iceServers: RtcIceServer[]; started: boolean } & SfuAckFields }>
-  rtcSignal(roomId: string, signal: import('@shared/server-types').RtcSignalPayload): Promise<Ack>
   rtcLeave(roomId: string): Promise<Ack>
   rtcEnd(roomId: string): Promise<Ack>
   rtcDmCall(
@@ -55,7 +54,6 @@ interface RtcPantryApi {
   onRtcDmRejected(l: (d: import('@shared/server-types').RtcDmRejectedEvent) => void): () => void
   onRtcPeerJoined(l: (d: import('@shared/server-types').RtcPeerJoinedEvent) => void): () => void
   onRtcPeerLeft(l: (d: import('@shared/server-types').RtcPeerLeftEvent) => void): () => void
-  onRtcSignal(l: (d: import('@shared/server-types').RtcSignalEvent) => void): () => void
   onRtcEnded(l: (d: import('@shared/server-types').RtcEndedEvent) => void): () => void
   onRtcGroupCall(l: (d: RtcGroupCallEvent) => void): () => void
   notify(opts: { title: string; body: string; target?: NotifTarget; tray?: boolean }): Promise<unknown>
@@ -163,14 +161,6 @@ export const useRtcStore = defineStore('rtc', () => {
           delete activeCall.value.remoteStreams[peer.userId]
           activeCall.value.peers = activeCall.value.peers.filter((p) => p.socketId !== d.peerId)
         }
-      })
-    )
-
-    cleanupFns.push(
-      rtcPantry.onRtcSignal((d) => {
-        if (!activeCall.value || activeCall.value.room.id !== d.room) return
-        // from 只有 userId/nick，engine 按 userId 维护 PC
-        engine?.handleSignal(d.from.userId, d.signal)
       })
     )
 
@@ -550,9 +540,7 @@ export const useRtcStore = defineStore('rtc', () => {
       iceServers,
       sfu,
       localStream,
-      onSignal: (signal) => {
-        void rtcPantry.rtcSignal(room.id, signal)
-      },
+      onSignal: () => {}, // LiveKit SFU 无需 P2P 信令（rtc:signal 通道已废弃清理）
       onRemoteStream: (userId, stream) => {
         if (activeCall.value) {
           activeCall.value.remoteStreams[userId] = stream

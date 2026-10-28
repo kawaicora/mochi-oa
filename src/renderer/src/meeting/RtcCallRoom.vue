@@ -12,7 +12,6 @@ import type {
   RtcKind,
   RtcPeer,
   RtcRoom,
-  RtcSignalPayload,
   RtcSfuInfo
 } from '@shared/server-types'
 import { sfuFromAck } from '@shared/sfu'
@@ -449,28 +448,6 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
   peers.value = [...roomPeers]
   currentRoomType = roomInfo.type
 
-  // 0. 【抢在采集媒体之前就订阅信令】
-  //
-  //    服务端 rtc:join 的顺序是：先广播 peerJoined 给房间里的人，再返回 ack 给我。
-  //    也就是说老成员收到 peerJoined 后会【立刻】给我发 offer，
-  //    而此刻我还在 await getUserMedia（几百毫秒），engine 尚未创建、
-  //    onRtcSignal 尚未订阅 —— 那个 offer 会被静默丢掉。
-  //    丢掉之后：我预建的 PC 永远收不到 offer，对方也等不到 answer，
-  //    只能靠超时重连，多人时就是循环掉线。
-  //
-  //    所以先把信令收进 pendingSignals，engine 一建好立刻按序补投。
-  const pendingSignals: Array<{ userId: number; signal: RtcSignalPayload }> = []
-  let engineReady = false
-  const onSignalSub = window.pantry.onRtcSignal((d) => {
-    if (d.room !== roomInfo.id) return
-    if (engineReady && engine) {
-      engine.handleSignal(d.from.userId, d.signal)
-    } else {
-      pendingSignals.push({ userId: d.from.userId, signal: d.signal })
-      console.log(`[RTC] 引擎尚未就绪，先缓冲信令 ${d.signal.type} from=${d.from.userId}（缓冲数=${pendingSignals.length}）`)
-    }
-  })
-
   // 1. 本地媒体：默认只开麦克风（高清），摄像头默认关闭，需要时手动开启
   let mic: MediaStream
   try {
@@ -504,7 +481,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     iceServers,
     sfu,
     localStream,
-    onSignal: (signal) => { void window.pantry.rtcSignal(roomInfo.id, signal) },
+    onSignal: () => {}, // LiveKit SFU 无需 P2P 信令（rtc:signal 通道已废弃清理）
     onRemoteStream: (userId, stream) => { remoteStreams[userId] = stream },
     onPeerConnected: (userId) => {
       // 连接（或重连）成功 → 清了这个对端的连续失败计数，并把上层的连续失败也清零
@@ -520,19 +497,7 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
     }
   })
 
-  // 2.1 引擎就绪 → 把采集媒体期间到达的信令按原始顺序补投。
-  //     老成员的 offer 通常就在缓冲里，补投之后 PC 才能进入 have-remote-offer。
-  engineReady = true
-  if (pendingSignals.length > 0) {
-    console.log(`[RTC] 引擎就绪，补投缓冲信令 ${pendingSignals.length} 条`)
-    const drained = pendingSignals.splice(0, pendingSignals.length)
-    for (const p of drained) {
-      engine.handleSignal(p.userId, p.signal)
-    }
-  }
   // 订阅器从进入 enterRoom 起就生效，这里只是登记以便退出时清理。
-  // 注意：下面的 onRtcSignal 不能再订阅一次，否则每条信令会被处理两遍。
-  unsubscribers.push(onSignalSub)
 
   // 3. 已有对端：为每个已在对端建 PC。
   //
@@ -569,10 +534,6 @@ async function enterRoom(roomInfo: RtcRoom, roomPeers: RtcPeer[], iceServers: Rt
         peers.value = peers.value.filter((p) => p.socketId !== d.peerId)
         maybeAutoCloseIfAlone()
       }
-    }),
-    window.pantry.onRtcSignal((d) => {
-      if (d.room !== roomInfo.id) return
-      engine?.handleSignal(d.from.userId, d.signal)
     }),
     window.pantry.onRtcEnded((d) => {
       if (d.room !== roomInfo.id) return
