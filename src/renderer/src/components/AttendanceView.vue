@@ -106,6 +106,18 @@ function loadDraft(t: AttType): void {
     if (raw) applyDraft(JSON.parse(raw) as Draft)
     else applyDraft({ punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] })
   } catch (e) { console.error('[考勤] 草稿读取失败', e) }
+  // 新发起/未选抄送时预填公司默认审批抄送人（可替换/清空，非强制）
+  void prefetchDefaultCc()
+}
+// 发起审批时默认带出公司默认抄送人（仅当用户尚未选择抄送时预填；可替换/清空，非强制）
+async function prefetchDefaultCc(): Promise<void> {
+  if (ccIds.value.length) return
+  if (!companyId.value) return
+  try {
+    const ack = await window.pantry.serverApprovalSettingsGet(companyId.value)
+    const ids = (ack.data as { userIds?: number[] })?.userIds
+    if (ack.ok && Array.isArray(ids) && ids.length && !ccIds.value.length) ccIds.value = ids
+  } catch (e) { console.error('[考勤] 读取默认抄送失败', e) }
 }
 // 手动保存草稿（含审批人/抄送人选择）
 function saveDraft(): void {

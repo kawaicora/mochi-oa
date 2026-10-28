@@ -1662,6 +1662,17 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'approval:flow:list', { companyId })
   }
 
+  /** 审批设置：读公司默认审批抄送人 userId 列表（成员可读，审批发起预填用） */
+  async approvalSettingsGet(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'approval:settingsGet', { companyId })
+  }
+  /** 审批设置：整表替换公司默认审批抄送人（owner/admin） */
+  async approvalSettingsSet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'approval:settingsSet', payload)
+  }
+
   // ─── 打卡（公司隔离）─────────
   /** 打卡：payload 带 companyId + 可选 mac；服务端用连接 IP 校验白名单 */
   async checkinCreate(payload: Record<string, unknown>): Promise<Ack> {

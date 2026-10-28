@@ -433,7 +433,17 @@ onBeforeUnmount(() => {
 })
 // 通讯录企业菜单「考勤设置」→ 跳转打卡页后自动打开规则设置
 function onOpenRulesEvent(): void {
-  if (app.isAdmin) void openRules()
+  if (!app.isAdmin) return
+  void openRulesWhenReady()
+}
+// 修复：跳转打卡页时公司上下文（activeCompanyId）可能尚未就绪，导致 openRules 静默返回、
+// 规则弹窗不弹出（"界面消失"）。此处轮询等待公司就绪后再打开，最多等 2 秒兜底。
+async function openRulesWhenReady(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    if (companyId.value) { await openRules(); return }
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  await openRules() // 超时也尝试一次（openRules 内部有 companyId 守卫）
 }
 // 考勤审批通过/驳回后刷新打卡页：重载当天打卡、月度申请状态、打卡状态，使状态点黄→紫即时生效。
 function onRefreshCheckin(): void {

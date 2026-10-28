@@ -190,6 +190,9 @@ export const IpcChannels = {
   serverCheckinRulesGet: 'server:checkin:rules:get',
   serverCheckinRulesSave: 'server:checkin:rules:save',
   serverCheckinStatusGet: 'server:checkin:status:get',
+  // 审批设置（公司默认审批抄送人）
+  serverApprovalSettingsGet: 'server:approval:settings:get',
+  serverApprovalSettingsSet: 'server:approval:settings:set',
   // 网络申请（代理）
   serverProxyCreate: 'server:proxy:create',
   serverProxyList: 'server:proxy:list',

@@ -5,6 +5,7 @@ import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
 import UserAvatar from './UserAvatar.vue'
 import DeptAdmin from './DeptAdmin.vue'
+import CompanyContactPicker from './CompanyContactPicker.vue'
 import type { OrgMember, Group, FriendItem } from '@shared/server-types'
 import type { ContactsScope } from './ContactsNav.vue'
 
@@ -32,6 +33,32 @@ async function doDissolveCompany(): Promise<void> {
   if (!window.confirm('解散该公司将删除其所有部门、群与消息且不可恢复，确定解散？')) return
   companyMenu.value = false
   await run(() => app.dissolveCompany(c.id))
+}
+
+// ── 审批设置：管理公司默认审批抄送人（owner/admin 可）──
+const showApprovalSettings = ref(false)
+const approvalCc = ref<number[]>([])
+async function openApprovalSettings(): Promise<void> {
+  companyMenu.value = false
+  const c = app.activeCompany
+  if (!c) return
+  approvalCc.value = []
+  showApprovalSettings.value = true
+  try {
+    const ack = await window.pantry.serverApprovalSettingsGet(c.id)
+    const ids = (ack.data as { userIds?: number[] })?.userIds
+    if (ack.ok && Array.isArray(ids)) approvalCc.value = ids
+  } catch (e) { console.error('[审批设置] 加载默认抄送失败', e) }
+}
+async function saveApprovalSettings(): Promise<void> {
+  const c = app.activeCompany
+  if (!c) return
+  try {
+    const ack = await window.pantry.serverApprovalSettingsSet({ companyId: c.id, userIds: JSON.parse(JSON.stringify(approvalCc.value)) })
+    if (!ack.ok) { promptMsg.value = ack.error || '保存失败'; return }
+    promptMsg.value = '默认抄送人已保存'
+    showApprovalSettings.value = false
+  } catch (e) { console.error('[审批设置] 保存失败', e); promptMsg.value = '保存失败' }
 }
 
 // 企业齿轮/右键菜单
@@ -198,6 +225,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
             <button class="gear-btn" :title="'企业设置（右键也可）'" @click.stop="openCompanyMenu()"><i class="fas fa-cog"></i></button>
             <div v-if="companyMenu" class="company-menu" @click.stop>
               <button class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
+              <button class="cm-item" @click="openApprovalSettings"><i class="fas fa-users"></i> 审批设置</button>
               <button class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
               <template v-if="app.isOwner">
                 <div class="cm-sep"></div>
@@ -378,6 +406,24 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
           <span>{{ u.nick || u.username }}</span>
         </div>
         <div v-if="!app.members.filter((x) => x.userId !== myId).length" class="t-empty">没有可转让的成员</div>
+      </div>
+    </div>
+
+    <!-- 审批设置：公司默认审批抄送人（owner/admin） -->
+    <div v-if="showApprovalSettings" class="modal-mask" @click.self="showApprovalSettings = false">
+      <div class="modal">
+        <div class="modal-head">审批设置</div>
+        <div class="modal-body">
+          <p class="modal-desc">默认审批抄送人：发起审批时默认带出（审批页可替换/清空，非强制）。</p>
+          <div style="margin-top: 12px">
+            <div style="font-size: 13px; color: var(--dt-text-2); margin-bottom: 6px">默认抄送人</div>
+            <CompanyContactPicker v-model="approvalCc" title="选择默认抄送人" placeholder="选择默认抄送人" />
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn" @click="showApprovalSettings = false">取消</button>
+          <button class="dt-btn dt-btn-primary" @click="saveApprovalSettings">保存</button>
+        </div>
       </div>
     </div>
 
