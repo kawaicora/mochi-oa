@@ -1724,6 +1724,11 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'proxy:request:notification:stop', payload)
   }
+  /** 获取可用代理服务器列表（服务端 proxy:server:list；第一项=服务端自身代理，其余=PROXY_SERVERS） */
+  async proxyServerList(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'proxy:server:list', {})
+  }
   async attendanceReceived(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:received:list', payload)

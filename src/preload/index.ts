@@ -356,6 +356,7 @@ const api = {
   serverProxyRenew: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverProxyRenew, payload),
   serverProxyAccountList: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverProxyAccountList, companyId),
   serverProxyNotifyStop: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverProxyNotifyStop, payload),
+  serverProxyServerList: (): Promise<Ack> => safeInvoke(IpcChannels.serverProxyServerList, {}),
   serverAttendanceReceived: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceReceived, payload),
   serverAttendanceCc: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCc, payload),
   serverAttendanceCcView: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCcView, payload),

@@ -44,6 +44,17 @@ interface ProxyReq {
   account?: { host: string; port: number; username: string; password: string } | null
   notifyStopped?: boolean // 服务端：该条循环提醒已被停止（审批处理自动停止或用户主动停止）
 }
+
+// 代理服务器（服务端 proxy:server:list 下发；self=true 为服务端自身出网代理）
+interface ProxyServer {
+  name: string
+  host: string
+  port: number
+  type: string
+  self?: boolean
+  auth: boolean
+  user: string
+}
 const app = useAppStore()
 const companyId = computed(() => app.activeCompanyId)
 
@@ -143,10 +154,50 @@ async function clearProxy(): Promise<void> {
   } catch (e) { console.error('[代理] 断开异常', e) }
 }
 
+// ===== 代理服务器下拉（服务端 proxy:server:list：第一项=服务端自身代理，其余=PROXY_SERVERS） =====
+const servers = ref<ProxyServer[]>([])
+const selServer = ref<ProxyServer | null>(null)
+const srvUser = ref('')
+const srvPass = ref('')
+const srvOn = ref(false)
+
+async function loadServers(): Promise<void> {
+  try {
+    const ack = await window.pantry.serverProxyServerList()
+    if (ack.ok) servers.value = (ack.data as { servers?: ProxyServer[] })?.servers ?? []
+    else console.error('[代理] 服务器列表加载失败', ack.error)
+  } catch (e) { console.error('[代理] 服务器列表异常', e) }
+}
+/** 连接选中的代理服务器（走系统代理：本地无鉴权转发 + 认证在本地转发层完成） */
+async function connectServer(): Promise<void> {
+  err.value = ''; okMsg.value = ''
+  const s = selServer.value
+  if (!s) { err.value = '请先选择代理服务器'; return }
+  if (!s.host || !s.port) { err.value = '代理服务器地址不完整'; return }
+  try {
+    const target = { host: s.host, port: Number(s.port), username: srvUser.value.trim() || s.user || '', password: srvPass.value }
+    const ack = await window.pantry.systemProxySet(toPlain(target))
+    if (ack.ok) {
+      srvOn.value = true
+      okMsg.value = '已连接代理：' + s.name + '（' + s.host + ':' + s.port + '）'
+      // 持久化，供启动检查/到期自动断开
+      try { localStorage.setItem('mochi:proxyActive', JSON.stringify({ mode: 'proxy', host: s.host, port: s.port, username: target.username, password: target.password, expiresAt: '' })) } catch { /* ignore */ }
+    } else alert('连接代理失败：' + (ack.error || ''))
+  } catch (e) { console.error('[代理] 连接服务器异常', e); alert('连接代理异常') }
+}
+async function disconnectServer(): Promise<void> {
+  err.value = ''; okMsg.value = ''
+  try {
+    const ack = await window.pantry.systemProxyClear(toPlain({ host: selServer.value?.host, port: selServer.value?.port }))
+    if (ack.ok) { srvOn.value = false; okMsg.value = '已断开代理'; try { localStorage.removeItem('mochi:proxyActive') } catch { /* ignore */ } } else alert('断开代理失败：' + (ack.error || ''))
+  } catch (e) { console.error('[代理] 断开服务器异常', e) }
+}
+
 const statusLabel: Record<string, string> = { pending: '待审批', approved: '已通过', rejected: '已拒绝' }
 
 onMounted(async () => {
   await load()
+  await loadServers()
   // 深链：若来自消息卡片，切到对应 tab 并高亮
   if (proxyDeepLinkId.value) {
     const id = proxyDeepLinkId.value
@@ -164,6 +215,21 @@ onMounted(async () => {
     <div class="pv-tabs">
       <button :class="{ on: myTab === 'mine' }" @click="myTab = 'mine'; load()">我的申请</button>
       <button v-if="app.isAdmin" :class="{ on: myTab === 'todo' }" @click="myTab = 'todo'; load()">待审批</button>
+    </div>
+
+    <!-- 代理服务器连接（服务端 proxy:server:list 下拉） -->
+    <div v-if="myTab === 'mine'" class="pv-form">
+      <div class="pv-t">代理服务器连接</div>
+      <div class="pv-row"><label>服务器</label>
+        <select v-model="selServer" class="pv-select">
+          <option :value="null" disabled>选择代理服务器</option>
+          <option v-for="s in servers" :key="s.host + ':' + s.port" :value="s">{{ s.name }}（{{ s.host }}:{{ s.port }}）</option>
+        </select>
+      </div>
+      <div v-if="selServer" class="pv-row"><label>账号</label><input v-model="srvUser" :placeholder="selServer.user || '代理账号'" /></div>
+      <div v-if="selServer" class="pv-row"><label>密码</label><input v-model="srvPass" type="password" placeholder="代理密码" /></div>
+      <div v-if="srvOn" class="pv-on">代理已连接　<button @click="disconnectServer">断开代理</button></div>
+      <div class="pv-row" v-else><button class="pv-submit" @click="connectServer">连接代理</button></div>
     </div>
 
     <!-- 申请表单（员工） -->
@@ -228,7 +294,8 @@ onMounted(async () => {
 .pv-t { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
 .pv-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
 .pv-row label { min-width: 90px; color: var(--dt-text-3); }
-.pv-row textarea, .pv-row input { flex: 1; border: 1px solid var(--dt-border); border-radius: 4px; padding: 6px; font-size: 13px; }
+.pv-row textarea, .pv-row input, .pv-select { flex: 1; border: 1px solid var(--dt-border); border-radius: 4px; padding: 6px; font-size: 13px; }
+.pv-select { background: #fff; }
 .pv-pick { border: 1px solid var(--dt-border); background: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .pv-err { color: #d92b3a; font-size: 13px; margin: 6px 0; }
 .pv-ok { color: #2fbb6b; font-size: 13px; margin: 6px 0; }

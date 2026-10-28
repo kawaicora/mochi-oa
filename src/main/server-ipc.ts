@@ -554,6 +554,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverProxyRenew, (_e, payload) => serverClient.proxyRenew((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverProxyAccountList, (_e, companyId) => serverClient.proxyAccountList(Number(companyId) || 0))
   ipcMain.handle(IpcChannels.serverProxyNotifyStop, (_e, payload) => serverClient.proxyNotifyStop((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverProxyServerList, () => serverClient.proxyServerList())
   ipcMain.handle(IpcChannels.serverAttendanceReceived, (_e, payload) => serverClient.attendanceReceived((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCc, (_e, payload) => serverClient.attendanceCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceCcView, (_e, payload) => serverClient.attendanceCcView((payload as Record<string, unknown>) ?? {}))

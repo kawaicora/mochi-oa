@@ -201,6 +201,8 @@ export const IpcChannels = {
   serverProxyRenew: 'server:proxy:renew',
   serverProxyAccountList: 'server:proxy:account:list',
   serverProxyNotifyStop: 'server:proxy:notify:stop',
+  // 代理服务器列表（服务端 proxy:server:list；第一项=服务端自身代理，其余=PROXY_SERVERS）
+  serverProxyServerList: 'server:proxy:server:list',
   // 考勤：收到审批/收到抄送
   serverAttendanceReceived: 'server:attendance:received',
   serverAttendanceCc: 'server:attendance:cc',
