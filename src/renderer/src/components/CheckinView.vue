@@ -451,9 +451,15 @@ watch(companyId, async () => {
   await Promise.all([loadData(), loadMonthAtts(), loadStatus()])
 })
 onMounted(async () => {
-  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
+  // 先注册事件监听（在数据加载前），避免通讯录「考勤设置」在加载期间派发的 openRules 事件丢失
   window.addEventListener('mochi:checkin:openRules', onOpenRulesEvent)
   window.addEventListener('mochi:checkin:refresh', onRefreshCheckin)
+  await Promise.all([loadMac(), loadData(), loadMonthAtts(), loadStatus(), loadStatFiles()])
+  // 兜底：通讯录「考勤设置」→ __pendingOpenRules 标志（不依赖事件时序），挂载后消费。
+  if ((window as any).__pendingOpenRules) {
+    ;(window as any).__pendingOpenRules = false
+    onOpenRulesEvent()
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('mochi:checkin:openRules', onOpenRulesEvent)

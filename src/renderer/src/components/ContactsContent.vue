@@ -69,9 +69,10 @@ function openCompanyMenu(e?: MouseEvent): void {
 }
 function goCompanySettings(): void {
   companyMenu.value = false
+  // 用持久 pending 标志而不是固定延时 dispatch：打卡页数据加载可能慢于 250ms，
+  // 事件若在 CheckinView 注册监听前派发会丢失导致规则弹窗不弹。挂载后兜底消费。
+  ;(window as any).__pendingOpenRules = true
   window.dispatchEvent(new CustomEvent('mochi:nav', { detail: 'checkin' }))
-  // 打卡页挂载后自动打开规则设置弹窗
-  window.setTimeout(() => window.dispatchEvent(new CustomEvent('mochi:checkin:openRules')), 250)
 }
 async function changeCompanyLogo(): Promise<void> {
   const c = app.activeCompany
