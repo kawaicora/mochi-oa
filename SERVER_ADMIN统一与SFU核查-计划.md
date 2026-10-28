@@ -1,8 +1,25 @@
-# SERVER_ADMIN 统一 + 落库 + 管理页 SFU 核查 —— 开发计划
+# SERVER_ADMIN 统一 + 落库 + 建库建表边界 + 管理页 SFU —— 开发计划
 
-> 需求来源：用户第 8/9/10/11 条。
+> 需求来源：用户第 6/8/9/10/11 条。
 > 仓库：服务端 `mochi-oa-server-go`（分支 report-and-erp-support）；客户端 `mochi-oa`（同分支）。
 > 状态：**待用户过目确认后实现**。
+
+---
+
+## 〇、需求 6 核查结论（建库 / 建表 / 迁移边界）—— 已满足，无需改代码
+
+> 用户原话：新服务器创建数据库依旧按照最新表的创建并且是服务端执行（这是服务的一部分）；如果数据库已经存在就创建表（外部已建库）；创建数据库是服务端的一部分，但迁移不是。
+
+核查 `internal/db/setup.go`，**现有实现完全符合**：
+
+| 职责 | 归属 | 现状实现 |
+|---|---|---|
+| 创建数据库 | **服务端启动** | `ensureDatabase()` 用 `CREATE DATABASE IF NOT EXISTS` —— 库不存在才建；**外部已建库则跳过**（IF NOT EXISTS 幂等） |
+| 创建/补齐表 | **服务端启动** | `autoMigrateTables()` 用 GORM AutoMigrate 按 Row 结构体建缺失表/补列，不删列不改数据；外部已建库 → 自动补建缺失表 |
+| 数据/结构迁移 | **独立工具**（不属于服务端） | `cmd/tools/database_update`；服务端启动**只 AutoMigrate，不内嵌任何 ALTER/ADD 语句** |
+
+- 开关：`AUTO_CREATE_DATABASE` / `AUTO_MIGRATE`（均默认 true，可关掉回退"只读复用现有表"）。
+- **与本计划衔接**：需求 9 新增的 `server_admins` 表，将加入 `autoMigrateTables` 的 models 列表，由**服务端启动 AutoMigrate 自动建表**（新表走服务端，无需迁移工具），与需求 6 边界一致。
 
 ---
 
