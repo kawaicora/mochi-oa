@@ -7,6 +7,7 @@ import AdvanceView from './AdvanceView.vue'
 import { proxyDeepLinkId } from '../utils/proxy-deeplink'
 import { expenseDeepLinkId } from '../utils/expense-deeplink'
 import { advanceDeepLinkId } from '../utils/advance-deeplink'
+import { attendanceDeepLinkId } from '../utils/attendance-deeplink'
 
 type ApplyTab = 'attendance' | 'proxy' | 'expense' | 'advance'
 
@@ -14,6 +15,7 @@ type ApplyTab = 'attendance' | 'proxy' | 'expense' | 'advance'
 // 在 setup（渲染前）根据哪个 deepLinkId 有值决定内层 tab，
 // 这样 ExpenseView/AdvanceView/ProxyView mount 时即落在正确分组，再自行定位高亮。
 const initialTab = ((): ApplyTab => {
+  if (attendanceDeepLinkId.value != null) return 'attendance'
   if (expenseDeepLinkId.value != null) return 'expense'
   if (advanceDeepLinkId.value != null) return 'advance'
   if (proxyDeepLinkId.value != null) return 'proxy'

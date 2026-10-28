@@ -244,11 +244,11 @@ const api = {
     safeInvoke(IpcChannels.serverConversationRead, conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null),
   serverChatHistory: (groupId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverChatHistory, groupId, beforeTs ?? null, limit ?? null),
-  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card'): Promise<Ack> =>
+  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'): Promise<Ack> =>
     safeInvoke(IpcChannels.serverChatSend, groupId, content, kind ?? null),
   serverDmHistory: (withUserId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDmHistory, withUserId, beforeTs ?? null, limit ?? null),
-  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card'): Promise<Ack> =>
+  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDmSend, toUserId, content, kind ?? null),
   serverMessageDelete: (conversationId: number, messageId: string, content?: string): Promise<Ack> =>
     safeInvoke(IpcChannels.serverMessageDelete, conversationId, messageId, content ?? ''),

@@ -15,6 +15,7 @@ import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/
 import { setProxyDeepLink } from '../utils/proxy-deeplink'
 import { setExpenseDeepLink } from '../utils/expense-deeplink'
 import { setAdvanceDeepLink } from '../utils/advance-deeplink'
+import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -277,6 +278,22 @@ function openAdvanceCard(content: string): void {
     const c = JSON.parse(content)
     if (c.requestId) setAdvanceDeepLink(Number(c.requestId))
   } catch (e) { console.error('[advance_card] 解析失败', e) }
+}
+
+/** 考勤申请卡片：解析 {"requestId","title","body","byNick","status"} 摘要 */
+function attendanceCardSummary(content: string): string {
+  try {
+    const c = JSON.parse(content)
+    const st = c.status === 'approved' ? '已通过' : c.status === 'rejected' ? '已驳回' : '待审批'
+    return `${c.byNick || ''}：${c.body || ''}（${c.title || '考勤申请'} · ${st}）`
+  } catch (e) { console.error('[attendance_card] 解析失败', e); return content }
+}
+/** 点击卡片：深链到 ApplyHome 的考勤申请 tab 并定位申请单 */
+function openAttendanceCard(content: string): void {
+  try {
+    const c = JSON.parse(content)
+    if (c.requestId) setAttendanceDeepLink(Number(c.requestId))
+  } catch (e) { console.error('[attendance_card] 解析失败', e) }
 }
 
 /** 消息已读回执标记：仅自己发出的消息；私聊=对方是否已读，群聊=已读人数 */
@@ -953,6 +970,12 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
               <div v-else-if="m.kind === 'advance_card'" class="msg-card" @click="openAdvanceCard(m.content)">
                 <div class="msg-card-t">备用金申请</div>
                 <div class="msg-card-b">{{ advanceCardSummary(m.content) }}</div>
+                <div class="msg-card-btn">查看/处理</div>
+              </div>
+              <!-- 考勤申请卡片 -->
+              <div v-else-if="m.kind === 'attendance_card'" class="msg-card" @click="openAttendanceCard(m.content)">
+                <div class="msg-card-t">考勤申请</div>
+                <div class="msg-card-b">{{ attendanceCardSummary(m.content) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 视频：FLV 走 flv.js；rm/avi/mkv/3gp/rmvb 走服务端 ffmpeg 转码；其余原生 Blob 播放 -->

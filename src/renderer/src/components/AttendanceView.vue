@@ -7,6 +7,7 @@ import RichTextEditor from './common/RichTextEditor.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { addPending, removePending } from '../utils/reminder'
+import { attendanceDeepLinkId, clearAttendanceDeepLink } from '../utils/attendance-deeplink'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time' | 'overtime'
@@ -82,9 +83,14 @@ const reason = ref('')
 // 发起时动态选择的审批人/抄送人（不再走预设审批流程配置）
 const approverIds = ref<number[]>([])
 const ccIds = ref<number[]>([])
+// 「以消息卡片发送」：勾选后提交给每个审批人私聊发考勤申请卡片（参照备用金/报销）
+const sendCard = ref(false)
 const submitting = ref(false)
 const err = ref('')
 const okMsg = ref('')
+// 申请人昵称（卡片 byNick）
+const myNick = computed(() => app.members.find((m) => m.userId === meId.value)?.nick
+  || app.members.find((m) => m.userId === meId.value)?.username || '我')
 
 // 草稿 localStorage key（按类型分 key）
 const draftKey = (t: AttType) => `mochi:oa:att:draft:${t}`
@@ -158,6 +164,22 @@ function namesOf(ids: number[]): string {
 }
 
 // ── 提交申请 ──
+// 卡片正文：补卡→补卡时间；请假/调休/加班→时间段
+function cardBody(): string {
+  return tab.value === 'make_up' ? '补卡时间 ' + (punchTime.value || '—') : `${startTime.value || '—'} ~ ${endTime.value || '—'}`
+}
+function cardBodyOf(r: AttendanceRequest): string {
+  return r.type === 'make_up' ? '补卡时间 ' + (r.punchTime || '—') : `${r.startTime || '—'} ~ ${r.endTime || '—'}`
+}
+// 给申请人私聊发审批结果卡片（非本人审批时；参照备用金/报销）
+function sendResultCard(r: AttendanceRequest, status: 'approved' | 'rejected'): void {
+  if (r.userId === meId.value) return
+  try {
+    void window.pantry.serverDmSend(r.userId,
+      JSON.stringify({ requestId: r.id, title: TYPE_LABEL[r.type] + '申请' + (status === 'approved' ? '已通过' : '已驳回'), body: cardBodyOf(r) + ' · ' + (r.reason || '').slice(0, 80), byNick: myNick.value, status }),
+      'attendance_card').catch((e) => console.error('[考勤] 结果卡片发送失败', e))
+  } catch (e) { console.error('[考勤] 结果卡片发送失败', e) }
+}
 async function submit(): Promise<void> {
   if (!companyId.value) { err.value = '尚未加入公司'; return }
   err.value = ''
@@ -190,11 +212,23 @@ async function submit(): Promise<void> {
     }
     const ack = await window.pantry.serverAttendanceCreate(toPlain(payload))
     if (!ack.ok) { console.error('[考勤] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
+    const req = (ack.data as { request?: AttendanceRequest })?.request
     okMsg.value = '已提交'
+    // 勾选「以消息卡片发送」→ 给每个审批人发 attendance_card 私聊卡片
+    if (sendCard.value && req?.id != null) {
+      const tl = TYPE_LABEL[tab.value]
+      const body = cardBody() + ' · ' + reason.value.slice(0, 80)
+      for (const aid of approverIds.value) {
+        try {
+          await window.pantry.serverDmSend(aid, JSON.stringify({ requestId: req.id, title: tl + '申请', body, byNick: myNick.value }), 'attendance_card')
+        } catch (e) { console.error('[考勤] 卡片消息发送失败', e) }
+      }
+    }
     // 提交成功 → 清空该类型草稿并重置表单
     clearDraft(tab.value)
     punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
     approverIds.value = []; ccIds.value = []; makeupDate.value = ''; makeupSlot.value = ''
+    sendCard.value = false
     await loadList()
   } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
   submitting.value = false
@@ -234,6 +268,7 @@ async function approve(r: AttendanceRequest): Promise<void> {
     await loadList()
     await loadReceived()
     removePending('att:' + r.id)
+    sendResultCard(r, 'approved')
     // 审批结果落库后通知打卡页刷新（补卡/请假/调休通过 → 状态点黄→紫）。
     window.dispatchEvent(new CustomEvent('mochi:checkin:refresh'))
   } catch (e) { console.error('[考勤] 通过异常', e); err.value = '操作异常' }
@@ -247,6 +282,7 @@ async function reject(r: AttendanceRequest): Promise<void> {
     await loadList()
     await loadReceived()
     removePending('att:' + r.id)
+    sendResultCard(r, 'rejected')
     // 驳回也可能影响状态点（如驳回后异常未处理仍为黄），同步刷新打卡页。
     window.dispatchEvent(new CustomEvent('mochi:checkin:refresh'))
   } catch (e) { console.error('[考勤] 驳回异常', e); err.value = '操作异常' }
@@ -355,6 +391,21 @@ watch(companyId, async () => {
   if (!companyId.value) return
   await loadList()
 })
+// 考勤申请卡片深链：ChatWindow 点卡片 → 定位并打开该申请详情（收到审批 或 本人历史）。
+async function locateAttendance(id: number): Promise<void> {
+  const find = () => receivedPending.value.concat(receivedDone.value, list.value).find((r) => r.id === id)
+  let r = find()
+  if (!r) { await loadReceived(); await loadList(); r = find() }
+  clearAttendanceDeepLink()
+  if (r) {
+    topTab.value = r.userId === meId.value ? 'history' : 'received'
+    detail.value = r
+  } else {
+    topTab.value = 'received'
+  }
+}
+watch(attendanceDeepLinkId, (id) => { if (id) void locateAttendance(id) })
+
 onMounted(async () => {
   loadDraft('make_up')
   await loadList()
@@ -461,6 +512,8 @@ function onOpenApply(e: Event): void {
           <CompanyContactPicker v-model="ccIds" title="选择抄送人" placeholder="选择抄送人" />
         </div>
       </div>
+
+      <label class="at-chk"><input type="checkbox" v-model="sendCard" /> 以消息卡片发送给审批人（私聊）</label>
 
       <div class="at-actions">
         <button class="dt-btn" @click="saveDraft"><i class="fas fa-save"></i> 保存草稿</button>
