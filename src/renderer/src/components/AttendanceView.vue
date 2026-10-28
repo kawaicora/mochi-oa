@@ -320,7 +320,35 @@ watch(tab, (t) => {
   if (!prefilled) { makeupDate.value = ''; makeupSlot.value = '' }
   prefilled = false
   loadDraft(t)
+  if (t === 'overtime') void fillOvertimeDefault()
 })
+// 加班申请自动填充当日下班时间（开始=当日下班，结束默认 +1 小时，可改）。
+async function fillOvertimeDefault(): Promise<void> {
+  if (!companyId.value || startTime.value) return // 已有草稿/预填则不覆盖
+  try {
+    const ack = await window.pantry.serverCheckinRulesGet(companyId.value)
+    if (!ack.ok) return
+    const d = (ack.data as { rules?: { week_rules: string | Array<{ dow: number; start: string; end: string; rest: boolean }> } })?.rules
+    if (!d) return
+    let wr = d.week_rules
+    if (typeof wr === 'string') { try { wr = JSON.parse(wr) } catch { return } }
+    if (!Array.isArray(wr) || wr.length !== 7) return
+    const now = new Date()
+    const dow = (now.getDay() + 6) % 7 // 周一=0
+    const p0 = (n: number) => String(n).padStart(2, '0')
+    const td = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`
+    const day = wr[dow]
+    if (!day || day.rest || !day.end) return // 今天休息无下班时间 → 留给用户手填
+    const hh = day.end.slice(0, 2)
+    const mm = day.end.slice(3, 5)
+    if (!/^\d{2}$/.test(hh) || !/^\d{2}$/.test(mm)) return
+    startTime.value = `${td}T${hh}:${mm}`
+    // 结束默认下班后 1 小时（跨天到次日也正确）。
+    const e = new Date(`${td}T${hh}:${mm}`)
+    e.setHours(e.getHours() + 1)
+    endTime.value = `${e.getFullYear()}-${p0(e.getMonth() + 1)}-${p0(e.getDate())}T${p0(e.getHours())}:${p0(e.getMinutes())}`
+  } catch (e) { console.error('[考勤] 加班默认时间填充失败', e) }
+}
 // 切历史类型 → 重置分页并加载
 watch(historyType, () => { histPage.value = 1; loadList() })
 watch(companyId, async () => {

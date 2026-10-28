@@ -208,7 +208,7 @@ async function loadStatus(): Promise<void> {
 // ── 打卡规则弹窗（admin/owner）──
 const showRules = ref(false)
 interface WeekRule { dow: number; start: string; end: string; rest: boolean }
-interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null; offwork_deadline: string }
+interface RulesForm { mode: string; grace_late_min: number; grace_early_min: number; week_rules: WeekRule[]; alt_rule: { dow: number; altStart: string; altEnd: string } | null }
 const rulesForm = ref<RulesForm | null>(null)
 const WEEK_NAMES = ['周日','周一','周二','周三','周四','周五','周六']
 
@@ -260,7 +260,6 @@ async function openRules(): Promise<void> {
         try { f.week_rules = JSON.parse(f.week_rules) as WeekRule[] } catch { f.week_rules = [] }
       }
       if (!f.alt_rule) f.alt_rule = { dow: 6, altStart: '09:00', altEnd: '18:00' }
-      if (!f.offwork_deadline) f.offwork_deadline = '04:00'
       rulesForm.value = f
     }
     await loadSettings() // 一并加载 MAC 白名单开关与列表
@@ -562,11 +561,6 @@ function onRefreshCheckin(): void {
             <input type="number" v-model.number="rulesForm.grace_late_min" min="0" />
             <label>早退豁免（分钟）</label>
             <input type="number" v-model.number="rulesForm.grace_early_min" min="0" />
-          </div>
-          <div class="ci-r-row">
-            <label>下班卡截止（次日）</label>
-            <input type="time" v-model="rulesForm.offwork_deadline" />
-            <span class="ci-r-hint">次日此刻前打的卡算当天/前天下班卡，超时记缺卡（默认 04:00）</span>
           </div>
           <div v-for="(w, i) in rulesForm.week_rules" :key="i" class="ci-r-row">
             <label>{{ WEEK_NAMES[w.dow] }}</label>
