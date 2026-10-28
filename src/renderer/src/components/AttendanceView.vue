@@ -39,6 +39,8 @@ interface AttendanceRequest {
 // 草稿结构（按类型存 localStorage；含审批人/抄送人选择）
 interface Draft {
   punchTime: string
+  makeupDate: string
+  makeupSlot: 'work' | 'off' | ''
   leaveType: string
   compType: string
   startTime: string
@@ -96,13 +98,16 @@ const myNick = computed(() => app.members.find((m) => m.userId === meId.value)?.
 const draftKey = (t: AttType) => `mochi:oa:att:draft:${t}`
 function currentDraft(): Draft {
   return {
-    punchTime: punchTime.value, leaveType: leaveType.value, compType: compType.value,
+    punchTime: punchTime.value, makeupDate: makeupDate.value, makeupSlot: makeupSlot.value,
+    leaveType: leaveType.value, compType: compType.value,
     startTime: startTime.value, endTime: endTime.value, durationHours: durationHours.value, reason: reason.value,
     approverIds: [...approverIds.value], ccIds: [...ccIds.value]
   }
 }
 function applyDraft(d: Draft): void {
   punchTime.value = d.punchTime || ''
+  makeupDate.value = d.makeupDate || ''
+  makeupSlot.value = d.makeupSlot || ''
   leaveType.value = d.leaveType || LEAVE_TYPES[0]
   compType.value = d.compType || COMP_TYPES[0]
   startTime.value = d.startTime || ''
@@ -117,9 +122,13 @@ function loadDraft(t: AttType): void {
   try {
     const raw = localStorage.getItem(draftKey(t))
     const d = raw ? (JSON.parse(raw) as Draft) : null
-    const base = d ?? { punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] }
-    // 从打卡页预填进入（makeupDate 非空）：保留已预填的补卡时间，避免被草稿覆盖丢失。
-    if (makeupDate.value) base.punchTime = punchTime.value
+    const base = d ?? { punchTime: '', makeupDate: '', makeupSlot: '' as const, leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] }
+    // 从打卡页预填进入（makeupDate 非空）：保留已预填的被补日期/槽位/补卡时间，避免被草稿覆盖丢失。
+    if (makeupDate.value) {
+      base.punchTime = punchTime.value
+      base.makeupDate = makeupDate.value
+      base.makeupSlot = makeupSlot.value || 'work'
+    }
     applyDraft(base)
   } catch (e) { console.error('[考勤] 草稿读取失败', e) }
   // 新发起/未选抄送时预填公司默认审批抄送人（可替换/清空，非强制）
@@ -185,6 +194,8 @@ async function submit(): Promise<void> {
   err.value = ''
   okMsg.value = ''
   if (tab.value === 'make_up' && !punchTime.value) { err.value = '请选择补卡时间'; return }
+  if (tab.value === 'make_up' && !makeupDate.value) { err.value = '请选择被补日期'; return }
+  if (tab.value === 'make_up' && !makeupSlot.value) { err.value = '请选择补卡类型（补上班/补下班）'; return }
   if (tab.value !== 'make_up' && (!startTime.value || !endTime.value)) { err.value = '请选择开始与结束时间'; return }
   if (!approverIds.value.length) { err.value = '请选择审批人'; return }
   if (!reason.value.trim()) { err.value = '请填写事由'; return }
@@ -295,6 +306,13 @@ function fmt(s: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+// 本地今天 "YYYY-MM-DD"（补卡默认被补日期）。
+function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 // ── 收到审批 / 收到抄送 ──
 const receivedPending = ref<AttendanceRequest[]>([])
 const receivedDone = ref<AttendanceRequest[]>([])
@@ -356,6 +374,11 @@ watch(tab, (t) => {
   if (!prefilled) { makeupDate.value = ''; makeupSlot.value = '' }
   prefilled = false
   loadDraft(t)
+  // 补卡手动发起（非打卡页预填）：默认被补日=今天、类型=补上班、补卡时间=当天 09:00，
+  // 用户可改（跨天补下班卡时把补卡时间改到次日凌晨、类型改补下班）。
+  if (t === 'make_up' && !makeupDate.value) makeupDate.value = todayStr()
+  if (t === 'make_up' && !makeupSlot.value) makeupSlot.value = 'work'
+  if (t === 'make_up' && !punchTime.value) punchTime.value = `${makeupDate.value}T09:00`
   if (t === 'overtime') void fillOvertimeDefault()
 })
 // 加班申请自动填充当日下班时间（开始=当日下班，结束默认 +1 小时，可改）。
@@ -471,8 +494,21 @@ function onOpenApply(e: Event): void {
 
       <!-- 补卡 -->
       <template v-if="tab === 'make_up'">
+        <div class="at-row">
+          <div>
+            <label class="at-lab">被补日期 <i class="req">*</i></label>
+            <DateTimeInput v-model="makeupDate" :time="false" placeholder="选择被补日期" />
+          </div>
+          <div>
+            <label class="at-lab">补卡类型 <i class="req">*</i></label>
+            <div class="at-seg">
+              <button :class="{ on: makeupSlot === 'work' }" @click="makeupSlot = 'work'">补上班</button>
+              <button :class="{ on: makeupSlot === 'off' }" @click="makeupSlot = 'off'">补下班</button>
+            </div>
+          </div>
+        </div>
         <label class="at-lab">补卡时间 <i class="req">*</i></label>
-        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间" />
+        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间（可跨天到次日凌晨）" />
       </template>
       <!-- 请假 / 调休 / 加班（共用时间段表单） -->
       <template v-else>
@@ -568,7 +604,7 @@ function onOpenApply(e: Event): void {
       <div v-for="r in receivedPending" :key="'p'+r.id" class="at-rrow" @click="openReceived(r)">
         <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
         <span v-if="isStopped(r)" class="at-stopped-badge"><i class="fas fa-bell-slash"></i> 已停止提醒</span>
-        <span>{{ r.nick || r.username }}：{{ r.startTime ? fmt(r.startTime) : fmt(r.createdAt) }}</span>
+        <span>{{ r.nick || r.username }}：{{ r.type === 'make_up' ? fmt(r.punchTime) : (r.startTime ? fmt(r.startTime) : fmt(r.createdAt)) }}</span>
         <span class="at-ops">
           <button class="at-op ok" @click.stop="approve(r)">通过</button>
           <button class="at-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
@@ -579,7 +615,7 @@ function onOpenApply(e: Event): void {
       <div v-if="!receivedDone.length" class="at-empty">无已处理</div>
       <div v-for="r in receivedDone" :key="'d'+r.id" class="at-rrow" @click="openReceived(r)">
         <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
-        <span>{{ r.nick || r.username }}：{{ fmt(r.createdAt) }}</span>
+        <span>{{ r.nick || r.username }}：{{ r.type === 'make_up' ? fmt(r.punchTime) : fmt(r.createdAt) }}</span>
       </div>
     </div>
 
