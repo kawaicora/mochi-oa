@@ -4,7 +4,7 @@ import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { toPlain } from '../utils/plain'
-import { fmtTime, fmtDate } from '../utils/time'
+import { fmtTime, fmtDate, fmtLocal } from '../utils/time'
 
 // ── 类型（与服务端冻结协议对齐）──
 interface CheckinItem {
@@ -634,7 +634,7 @@ function onRefreshCheckin(): void {
               <span v-if="r.label" :class="recCls(r.label)">{{ r.label }}</span>
               <span class="ci-rec-ip">{{ r.ip }}</span>
             </div>
-            <div class="ci-rec-summary">共 {{ selectedDay.count }} 次　首 {{ fmtTime(selectedDay.firstTime) }}　末 {{ fmtTime(selectedDay.lastTime) }}</div>
+            <div class="ci-rec-summary">共 {{ selectedDay.count }} 次　首 {{ fmtLocal(selectedDay.firstTime) }}　末 {{ fmtLocal(selectedDay.lastTime) }}</div>
           </div>
           <div v-else class="ci-rec-empty">当天无打卡记录</div>
           <!-- 当天通过加班申请（加班申请通过才显示，不靠打卡时间晚推断） -->
