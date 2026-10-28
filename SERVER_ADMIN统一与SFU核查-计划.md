@@ -2,7 +2,7 @@
 
 > 需求来源：用户第 6/8/9/10/11 条。
 > 仓库：服务端 `mochi-oa-server-go`（分支 report-and-erp-support）；客户端 `mochi-oa`（同分支）。
-> 状态：**待用户过目确认后实现**。
+> 状态：**需求 11（管理页 SFU + 清理旧 WebRTC）已完成；需求 8/9/10（SERVER_ADMIN）待用户过目确认后实现**。
 
 ---
 
@@ -114,13 +114,21 @@ func IsServerAdmin(a *types.Auth, cfg *config.ServerConfig, store db.Store) bool
 | `cmd/tools/database_update/main.go` | 迁移加第 6 步（建 server_admins 表，幂等） |
 | `build.ps1` / `build.sh` | 若新增独立 cmd 无需改；迁移工具已在 dist |
 
-### 任务 B：管理页远程查看/会议 SFU 核查（需求 11）
+### 任务 B：管理页远程查看/会议 SFU（需求 11）—— 已完成 ✅
 
-- **已确认**：Electron 客户端 `RtcEngine.ts` 已全 SFU（LiveKit 订阅，无 P2P 信令）；远程查看 `openRemoteWindow` 走服务端签发的 SFU token；`dev.go`/`rtc.go` 会议/远程已返回 token。服务端保留 SDP 中继仅为兼容旧客户端。
-- **待确认**：你说的"管理页面"具体指哪个界面？
-  1. Electron 客户端菜单里的管理/后台页面（远程查看列表 + 会议入口）—— **已 SFU**
-  2. 浏览器访问的网页后台（`oa.kawaimoe.org` 的 admin 页面）—— 若仍在 P2P，需改 SFU（找到该页面代码后按 RtcEngine 同款接入）
-- 确认后，若为 (2)，再补充该页面的 SFU 改造子任务（任务分解另行列出）。
+> 用户确认"笑死我了 你妈的 /view/admin 的所有和RTC有关的改SFU"= 网页后台（浏览器 `/view/admin`）全部 RTC 改 SFU。
+
+**已完成实现（服务端 `96715a5` + 客户端 `10c568c`）：**
+- `web/static/js/rtc.js` **重写为 LiveKit SFU 引擎**（`window.LivekitClient.Room`，`TrackSubscribed` 按 `participant.identity` 触发远端，`connect` 失败必须 `room.disconnect()` 防无限自动重连）；`addPeer/handleSignal/closePeer` 空操作保签名；`replaceTrack` 只更新 LiveKit 发布轨道。
+- `web/static/js/room.js`：`open` 透传 `ack.sfu` → `enterCall(…, sfu)`；引擎传 sfu、`onSignal:()=>{}`；去 `roomPeers.forEach(addPeer)`、`onPeerJoined/onPeerLeft` 的 addPeer/closePeer、`onSignal` 转发。
+- `web/static/js/remote-view.js`：`dev:view` ack 存 `RV._sfu`；新增 `_connectSfu()/_closeRoom()`（订阅被控端屏幕/摄像头/麦克风轨道）；`start` 连 LiveKit 而非等被控端 offer；删除 `_buildPC/_handleSignal/_teardownPC`；`stop` 走 `_closeRoom`；清理 `_pc/_ice/_pendCands` 字段。
+- `web/static/js/livekit-client.min.js`（新增，610KB UMD 全局 `LivekitClient`，来自客户端 node_modules）；`admin.html`/`remote-window.html` 引入。
+- **11.1/11.2 旧 WebRTC 清理（服务端 + 客户端，删净不保留）**：
+  - 服务端删 `rtc:signal`（rtc.go）、`dev:signal`（dev.go）P2P 信令中继 handler + `rtcSignalReq`/`devSignalReq` 未用类型。
+  - 客户端删 `rtcSignal`/`devSignal` IPC 通道定义、preload 方法、`socket.on('rtc:signal'/'dev:signal')` 监听、`server-ipc` 桥接、`onRtcSignal` 订阅、RtcCallRoom 与 stores/rtc 的 P2P 信令缓冲逻辑；typecheck 通过。
+- 保留（用户认可）：`RtcEngine` 的 `onSignal/handleSignal` 空操作兼容签名与 `RtcSignalPayload` 类型；仅注释提及 RTCPeerConnection 的历史说明。
+- 验收：服务端 `go build ./...`、`go vet ./...` 通过；网页 4 个 JS `node --check` 通过；客户端 `npm run typecheck` 通过；两端已 git 提交。
+- **未部署**：web 为 `go:embed`，需交叉编译 `dist` + 生产 `docker compose up -d` 重建才生效。
 
 ---
 
@@ -141,7 +149,7 @@ func IsServerAdmin(a *types.Auth, cfg *config.ServerConfig, store db.Store) bool
 
 ## 四、待确认（请过目拍板）
 
-1. **需求 11 的"管理页面"指**：(a) Electron 客户端管理界面（已 SFU，无需改） 还是 (b) 网页后台（需 SFU 改造）？若为 (b)，请提供网页后台入口/地址。
+1. ~~需求 11 的"管理页面"~~ —— 已确认 = 网页后台 `/view/admin`，且**已全部改 SFU + 清理旧 WebRTC 完成**（见任务 B）。
 2. **SERVER_ADMIN 判定语义**：推荐"环境变量种子 ∪ 数据库表"，后台增删写表、重启保留。是否接受？还是希望"以表为唯一权威，环境变量仅首启播种"？
 3. 是否需要 `admin:listServerAdmins` 接口（管理页回显当前管理员）？
 
