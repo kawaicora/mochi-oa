@@ -160,7 +160,7 @@ const punchLabel = computed(() => {
   if (punching.value) return '打卡中…'
   if (todayCount.value <= 0) return '上班打卡'
   if (todayCount.value === 1) return '下班打卡'
-  return '再打卡（覆盖下班）'
+  return '下班打卡（覆盖）'
 })
 
 // ── 当天状态（checkin:status:get）──
