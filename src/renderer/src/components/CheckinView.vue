@@ -111,6 +111,8 @@ function dotsOf(dateStr: string): DotKind[] {
     dayMap: dayMap.value,
     monthAtts: monthAtts.value,
     rejectedDays: rejectedDays.value,
+    joinedDate: myJoinedDate.value, // 需求 7.1(a)：加入日之前不判异常；为空 → undefined 不过滤
+    noPunch: myNoPunch.value,        // 需求 7.1(b)：免打卡 → 不判迟到/早退/缺卡异常
   })
 }
 
@@ -171,11 +173,13 @@ const rulesForm = ref<RulesForm | null>(null)
 const WEEK_NAMES = ['周日','周一','周二','周三','周四','周五','周六']
 
 // ── 可打卡 MAC 白名单（并入规则弹窗）──
-interface CheckinSettingsData { macEnabled?: boolean; macWhitelist?: string[]; ipWhitelist?: string[] }
+// 需求 7.1：noPunchUserIds = 免打卡人员 id 列表（字符串形式），被列入者按每天正常打卡算。
+interface CheckinSettingsData { macEnabled?: boolean; macWhitelist?: string[]; ipWhitelist?: string[]; noPunchUserIds?: string[] }
 const macEnabled = ref(false)          // 只允许指定 MAC 打卡开关
 const macListText = ref('')            // MAC 列表文本（逗号/换行分隔）
 const ipWhitelist = ref<string[]>([])  // 保留既有 IP 白名单，不做界面编辑
 const showMacEditor = ref(false)       // MAC 列表编辑弹窗
+const noPunchUserIds = ref<string[]>([]) // 免打卡人员（user id 字符串数组）
 async function loadSettings(): Promise<void> {
   if (!companyId.value) return
   try {
@@ -186,6 +190,8 @@ async function loadSettings(): Promise<void> {
       macEnabled.value = !!s.macEnabled
       macListText.value = (s.macWhitelist ?? []).join(', ')
       ipWhitelist.value = s.ipWhitelist ?? []
+      // 自适应：服务端若返回非数组（缺字段/格式差异），兜底为空数组
+      noPunchUserIds.value = Array.isArray(s.noPunchUserIds) ? s.noPunchUserIds.map(String) : []
     }
   } catch (e) { console.error('[打卡] 白名单加载异常', e) }
 }
@@ -197,11 +203,25 @@ async function saveSettings(): Promise<boolean> {
       macEnabled: macEnabled.value,
       macWhitelist: parseMacText(macListText.value),
       ipWhitelist: ipWhitelist.value,
+      noPunchUserIds: [...noPunchUserIds.value],
     }))
     if (!ack.ok) { console.error('[打卡] 白名单保存失败', ack.error); return false }
     return true
   } catch (e) { console.error('[打卡] 白名单保存异常', e); return false }
 }
+
+// ── 需求 7.1：当前用户的加入日与免打卡判定 ──
+// 加入日数据源：app.members 中当前用户的 OrgMember.joinedAt（可选，可能为空 → 不做过滤）。
+// 归一化为 YYYY-MM-DD（服务端可能返回 ISO 时间戳，取日期部分）。
+const myJoinedDate = computed(() => {
+  const me = app.members.find((m) => m.userId === server.state.userId)
+  const j = me?.joinedAt
+  if (!j) return undefined
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(j)
+  return m ? m[1] : undefined
+})
+// 当前用户是否在免打卡名单内（名单为 user id 字符串数组，与 number userId 字符串化后比较）
+const myNoPunch = computed(() => noPunchUserIds.value.includes(String(server.state.userId ?? '')))
 async function openRules(): Promise<void> {
   if (!companyId.value) return
   try {
@@ -508,6 +528,17 @@ function onRefreshCheckin(): void {
             <label class="ci-r-chk"><input type="checkbox" v-model="macEnabled" /> 只允许指定 MAC 地址打卡</label>
             <button class="dt-btn sm" @click="showMacEditor = true"><i class="fas fa-edit"></i> 编辑可打卡 MAC 列表</button>
           </div>
+          <!-- 需求 7.1(b)：免打卡人员多选（公司成员，勾选保存为 user id 字符串数组） -->
+          <div class="ci-r-row ci-r-nopunch">
+            <label>免打卡人员</label>
+            <div class="ci-np-list">
+              <label v-for="m in app.members" :key="m.userId" class="ci-r-chk ci-np-item">
+                <input type="checkbox" :value="String(m.userId)" v-model="noPunchUserIds" />
+                {{ m.nick || m.username }}
+              </label>
+              <div v-if="!app.members.length" class="ci-r-hint">暂无公司成员</div>
+            </div>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="dt-btn" @click="showRules = false">取消</button>
@@ -632,6 +663,10 @@ function onRefreshCheckin(): void {
 .ci-r-row input[type="number"], .ci-r-row input[type="time"], .ci-r-row select { height: 28px; border: 1px solid var(--dt-border); border-radius: 4px; padding: 0 6px; font-size: 13px; }
 .ci-r-chk { min-width: 60px !important; display: flex; align-items: center; gap: 4px; }
 .ci-r-row.ci-r-mac { flex-wrap: wrap; }
+.ci-r-nopunch { align-items: flex-start; }
+.ci-r-nopunch > label { padding-top: 2px; }
+.ci-np-list { display: flex; flex-wrap: wrap; gap: 4px 14px; flex: 1; }
+.ci-np-item { min-width: 120px !important; font-size: 13px; color: var(--dt-text-2); }
 .ci-r-row .dt-btn.sm { height: 26px; font-size: 12px; }
 .ci-r-hint { color: var(--dt-text-3); font-size: 11px; margin-left: 8px; flex: 1; }
 .ci-miss { margin-top: 6px; padding: 6px 10px; background: #fff7ed; color: #d97706; border-radius: 6px; font-size: 12px; }

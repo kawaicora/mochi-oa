@@ -9,6 +9,7 @@ import { toPlain } from '../utils/plain'
 import { addPending, removePending } from '../utils/reminder'
 import { attendanceDeepLinkId, clearAttendanceDeepLink } from '../utils/attendance-deeplink'
 import { buildAttendancePayload, cardBody as tabCardBody, applyMakeupPrefill, overtimeDefault } from '../utils/attendance-logic'
+import { canActApproval } from '../utils/approval'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time' | 'overtime'
@@ -243,10 +244,10 @@ async function loadList(): Promise<void> {
 }
 const histPages = computed(() => Math.max(1, Math.ceil(histTotal.value / pageSize)))
 
-// 审批操作按钮可见：待审批 且（管理员 或 我在审批人名单里）
+// 审批操作按钮可见（需求 7.2）：pending 且（管理员 或 我在审批人名单里）。
+// 纯逻辑见 utils/approval.canActApproval。历史/已处理列表不直接渲染按钮，仅在详情卡片内按此判定。
 function canAct(r: AttendanceRequest): boolean {
-  if (r.status !== 'pending') return false
-  return isAdmin.value || (r.approverIds ?? []).includes(meId.value)
+  return canActApproval({ status: r.status, meId: meId.value, approverIds: r.approverIds, isAdmin: isAdmin.value })
 }
 async function approve(r: AttendanceRequest): Promise<void> {
   try {
@@ -516,8 +517,9 @@ function onOpenApply(e: Event): void {
       <div class="at-table-wrap">
         <div v-if="!list.length" class="at-empty">暂无{{ TYPE_LABEL[historyType] }}记录</div>
         <table v-else class="at-table">
-          <thead><tr><th>类型</th><th>时间/时长</th><th>状态</th><th>提交时间</th><th></th></tr></thead>
+          <thead><tr><th>类型</th><th>时间/时长</th><th>状态</th><th>提交时间</th></tr></thead>
           <tbody>
+            <!-- 需求 7.2：历史记录只读展示，不直接渲染通过/驳回；点行打开详情卡片后按 canAct 显示操作 -->
             <tr v-for="r in list" :key="r.id" class="at-row" @click="detail = r; rejectNote = ''">
               <td>{{ TYPE_LABEL[r.type] }}</td>
               <td>
@@ -526,10 +528,6 @@ function onOpenApply(e: Event): void {
               </td>
               <td><span class="at-badge" :class="r.status">{{ STATUS_LABEL[r.status] }}</span></td>
               <td>{{ fmt(r.createdAt) }}</td>
-              <td class="at-ops">
-                <button v-if="canAct(r)" class="at-op ok" @click.stop="approve(r)"><i class="fas fa-check"></i> 通过</button>
-                <button v-if="canAct(r)" class="at-op danger" @click.stop="detail = r; rejectNote = ''"><i class="fas fa-times"></i> 驳回</button>
-              </td>
             </tr>
           </tbody>
         </table>
@@ -545,13 +543,13 @@ function onOpenApply(e: Event): void {
     <div v-show="topTab === 'received'" class="at-body">
       <div class="at-sec-t">未处理（{{ receivedPending.length }}）</div>
       <div v-if="!receivedPending.length" class="at-empty">无待审批</div>
+      <!-- 需求 7.2：待审批项不在列表行内直接显示通过/驳回；点卡片打开详情后，卡片内按 canAct 显示审批信息与按钮。
+           （停止提醒是个人提醒开关、非审批动作，保留在行内。） -->
       <div v-for="r in receivedPending" :key="'p'+r.id" class="at-rrow" @click="openReceived(r)">
         <span class="at-badge" :class="r.status">{{ TYPE_LABEL[r.type] }}</span>
         <span v-if="isStopped(r)" class="at-stopped-badge"><i class="fas fa-bell-slash"></i> 已停止提醒</span>
         <span>{{ r.nick || r.username }}：{{ r.type === 'make_up' ? fmt(r.punchTime) : (r.startTime ? fmt(r.startTime) : fmt(r.createdAt)) }}</span>
         <span class="at-ops">
-          <button class="at-op ok" @click.stop="approve(r)">通过</button>
-          <button class="at-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
           <button v-if="!isStopped(r)" class="at-op mute" title="不再循环提醒本条" @click.stop="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
         </span>
       </div>

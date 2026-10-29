@@ -7,6 +7,7 @@ import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { advanceDeepLinkId, clearAdvanceDeepLink } from '../utils/advance-deeplink'
+import { canActApproval } from '../utils/approval'
 
 // ── 类型（与服务端冻结协议对齐，数据字段同报销）──
 type AdvCategory = 'travel' | 'purchase' | 'daily' | 'project' | 'other'
@@ -200,9 +201,9 @@ async function loadList(): Promise<void> {
 }
 const histPages = computed(() => Math.max(1, Math.ceil(histTotal.value / pageSize)))
 
+// 审批操作按钮可见（需求 7.2）：pending 且（管理员 或 我在审批人名单里）。纯逻辑见 utils/approval。
 function canAct(r: AdvanceRequest): boolean {
-  if (r.status !== 'pending') return false
-  return isAdmin.value || (r.approverIds ?? []).includes(meId.value)
+  return canActApproval({ status: r.status, meId: meId.value, approverIds: r.approverIds, isAdmin: isAdmin.value })
 }
 async function approve(r: AdvanceRequest): Promise<void> {
   err.value = ''
@@ -347,18 +348,15 @@ onMounted(async () => {
       <div class="av-table-wrap">
         <div v-if="!list.length" class="av-empty">暂无备用金记录</div>
         <table v-else class="av-table">
-          <thead><tr><th>类型</th><th>金额</th><th>事由</th><th>状态</th><th>时间</th><th></th></tr></thead>
+          <thead><tr><th>类型</th><th>金额</th><th>事由</th><th>状态</th><th>时间</th></tr></thead>
           <tbody>
+            <!-- 需求 7.2：历史记录只读，不直接渲染通过/驳回；点行打开详情卡片后按 canAct 显示操作 -->
             <tr v-for="r in list" :key="r.id" class="av-row" :class="{ hl: hlId === r.id }" :data-req-id="r.id" @click="detail = r; rejectNote = ''">
               <td>{{ CATEGORY_LABEL[r.category] }}</td>
               <td>¥{{ Number(r.amount).toFixed(2) }}</td>
               <td class="av-reason-cell">{{ toPlain(r.reason).slice(0, 30) || '—' }}</td>
               <td><span class="av-badge" :class="r.status">{{ STATUS_LABEL[r.status] }}</span></td>
               <td>{{ fmtHuman(r.createdAt) }}</td>
-              <td class="av-ops">
-                <button v-if="canAct(r)" class="av-op ok" @click.stop="approve(r)"><i class="fas fa-check"></i> 通过</button>
-                <button v-if="canAct(r)" class="av-op danger" @click.stop="detail = r; rejectNote = ''"><i class="fas fa-times"></i> 驳回</button>
-              </td>
             </tr>
           </tbody>
         </table>
@@ -373,13 +371,10 @@ onMounted(async () => {
     <div v-show="topTab === 'received'" class="av-body">
       <div class="av-sec-t">未处理（{{ receivedPending.length }}）</div>
       <div v-if="!receivedPending.length" class="av-empty">无待审批</div>
+      <!-- 需求 7.2：待审批项不在行内直接显示通过/驳回；点卡片打开详情后，卡片内按 canAct 显示审批信息与按钮 -->
       <div v-for="r in receivedPending" :key="'p'+r.id" class="av-rrow" :class="{ hl: hlId === r.id }" :data-req-id="r.id" @click="detail = r; rejectNote = ''">
         <span class="av-badge" :class="r.status">{{ CATEGORY_LABEL[r.category] }}</span>
         <span>{{ r.nick || r.username }}：¥{{ Number(r.amount).toFixed(2) }} · {{ fmtHuman(r.createdAt) }}</span>
-        <span class="av-ops">
-          <button class="av-op ok" @click.stop="approve(r)">通过</button>
-          <button class="av-op danger" @click.stop="detail = r; rejectNote = ''">驳回</button>
-        </span>
       </div>
       <div class="av-sec-t">已处理（{{ receivedDone.length }}）</div>
       <div v-if="!receivedDone.length" class="av-empty">无已处理</div>

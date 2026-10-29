@@ -56,14 +56,27 @@ export function dayStateOf(records: CheckinRecordLike[] | undefined): number {
  * - 仍有任一异常 → 黄点；已通过申请 → 叠加紫点；全部解决且有打卡 → 蓝点（可蓝+紫）
  * - 待审申请 → 追加紫点
  * 示例：只补上班迟到、下班仍早退 → 黄+紫（黄不消失）；上班下班都补完 → 蓝+紫（黄消失）。
+ *
+ * 需求 7.1 新增两个可选参数：
+ * - joinedDate?: YYYY-MM-DD（加入公司当天）。dateStr < joinedDate（同格式字符串比较）→
+ *   不判任何「记录派生」异常（缺卡/迟到/早退），即该天不因无记录/迟到/早退出黄点；
+ *   为空时维持原逻辑不做过滤。紫点（待审/已通过申请）不受影响照常显示。
+ * - noPunch?: 免打卡人员。为 true → workAbnormal/offAbnormal 强制 false
+ *   （按每天正常打卡算，不判迟到/早退/缺卡黄点）。
+ * 注：rejectedDays（本会话内被 MAC/IP 白名单拦截的日期）不被 joinedDate / noPunch 豁免——
+ * 它是明确的人工/系统驳回结果；且加入日之前不可能发生打卡拦截（未入司无法打卡），实际不可达。
  */
 export function dotsOf(opts: {
   dateStr: string
   dayMap: Map<string, { records?: CheckinRecordLike[]; status?: string }>
   monthAtts: MonthAttLike[]
   rejectedDays: Set<string>
+  /** 加入公司日（YYYY-MM-DD）；此前日期不判记录派生异常。空/缺省 → 不过滤。 */
+  joinedDate?: string
+  /** 免打卡人员 → 不判迟到/早退/缺卡异常。 */
+  noPunch?: boolean
 }): DotKind[] {
-  const { dateStr, dayMap, monthAtts, rejectedDays } = opts
+  const { dateStr, dayMap, monthAtts, rejectedDays, joinedDate, noPunch } = opts
   const day = dayMap.get(dateStr)
   const recs = day?.records ?? []
   const ds = dayStateOf(recs)
@@ -82,9 +95,13 @@ export function dotsOf(opts: {
   const hasRawOff = recs.some((r) => ((r.state ?? 0) & S_OFF) !== 0 && ((r.state ?? 0) & S_MAKEUP) === 0)
   const workLate = recs.some((r) => ((r.state ?? 0) & S_WORK) !== 0 && ((r.state ?? 0) & S_MAKEUP) === 0 && r.label === '迟到')
   const offEarly = recs.some((r) => ((r.state ?? 0) & S_OFF) !== 0 && ((r.state ?? 0) & S_MAKEUP) === 0 && r.label === '早退')
-  // 各槽位异常：补卡已落库即视为解决；整天申请视为解决
-  const workAbnormal = !rest && !fullCovered && !workMakeupApplied && (!hasRawWork || workLate)
-  const offAbnormal = !rest && !fullCovered && !offMakeupApplied && (!hasRawOff || offEarly)
+  // 各槽位异常：补卡已落库即视为解决；整天申请视为解决。
+  // 需求 7.1：加入日之前（dateStr < joinedDate）不判任何记录派生异常；免打卡(noPunch)强制两槽位均无异常。
+  const beforeJoin = !!joinedDate && dateStr < joinedDate
+  const skipRecordAbnormal = beforeJoin || !!noPunch
+  const workAbnormal = !skipRecordAbnormal && !rest && !fullCovered && !workMakeupApplied && (!hasRawWork || workLate)
+  const offAbnormal = !skipRecordAbnormal && !rest && !fullCovered && !offMakeupApplied && (!hasRawOff || offEarly)
+  // rejectedDays 不被 joinedDate/noPunch 豁免（明确的人工/拦截驳回结果）
   const abnormal = workAbnormal || offAbnormal || rejectedDays.has(dateStr)
   const out: DotKind[] = []
   if (!abnormal && (hasWork || hasOff)) out.push('blue')

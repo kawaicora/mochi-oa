@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
+import { useServerStore } from '../stores/server'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
 import { removePending, addPending } from '../utils/reminder'
+import { canActApproval } from '../utils/approval'
 
 // 显式"停止提醒"：调服务端 proxy:request:notification:stop + 本地 removePending
 // 本地记录已停止的条（Set 重新赋值以触发响应式）；服务端若返回 notifyStopped 同样展示"已停止"
@@ -56,7 +58,9 @@ interface ProxyServer {
   user: string
 }
 const app = useAppStore()
+const server = useServerStore()
 const companyId = computed(() => app.activeCompanyId)
+const meId = computed(() => server.state.userId ?? 0)
 
 // 表单
 const reason = ref('')
@@ -70,6 +74,13 @@ const okMsg = ref('')
 // 列表
 const list = ref<ProxyReq[]>([])
 const myTab = ref<'mine' | 'todo'>('mine')
+// 需求 7.2：待审批项不再在行内直接渲染通过/拒绝；点卡片打开详情弹窗，弹窗内按 canAct 显示审批信息与按钮。
+const selected = ref<ProxyReq | null>(null)
+// 审批操作可见性（纯逻辑见 utils/approval）：pending 且（管理员 或 我是单人审批人 approverId）
+function canAct(r: ProxyReq): boolean {
+  return canActApproval({ status: r.status, meId: meId.value, approverId: r.approverId, isAdmin: app.isAdmin })
+}
+function openDetail(r: ProxyReq): void { selected.value = r }
 const proxyOn = ref(false)
 const proxyMode = ref<'proxy' | 'tun'>('proxy') // 1 纯代理 / 2 TUN(sing-box)
 const lastProxy = ref<{ host: string; port: number } | null>(null)
@@ -116,13 +127,13 @@ async function submit(): Promise<void> {
 async function approve(r: ProxyReq): Promise<void> {
   try {
     const ack = await window.pantry.serverProxyApprove(toPlain({ companyId: companyId.value, id: r.id }))
-    if (ack.ok) { removePending('proxy:' + r.id); await load(); } else console.error('[代理] 审批失败', ack.error)
+    if (ack.ok) { removePending('proxy:' + r.id); selected.value = null; await load(); } else console.error('[代理] 审批失败', ack.error)
   } catch (e) { console.error('[代理] 审批异常', e) }
 }
 async function reject(r: ProxyReq): Promise<void> {
   try {
     const ack = await window.pantry.serverProxyReject(toPlain({ companyId: companyId.value, id: r.id }))
-    if (ack.ok) { removePending('proxy:' + r.id); await load(); } else console.error('[代理] 拒绝失败', ack.error)
+    if (ack.ok) { removePending('proxy:' + r.id); selected.value = null; await load(); } else console.error('[代理] 拒绝失败', ack.error)
   } catch (e) { console.error('[代理] 拒绝异常', e) }
 }
 
@@ -251,7 +262,8 @@ onMounted(async () => {
 
     <!-- 列表 -->
     <div class="pv-list">
-      <div v-for="r in list" :key="r.id" class="pv-item" :class="r.status" :data-req-id="r.id">
+      <!-- 需求 7.2：待审批(todo)项不再在行内直接渲染通过/拒绝；点卡片打开详情弹窗，弹窗内显示审批信息与按钮 -->
+      <div v-for="r in list" :key="r.id" class="pv-item" :class="[r.status, { 'pv-clickable': myTab === 'todo' }]" :data-req-id="r.id" @click="myTab === 'todo' && openDetail(r)">
         <div class="pv-item-head">
           <span>#{{ r.id }} {{ r.nick || r.username }}</span>
           <span>
@@ -274,13 +286,26 @@ onMounted(async () => {
             <button v-else @click="clearProxy">断开代理</button>
           </div>
         </div>
-        <div v-if="myTab === 'todo' && r.status === 'pending'" class="pv-acts">
-          <button class="pv-approve" @click="approve(r)">通过</button>
-          <button class="pv-reject" @click="reject(r)">拒绝</button>
-          <button v-if="!isStopped(r)" class="pv-mute" title="不再循环提醒本条" @click="snoozeRemind(r)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
-        </div>
       </div>
       <div v-if="!list.length" class="pv-empty">暂无申请</div>
+    </div>
+
+    <!-- 需求 7.2：审批详情弹窗（点击待审批卡片后打开；内含审批信息 + 通过/拒绝按钮） -->
+    <div v-if="selected" class="modal-mask" @click.self="selected = null">
+      <div class="modal" style="width:460px">
+        <div class="modal-head">上网申请 · {{ selected.nick || selected.username }} · {{ statusLabel[selected.status] }}</div>
+        <div class="modal-body">
+          <div class="pv-meta">申请人：{{ selected.nick || selected.username }}　提交时间：{{ fmtHuman(selected.createdAt) }}　时长：{{ selected.durationDays }} 天</div>
+          <div class="pv-reason">{{ selected.reason }}</div>
+          <div v-if="selected.status === 'rejected' && selected.rejectReason" class="pv-reject-note">拒绝原因：{{ selected.rejectReason }}</div>
+        </div>
+        <div class="modal-foot">
+          <button v-if="canAct(selected)" class="dt-btn" @click="approve(selected)"><i class="fas fa-check"></i> 通过</button>
+          <button v-if="canAct(selected)" class="dt-btn danger" @click="reject(selected)"><i class="fas fa-times"></i> 拒绝</button>
+          <button v-if="canAct(selected) && !isStopped(selected)" class="dt-btn" title="不再循环提醒本条" @click="snoozeRemind(selected)"><i class="fas fa-bell-slash"></i> 停止提醒</button>
+          <button class="dt-btn" @click="selected = null">关闭</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -303,6 +328,9 @@ onMounted(async () => {
 .pv-on { margin-top: 8px; color: #2fbb6b; font-size: 13px; }
 .pv-list { display: flex; flex-direction: column; gap: 8px; }
 .pv-item { background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; padding: 10px 14px; }
+.pv-item.pv-clickable { cursor: pointer; }
+.pv-item.pv-clickable:hover { background: #f6f8fb; }
+.pv-reject-note { margin-top: 8px; color: #d92b3a; font-size: 13px; }
 .pv-item.approved { border-color: #2fbb6b; }
 .pv-item.rejected { border-color: #d92b3a; }
 .pv-item-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
