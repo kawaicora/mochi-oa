@@ -25,6 +25,12 @@ import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type Notif
 import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
 import { toPlain } from '../utils/plain'
 import { mergeReadPosition } from '../utils/read-receipt'
+// 需求 7.3：审批卡片深链（系统通知点击 → 打开对应审批 View 并定位申请单）
+import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
+import { setExpenseDeepLink } from '../utils/expense-deeplink'
+import { setAdvanceDeepLink } from '../utils/advance-deeplink'
+import { setProxyDeepLink } from '../utils/proxy-deeplink'
+import { isApprovalCardKind, parseApprovalCard, APPROVAL_CARD_TITLE, type ApprovalCardKind } from '../utils/approval-card'
 
 /** 从 ack 提取 data 载荷 */
 function d<T>(ack: unknown): T | undefined {
@@ -116,6 +122,13 @@ export const useAppStore = defineStore('app', () => {
   // 通知管理器：点击消息通知 → 定位到该会话
   window.pantry.onNavigateToConversation((conversationId) => {
     void navigateToConversation(conversationId)
+  })
+  // 需求 7.3：审批卡片系统通知被点击 → 主窗口唤起后，深链到对应审批 View 并定位申请单
+  window.pantry.onOpenApprovalCard(({ cardKind, requestId }) => {
+    if (cardKind === 'attendance_card') setAttendanceDeepLink(requestId)
+    else if (cardKind === 'expense_card') setExpenseDeepLink(requestId)
+    else if (cardKind === 'advance_card') setAdvanceDeepLink(requestId)
+    else if (cardKind === 'proxy_card') setProxyDeepLink(requestId)
   })
 
   // ─── 群设置（owner/admin） ───
@@ -1213,18 +1226,27 @@ export const useAppStore = defineStore('app', () => {
       // 这里不再标记已读：由 ChatWindow 观察消息是否真的滚进可视区域再上报
     }
     const conv = conversations.value.find((c) => c.conversationId === msg.conversationId)
-    const preview =
-      msg.kind === 'text' ? msg.content : msg.kind === 'image' ? '[图片]' : msg.kind === 'video' ? '[视频]' : msg.kind === 'folder' ? '[文件夹]' : '[文件]'
+    // 需求 7.3：审批卡片消息 → 会话预览与通知正文都用卡片内容（标题/申请人/摘要），不再是笼统的 [文件]
+    const cardK: ApprovalCardKind | null = isApprovalCardKind(msg.kind) ? (msg.kind as ApprovalCardKind) : null
+    const cardC = cardK ? parseApprovalCard(msg.content) : null
+    const preview = cardK
+      ? `[${APPROVAL_CARD_TITLE[cardK]}] ${cardC?.byNick || ''}：${cardC?.body || ''}`
+      : msg.kind === 'text' ? msg.content : msg.kind === 'image' ? '[图片]' : msg.kind === 'video' ? '[视频]' : msg.kind === 'folder' ? '[文件夹]' : '[文件]'
     if (msg.fromId !== server.state.userId) {
       // 统一走通知管理器：它按类型（消息/来电/会议/闹钟）决定弹不弹通知、响不响、响哪个音，
       // 并统一处理全局免打扰、会话级免打扰、以及「正在看这个会话就不打扰」。
+      // 审批卡片：通知标题=卡片标题，正文=申请人+摘要；点击通知 → approvalCard 深链（见 onOpenApprovalCard）。
+      const baseTarget = { kind: 'main' as const, conversationId: msg.conversationId }
+      const notifTarget: NotifTarget = cardK && cardC?.requestId
+        ? { ...baseTarget, approvalCard: { cardKind: cardK, requestId: cardC.requestId } }
+        : baseTarget
       void notifyEvent({
         kind: 'message',
-        title: conv?.name ? `新消息：${conv.name}` : '新消息',
-        body: preview,
+        title: cardK ? (cardC?.title || APPROVAL_CARD_TITLE[cardK]) : conv?.name ? `新消息：${conv.name}` : '新消息',
+        body: cardK ? (cardC?.byNick ? `${cardC.byNick}：${cardC.body}` : (cardC?.body || '')) : preview,
         convKey: convKey(msg.type, msg.conversationId),
         inCurrentConv: inConv,
-        target: { kind: 'main', conversationId: msg.conversationId }
+        target: notifTarget
       })
     }
     if (conv) {

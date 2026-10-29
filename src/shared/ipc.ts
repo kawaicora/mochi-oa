@@ -366,7 +366,9 @@ export const IpcChannels = {
 
 /** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
 export type NotifTarget =
-  | { kind: 'main'; nav?: string; conversationId?: number }
+  | { kind: 'main'; nav?: string; conversationId?: number;
+      /** 需求 7.3：审批卡片通知点击 → 渲染层深链到对应审批 View 并定位该申请单 */
+      approvalCard?: { cardKind: 'attendance_card' | 'expense_card' | 'advance_card' | 'proxy_card'; requestId: number } }
   | { kind: 'meeting'; mode: 'create' | 'join'; callType?: 'voice' | 'video'; meetingNo?: string; password?: string }
 
 /**
@@ -407,6 +409,8 @@ export const IpcEvents = {
   serverState: 'server:event:state',
   serverMessage: 'server:event:message',
   navigateToConversation: 'app:navigateToConversation',
+  /** 审批卡片系统通知被点击 → 主窗口唤起后，通知渲染层深链到对应审批 View（{cardKind, requestId}） */
+  openApprovalCard: 'app:openApprovalCard',
   serverPresence: 'server:event:presence',
   serverMessageDeleted: 'server:event:messageDeleted',
   serverConversationsUpdated: 'server:event:conversationsUpdated',

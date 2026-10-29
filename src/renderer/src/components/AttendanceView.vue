@@ -10,6 +10,7 @@ import { addPending, removePending } from '../utils/reminder'
 import { attendanceDeepLinkId, clearAttendanceDeepLink } from '../utils/attendance-deeplink'
 import { buildAttendancePayload, cardBody as tabCardBody, applyMakeupPrefill, overtimeDefault } from '../utils/attendance-logic'
 import { canActApproval } from '../utils/approval'
+import { buildApprovalCard } from '../utils/approval-card'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time' | 'overtime'
@@ -174,7 +175,7 @@ function sendResultCard(r: AttendanceRequest, status: 'approved' | 'rejected'): 
   if (r.userId === meId.value) return
   try {
     void window.pantry.serverDmSend(r.userId,
-      JSON.stringify({ requestId: r.id, title: TYPE_LABEL[r.type] + '申请' + (status === 'approved' ? '已通过' : '已驳回'), body: cardBodyOf(r) + ' · ' + (r.reason || '').slice(0, 80), byNick: myNick.value, status }),
+      buildApprovalCard('attendance_card', { requestId: r.id, title: TYPE_LABEL[r.type] + '申请' + (status === 'approved' ? '已通过' : '已驳回'), body: cardBodyOf(r) + ' · ' + (r.reason || '').slice(0, 80), byNick: myNick.value, status }),
       'attendance_card').catch((e) => console.error('[考勤] 结果卡片发送失败', e))
   } catch (e) { console.error('[考勤] 结果卡片发送失败', e) }
 }
@@ -209,7 +210,7 @@ async function submit(): Promise<void> {
       const body = cardBody() + ' · ' + reason.value.slice(0, 80)
       for (const aid of approverIds.value) {
         try {
-          await window.pantry.serverDmSend(aid, JSON.stringify({ requestId: req.id, title: tl + '申请', body, byNick: myNick.value }), 'attendance_card')
+          await window.pantry.serverDmSend(aid, buildApprovalCard('attendance_card', { requestId: req.id, title: tl + '申请', body, byNick: myNick.value }), 'attendance_card')
         } catch (e) { console.error('[考勤] 卡片消息发送失败', e) }
       }
     }

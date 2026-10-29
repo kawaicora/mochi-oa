@@ -8,6 +8,7 @@ import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { advanceDeepLinkId, clearAdvanceDeepLink } from '../utils/advance-deeplink'
 import { canActApproval } from '../utils/approval'
+import { buildApprovalCard } from '../utils/approval-card'
 
 // ── 类型（与服务端冻结协议对齐，数据字段同报销）──
 type AdvCategory = 'travel' | 'purchase' | 'daily' | 'project' | 'other'
@@ -167,7 +168,7 @@ async function submit(): Promise<void> {
       const body = `${Number(amount.value).toFixed(2)} 元 · ${CATEGORY_LABEL[category.value]}：${toPlain(reason.value).slice(0, 80)}`
       for (const aid of approverIds.value) {
         try {
-          await window.pantry.serverDmSend(aid, JSON.stringify({ requestId: req.id, title: '备用金申请', body, byNick: myNick.value }), 'advance_card')
+          await window.pantry.serverDmSend(aid, buildApprovalCard('advance_card', { requestId: req.id, title: '备用金申请', body, byNick: myNick.value }), 'advance_card')
         } catch (e) { console.error('[备用金] 卡片消息发送失败', e) }
       }
     }

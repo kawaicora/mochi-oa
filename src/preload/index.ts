@@ -473,6 +473,9 @@ const api = {
   onServerState: (l: (s: ServerClientState) => void) => subscribe<ServerClientState>(IpcEvents.serverState, l),
   onServerMessage: (l: (m: ServerChatMessage) => void) => subscribe<ServerChatMessage>(IpcEvents.serverMessage, l),
   onNavigateToConversation: (l: (conversationId: number) => void) => subscribe<number>(IpcEvents.navigateToConversation, l),
+  /** 需求 7.3：审批卡片系统通知被点击 → 渲染层深链到对应审批 View */
+  onOpenApprovalCard: (l: (d: { cardKind: 'attendance_card' | 'expense_card' | 'advance_card' | 'proxy_card'; requestId: number }) => void) =>
+    subscribe<{ cardKind: 'attendance_card' | 'expense_card' | 'advance_card' | 'proxy_card'; requestId: number }>(IpcEvents.openApprovalCard, l),
   onServerPresence: (l: (p: ServerPresenceUpdate) => void) => subscribe<ServerPresenceUpdate>(IpcEvents.serverPresence, l),
   onUserProfileUpdated: (l: (d: { user: { id: number; username: string; nick: string; avatar: string; email: string; phone: string; extra: string } }) => void) => subscribe<{ user: { id: number; username: string; nick: string; avatar: string; email: string; phone: string; extra: string } }>(IpcEvents.userProfileUpdated, l),
   onServerMessageDeleted: (l: (d: ServerMessageDeleted) => void) =>

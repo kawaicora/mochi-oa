@@ -40,6 +40,8 @@ export function initNotifManager(showMain: () => void, getWin: () => BrowserWind
 export function openTarget(t: NotifTarget): void {
   if (t.kind === 'main') {
     showMainWindow?.()
+    // 需求 7.3：审批卡片通知 → 通知渲染层深链到对应审批 View 并定位申请单
+    if (t.approvalCard) getMainWindow?.()?.webContents.send(IpcEvents.openApprovalCard, t.approvalCard)
     // 携带会话参数 → 通知渲染层定位到该会话
     if (t.conversationId) getMainWindow?.()?.webContents.send(IpcEvents.navigateToConversation, t.conversationId)
   } else if (t.kind === 'meeting') {

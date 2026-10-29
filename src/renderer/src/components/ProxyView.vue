@@ -8,6 +8,7 @@ import { fmtHuman } from '../utils/time'
 import { proxyDeepLinkId, clearProxyDeepLink } from '../utils/proxy-deeplink'
 import { removePending, addPending } from '../utils/reminder'
 import { canActApproval } from '../utils/approval'
+import { buildApprovalCard } from '../utils/approval-card'
 
 // 显式"停止提醒"：调服务端 proxy:request:notification:stop + 本地 removePending
 // 本地记录已停止的条（Set 重新赋值以触发响应式）；服务端若返回 notifyStopped 同样展示"已停止"
@@ -61,6 +62,8 @@ const app = useAppStore()
 const server = useServerStore()
 const companyId = computed(() => app.activeCompanyId)
 const meId = computed(() => server.state.userId ?? 0)
+// 卡片 byNick：当前用户昵称（失败兜底用 username）
+const myNick = computed(() => app.members.find((m) => m.userId === meId.value)?.nick || server.state.username || '我')
 
 // 表单
 const reason = ref('')
@@ -119,6 +122,16 @@ async function submit(): Promise<void> {
     }))
     if (!ack.ok) { err.value = ack.error || '申请失败'; return }
     okMsg.value = '申请已提交'
+    // 需求 7.3：勾选「以消息卡片发送」→ 给每个审批人发 proxy_card 私聊卡片（与考勤/报销/备用金同一链路）
+    const reqId = Number((ack.data as { request?: { id?: number } })?.request?.id)
+    if (card.value && Number.isFinite(reqId)) {
+      const body = `${reason.value.trim()} · 时长 ${Number(durationDays.value) || 7} 天`
+      for (const aid of approverIds.value) {
+        try {
+          await window.pantry.serverDmSend(aid, buildApprovalCard('proxy_card', { requestId: reqId, title: '上网申请', body, byNick: myNick.value }), 'proxy_card')
+        } catch (e) { console.error('[上网] 申请卡片发送失败', e) }
+      }
+    }
     reason.value = ''; approverIds.value = []; card.value = false
     await load()
   } catch (e) { console.error('[代理] 提交异常', e); err.value = '提交异常' }

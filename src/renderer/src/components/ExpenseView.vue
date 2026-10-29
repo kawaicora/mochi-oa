@@ -8,6 +8,7 @@ import { toPlain } from '../utils/plain'
 import { fmtHuman } from '../utils/time'
 import { expenseDeepLinkId, clearExpenseDeepLink } from '../utils/expense-deeplink'
 import { canActApproval } from '../utils/approval'
+import { buildApprovalCard } from '../utils/approval-card'
 
 // ── 类型（与服务端冻结协议对齐）──
 type ExpCategory = 'transport' | 'meal' | 'lodging' | 'office' | 'travel' | 'medical' | 'other'
@@ -169,7 +170,7 @@ async function submit(): Promise<void> {
       const body = `${Number(amount.value).toFixed(2)} 元 · ${CATEGORY_LABEL[category.value]}：${toPlain(reason.value).slice(0, 80)}`
       for (const aid of approverIds.value) {
         try {
-          await window.pantry.serverDmSend(aid, JSON.stringify({ requestId: req.id, title: '报销申请', body, byNick: myNick.value }), 'expense_card')
+          await window.pantry.serverDmSend(aid, buildApprovalCard('expense_card', { requestId: req.id, title: '报销申请', body, byNick: myNick.value }), 'expense_card')
         } catch (e) { console.error('[报销] 卡片消息发送失败', e) }
       }
     }
