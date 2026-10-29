@@ -157,9 +157,11 @@ async function submit(): Promise<void> {
       category: category.value,
       amount: Number(amount.value),
       reason: reason.value,
-      evidence: evidence.value,
-      approverIds: approverIds.value,
-      ccIds: ccIds.value
+      // 关键修复：将 Proxy 数组转换为普通数组
+      evidence: JSON.parse(JSON.stringify(evidence.value)), 
+      // 同样建议处理其他可能为 Proxy 或对象的字段
+      approverIds: JSON.parse(JSON.stringify(approverIds.value)),
+      ccIds: JSON.parse(JSON.stringify(ccIds.value))
     })
     if (!ack.ok) { console.error('[备用金] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     const req = (ack.data as { request?: AdvanceRequest })?.request
