@@ -4,5 +4,5 @@
   "appId": "com.mochi.oa",
   "description": "麻薯-好用简洁的办公软件",
   "iconPath": "mochi_256.png",
-  "defaultServerUrl": "https://oa.kawaimoe.org:443",
+  "defaultServerUrl": "https://oa.kawaimoe.org:443"
 }
