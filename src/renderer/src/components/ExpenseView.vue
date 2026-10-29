@@ -154,13 +154,13 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     const ack = await window.pantry.serverCreateExpense({
-      companyId: companyId.value,
-      category: category.value,
-      amount: Number(amount.value),
-      reason: reason.value,
-      evidence: evidence.value,
-      approverIds: approverIds.value,
-      ccIds: ccIds.value
+      companyId: JSON.parse(JSON.stringify(companyId.value)),
+      category: JSON.parse(JSON.stringify(category.value)),
+      amount: JSON.parse(JSON.stringify(Number(amount.value))),
+      reason: JSON.parse(JSON.stringify(reason.value)),
+      evidence: JSON.parse(JSON.stringify(evidence.value)),
+      approverIds: JSON.parse(JSON.stringify(approverIds.value)),
+      ccIds: JSON.parse(JSON.stringify(ccIds.value))
     })
     if (!ack.ok) { console.error('[报销] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     const req = (ack.data as { request?: ExpenseRequest })?.request
@@ -195,7 +195,9 @@ const hlId = ref<number | null>(null)
 async function loadList(): Promise<void> {
   if (!companyId.value) return
   try {
-    const ack = await window.pantry.serverExpenseList({ companyId: companyId.value, page: histPage.value, pageSize })
+    const ack = await window.pantry.serverExpenseList({ 
+      companyId: JSON.parse(JSON.stringify(companyId.value)), 
+      page: JSON.parse(JSON.stringify(histPage.value)), pageSize })
     if (!ack.ok) { console.error('[报销] 历史列表失败', ack.error); return }
     const d = (ack.data as { list?: ExpenseRequest[]; total?: number }) ?? {}
     list.value = d.list ?? []
@@ -211,7 +213,7 @@ function canAct(r: ExpenseRequest): boolean {
 async function approve(r: ExpenseRequest): Promise<void> {
   err.value = ''
   try {
-    const ack = await window.pantry.serverExpenseApprove(r.id, rejectNote.value || undefined)
+    const ack = await window.pantry.serverExpenseApprove(JSON.parse(JSON.stringify(r)) )
     if (!ack.ok) { console.error('[报销] 通过失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: ExpenseRequest })?.request ?? detail.value
     await loadList(); await loadReceived()
@@ -221,7 +223,7 @@ async function reject(r: ExpenseRequest): Promise<void> {
   if (!rejectNote.value.trim()) { err.value = '请填写驳回原因'; return }
   err.value = ''
   try {
-    const ack = await window.pantry.serverExpenseReject(r.id, rejectNote.value.trim())
+    const ack = await window.pantry.serverExpenseReject(JSON.parse(JSON.stringify(r)))
     if (!ack.ok) { console.error('[报销] 驳回失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: ExpenseRequest })?.request ?? detail.value
     rejectNote.value = ''
@@ -237,7 +239,7 @@ const ccViewed = ref<ExpenseRequest[]>([])
 async function loadReceived(): Promise<void> {
   if (!companyId.value) return
   try {
-    const ack = await window.pantry.serverExpenseReceived(companyId.value)
+    const ack = await window.pantry.serverExpenseReceived({"companyId":companyId.value})
     if (!ack.ok) { console.error('[报销] 收到审批加载失败', ack.error); return }
     const d = (ack.data as { pending?: ExpenseRequest[]; processed?: ExpenseRequest[] }) ?? {}
     receivedPending.value = d.pending ?? []
@@ -247,7 +249,7 @@ async function loadReceived(): Promise<void> {
 async function loadCc(): Promise<void> {
   if (!companyId.value) return
   try {
-    const ack = await window.pantry.serverExpenseCc(companyId.value)
+    const ack = await window.pantry.serverExpenseCc({"companyId":companyId.value})
     if (!ack.ok) { console.error('[报销] 收到抄送加载失败', ack.error); return }
     const d = (ack.data as { unviewed?: ExpenseRequest[]; viewed?: ExpenseRequest[] }) ?? {}
     ccUnviewed.value = d.unviewed ?? []
@@ -259,7 +261,7 @@ async function openCc(r: ExpenseRequest): Promise<void> {
   detail.value = r
   if (!r.viewed) {
     try {
-      await window.pantry.serverExpenseCcView(r.id)
+      await window.pantry.serverExpenseCcView(JSON.parse(JSON.stringify(r)))
       await loadCc()
     } catch (e) { console.error('[报销] 抄送标记查看失败', e) }
   }

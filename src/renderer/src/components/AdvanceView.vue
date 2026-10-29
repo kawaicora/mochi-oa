@@ -9,10 +9,24 @@ import { fmtHuman } from '../utils/time'
 import { advanceDeepLinkId, clearAdvanceDeepLink } from '../utils/advance-deeplink'
 import { canActApproval } from '../utils/approval'
 import { buildApprovalCard } from '../utils/approval-card'
+import { userInfo } from 'node:os'
+import { userData } from 'three/src/nodes/TSL.js'
 
-// ── 类型（与服务端冻结协议对齐，数据字段同报销）──
+
+
 type AdvCategory = 'travel' | 'purchase' | 'daily' | 'project' | 'other'
 type AdvStatus = 'pending' | 'approved' | 'rejected'
+
+interface Draft {
+  category: AdvCategory
+  amount: number | null
+  reason: string
+  evidence: string[]
+  evidenceNames: string[]
+  approverIds: number[]
+  ccIds: number[]
+}
+
 interface AdvanceRequest {
   id: number
   companyId: number
@@ -32,15 +46,8 @@ interface AdvanceRequest {
   username?: string
   viewed?: boolean
 }
-interface Draft {
-  category: AdvCategory
-  amount: number | null
-  reason: string
-  evidence: string[]
-  evidenceNames: string[]
-  approverIds: number[]
-  ccIds: number[]
-}
+// ── 类型（与服务端冻结协议对齐，数据字段同报销）──
+
 
 const app = useAppStore()
 const server = useServerStore()
@@ -211,7 +218,7 @@ function canAct(r: AdvanceRequest): boolean {
 async function approve(r: AdvanceRequest): Promise<void> {
   err.value = ''
   try {
-    const ack = await window.pantry.serverAdvanceApprove(r.id, rejectNote.value || undefined)
+    const ack = await window.pantry.serverAdvanceApprove(JSON.parse(JSON.stringify(r)))
     if (!ack.ok) { console.error('[备用金] 通过失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: AdvanceRequest })?.request ?? detail.value
     await loadList(); await loadReceived()
@@ -221,7 +228,7 @@ async function reject(r: AdvanceRequest): Promise<void> {
   if (!rejectNote.value.trim()) { err.value = '请填写驳回原因'; return }
   err.value = ''
   try {
-    const ack = await window.pantry.serverAdvanceReject(r.id, rejectNote.value.trim())
+    const ack = await window.pantry.serverAdvanceReject(JSON.parse(JSON.stringify(r)))
     if (!ack.ok) { console.error('[备用金] 驳回失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: AdvanceRequest })?.request ?? detail.value
     rejectNote.value = ''
@@ -237,7 +244,7 @@ const ccViewed = ref<AdvanceRequest[]>([])
 async function loadReceived(): Promise<void> {
   if (!companyId.value) return
   try {
-    const ack = await window.pantry.serverAdvanceReceived(companyId.value)
+    const ack = await window.pantry.serverAdvanceReceived({"companyId":companyId.value})
     if (!ack.ok) { console.error('[备用金] 收到审批加载失败', ack.error); return }
     const d = (ack.data as { pending?: AdvanceRequest[]; processed?: AdvanceRequest[] }) ?? {}
     receivedPending.value = d.pending ?? []
@@ -247,7 +254,7 @@ async function loadReceived(): Promise<void> {
 async function loadCc(): Promise<void> {
   if (!companyId.value) return
   try {
-    const ack = await window.pantry.serverAdvanceCc(companyId.value)
+    const ack = await window.pantry.serverAdvanceCc({"companyId":companyId.value})
     if (!ack.ok) { console.error('[备用金] 收到抄送加载失败', ack.error); return }
     const d = (ack.data as { unviewed?: AdvanceRequest[]; viewed?: AdvanceRequest[] }) ?? {}
     ccUnviewed.value = d.unviewed ?? []
@@ -258,7 +265,7 @@ async function openCc(r: AdvanceRequest): Promise<void> {
   detail.value = r
   if (!r.viewed) {
     try {
-      await window.pantry.serverAdvanceCcView(r.id)
+      await window.pantry.serverAdvanceCcView(JSON.parse(JSON.stringify(r)))
       await loadCc()
     } catch (e) { console.error('[备用金] 抄送标记查看失败', e) }
   }

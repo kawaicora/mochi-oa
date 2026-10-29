@@ -28,7 +28,7 @@ import type {
   ServerSession,
   ServerSettings,
   SessionRevokedEvent,
-  UserProfileUpdateAck
+  UserProfileUpdateAck,
 } from '../shared/server-types'
 import type { SfuAckFields } from '../shared/sfu'
 
@@ -332,8 +332,8 @@ const api = {
   serverAttendanceCreate: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceCreate, payload),
   serverAttendanceList: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceList, payload),
   serverAttendanceStatList: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceStatList, payload),
-  serverAttendanceApprove: (companyId: number, id: number): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceApprove, companyId, id),
-  serverAttendanceReject: (companyId: number, id: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceReject, companyId, id, note ?? ''),
+  serverAttendanceApprove: ( payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceApprove, payload),
+  serverAttendanceReject: ( payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAttendanceReject, payload),
   // 审批流程配置
   serverApprovalFlowGet: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverApprovalFlowGet, payload),
   serverApprovalFlowSave: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverApprovalFlowSave, payload),
@@ -366,21 +366,21 @@ const api = {
     safeInvoke(IpcChannels.serverExpenseCreate, payload),
   serverExpenseList: (params: { category?: string; page: number; pageSize: number; companyId?: number }): Promise<Ack> =>
     safeInvoke(IpcChannels.serverExpenseList, params),
-  serverExpenseReceived: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReceived, companyId ?? 0),
-  serverExpenseCc: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCc, companyId ?? 0),
-  serverExpenseCcView: (requestId: number): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCcView, requestId),
-  serverExpenseApprove: (requestId: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseApprove, requestId, note ?? ''),
-  serverExpenseReject: (requestId: number, note: string): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReject, requestId, note),
+  serverExpenseReceived: (payload : unknown): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReceived, payload ?? {}),
+  serverExpenseCc: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCc, payload??{}),
+  serverExpenseCcView: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseCcView, payload??{}),
+  serverExpenseApprove: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseApprove, payload??{}),
+  serverExpenseReject: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverExpenseReject, payload??{}),
   // 备用金借款（公司隔离）
   serverAdvanceCreate: (payload: { category: string; amount: number; reason: string; evidence: string[]; approverIds: number[]; ccIds: number[]; companyId?: number }): Promise<Ack> =>
     safeInvoke(IpcChannels.serverAdvanceCreate, payload),
   serverAdvanceList: (params: { category?: string; page: number; pageSize: number; companyId?: number }): Promise<Ack> =>
     safeInvoke(IpcChannels.serverAdvanceList, params),
-  serverAdvanceReceived: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReceived, companyId ?? 0),
-  serverAdvanceCc: (companyId?: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceCc, companyId ?? 0),
+  serverAdvanceReceived: (params: {companyId?: number;} ): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReceived, params),
+  serverAdvanceCc: (params: {companyId?: number;}): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceCc, params),
   serverAdvanceCcView: (requestId: number): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceCcView, requestId),
-  serverAdvanceApprove: (requestId: number, note?: string): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceApprove, requestId, note ?? ''),
-  serverAdvanceReject: (requestId: number, note: string): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReject, requestId, note),
+  serverAdvanceApprove: (request :unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceApprove, request),
+  serverAdvanceReject: (request :unknown): Promise<Ack> => safeInvoke(IpcChannels.serverAdvanceReject, request),
   systemProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxySet, target),
   systemProxyClear: (target?: unknown): Promise<Ack> => safeInvoke(IpcChannels.systemProxyClear, target ?? null),
   tunProxySet: (target: unknown): Promise<Ack> => safeInvoke(IpcChannels.tunProxySet, target),

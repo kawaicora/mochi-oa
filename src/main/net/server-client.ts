@@ -1625,13 +1625,13 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'attendance:stat:list', payload)
   }
-  async attendanceApprove(companyId: number, id: number): Promise<Ack> {
+  async attendanceApprove(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'attendance:approve', { companyId, id })
+    return emitWithAck(this.socket, 'attendance:approve', payload)
   }
-  async attendanceReject(companyId: number, id: number, note?: string): Promise<Ack> {
+  async attendanceReject(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'attendance:reject', { companyId, id, note: note ?? '' })
+    return emitWithAck(this.socket, 'attendance:reject', payload)
   }
 
   // ─── 审批流程配置 ─────────
@@ -1768,13 +1768,13 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'expense:cc:view', payload)
   }
-  async expenseApprove(requestId: number, note?: string): Promise<Ack> {
+  async expenseApprove(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'expense:approve', { requestId, note: note ?? '' })
+    return emitWithAck(this.socket, 'expense:approve',payload )
   }
-  async expenseReject(requestId: number, note: string): Promise<Ack> {
+  async expenseReject(payload: Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'expense:reject', { requestId, note })
+    return emitWithAck(this.socket, 'expense:reject', payload)
   }
 
   // ─── 备用金借款（公司隔离，审批流同 attendance）─────────
@@ -1798,13 +1798,13 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'advance:cc:view', payload)
   }
-  async advanceApprove(requestId: number, note?: string): Promise<Ack> {
+  async advanceApprove(payload :Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'advance:approve', { requestId, note: note ?? '' })
+    return emitWithAck(this.socket, 'advance:approve',payload)
   }
-  async advanceReject(requestId: number, note: string): Promise<Ack> {
+  async advanceReject(payload :Record<string, unknown>): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'advance:reject', { requestId, note })
+    return emitWithAck(this.socket, 'advance:reject', payload)
   }
 
   // ─── 资产管理（公司隔离）─────────

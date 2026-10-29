@@ -75,6 +75,7 @@ export interface Ack {
   data?: unknown
 }
 
+
 /** 服务端客户端状态（桥接到渲染进程） */
 export interface ServerClientState {
   connected: boolean

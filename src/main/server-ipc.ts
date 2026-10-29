@@ -19,7 +19,6 @@ import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
-
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
 
@@ -529,8 +528,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverAttendanceCreate, (_e, payload) => serverClient.attendanceCreate((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceList, (_e, payload) => serverClient.attendanceList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAttendanceStatList, (_e, payload) => serverClient.attendanceStatList((payload as Record<string, unknown>) ?? {}))
-  ipcMain.handle(IpcChannels.serverAttendanceApprove, (_e, companyId, id) => serverClient.attendanceApprove(Number(companyId) || 0, Number(id) || 0))
-  ipcMain.handle(IpcChannels.serverAttendanceReject, (_e, companyId, id, note) => serverClient.attendanceReject(Number(companyId) || 0, Number(id) || 0, typeof note === 'string' ? note : ''))
+  ipcMain.handle(IpcChannels.serverAttendanceApprove, (_e, payload) => serverClient.attendanceApprove((payload as Record<string,unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAttendanceReject, (_e, payload) => serverClient.attendanceReject((payload as Record<string,unknown>) ?? {}))
   // 审批流程配置
   ipcMain.handle(IpcChannels.serverApprovalFlowGet, (_e, payload) => serverClient.approvalFlowGet((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverApprovalFlowSave, (_e, payload) => serverClient.approvalFlowSave((payload as Record<string, unknown>) ?? {}))
@@ -565,16 +564,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverExpenseReceived, (_e, payload) => serverClient.expenseReceived((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverExpenseCc, (_e, payload) => serverClient.expenseCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverExpenseCcView, (_e, payload) => serverClient.expenseCcView((payload as Record<string, unknown>) ?? {}))
-  ipcMain.handle(IpcChannels.serverExpenseApprove, (_e, requestId, note) => serverClient.expenseApprove(Number(requestId) || 0, typeof note === 'string' ? note : ''))
-  ipcMain.handle(IpcChannels.serverExpenseReject, (_e, requestId, note) => serverClient.expenseReject(Number(requestId) || 0, typeof note === 'string' ? note : ''))
+  ipcMain.handle(IpcChannels.serverExpenseApprove, (_e, payload) => serverClient.expenseApprove((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverExpenseReject, (_e, payload) => serverClient.expenseReject((payload as Record<string, unknown>) ?? {}))
   // 备用金借款（公司隔离）
   ipcMain.handle(IpcChannels.serverAdvanceCreate, (_e, payload) => serverClient.advanceCreate((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAdvanceList, (_e, payload) => serverClient.advanceList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAdvanceReceived, (_e, payload) => serverClient.advanceReceived((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAdvanceCc, (_e, payload) => serverClient.advanceCcList((payload as Record<string, unknown>) ?? {}))
   ipcMain.handle(IpcChannels.serverAdvanceCcView, (_e, payload) => serverClient.advanceCcView((payload as Record<string, unknown>) ?? {}))
-  ipcMain.handle(IpcChannels.serverAdvanceApprove, (_e, requestId, note) => serverClient.advanceApprove(Number(requestId) || 0, typeof note === 'string' ? note : ''))
-  ipcMain.handle(IpcChannels.serverAdvanceReject, (_e, requestId, note) => serverClient.advanceReject(Number(requestId) || 0, typeof note === 'string' ? note : ''))
+  ipcMain.handle(IpcChannels.serverAdvanceApprove, (_e, payload) => serverClient.advanceApprove((payload as Record<string, unknown>) ?? {}))
+  ipcMain.handle(IpcChannels.serverAdvanceReject, (_e, payload) => serverClient.advanceReject((payload as Record<string, unknown>) ?? {}))
   // 系统代理（本地操作）
   ipcMain.handle(IpcChannels.systemProxySet, (_e, target) => setSystemProxy(target as { host: string; port: number; username?: string; password?: string }))
   ipcMain.handle(IpcChannels.systemProxyClear, (_e, target) => clearSystemProxy(target as { host?: string; port?: number } | undefined))
