@@ -236,7 +236,9 @@ async function loadList(): Promise<void> {
   if (!companyId.value) return
   try {
     const ack = await window.pantry.serverAttendanceList({
-      companyId: companyId.value, type: historyType.value, page: histPage.value, pageSize
+      companyId: JSON.parse(JSON.stringify(companyId.value)), 
+      type: JSON.parse(JSON.stringify(historyType.value)), 
+      page: JSON.parse(JSON.stringify(histPage.value)), pageSize
     })
     if (!ack.ok) { console.error('[考勤] 历史列表失败', ack.error); return }
     list.value = (ack.data as { requests?: AttendanceRequest[]; total?: number })?.requests ?? []
@@ -252,7 +254,9 @@ function canAct(r: AttendanceRequest): boolean {
 }
 async function approve(r: AttendanceRequest): Promise<void> {
   try {
-    const ack = await window.pantry.serverAttendanceApprove(companyId.value, r.id)
+    const ack = await window.pantry.serverAttendanceApprove(
+      JSON.parse(JSON.stringify( r))
+    )
     if (!ack.ok) { console.error('[考勤] 通过失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
     await loadList()
@@ -265,7 +269,9 @@ async function approve(r: AttendanceRequest): Promise<void> {
 }
 async function reject(r: AttendanceRequest): Promise<void> {
   try {
-    const ack = await window.pantry.serverAttendanceReject(companyId.value, r.id, rejectNote.value)
+    const ack = await window.pantry.serverAttendanceReject(
+      JSON.parse(JSON.stringify(r)),
+    )
     if (!ack.ok) { console.error('[考勤] 驳回失败', ack.error); err.value = ack.error || '操作失败'; return }
     detail.value = (ack.data as { request?: AttendanceRequest })?.request ?? detail.value
     rejectNote.value = ''
