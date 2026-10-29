@@ -4,7 +4,13 @@ import CalendarMonth from './common/CalendarMonth.vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { toPlain } from '../utils/plain'
-import { fmtTime, fmtDate, fmtLocal } from '../utils/time'
+import { fmtTime, fmtLocal } from '../utils/time'
+import {
+  S_WORK, S_OFF, S_MAKEUP,
+  dayStateOf as aggDayState, dotsOf as dotsLogic, punchLabel as punchLabelLogic,
+  hm, parseMacText, fmtOvertime, recCls, canMakeup as canMakeupLogic, attDateOf,
+  type DotKind,
+} from '../utils/attendance-logic'
 
 // ── 类型（与服务端冻结协议对齐）──
 interface CheckinItem {
@@ -94,50 +100,18 @@ const monthAtts = ref<MonthAtt[]>([])
 const p0 = (n: number) => String(n).padStart(2, '0')
 const todayStr = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`
 
-// 某日期状态点（可并排多个）。规则：
-// - 当天有通过的考勤申请(补卡/请假/调休) → 算正常，异常黄点不显示；显示紫点(申请)
-// - 整天申请(无正常打卡) → 只显示紫；正常打卡+申请 → 蓝+紫
-// - 无通过申请时按打卡：正常(>=2) → 蓝；异常(缺卡/迟到/早退) → 黄
-// - 异常记录如实保留：点日期弹窗可查看当天全部打卡与申请详情
-type DotKind = 'blue' | 'yellow' | 'purple'
-// state 位掩码（与服务端 checkins.state 一致）：1上班 2下班 4缺卡 8补卡 16请假 32调休。
-const S_WORK = 1
-const S_OFF = 2
-const S_MISS = 4
-const S_MAKEUP = 8
-const S_LEAVE = 16
-const S_COMP = 32
-// 聚合当天所有打卡记录的状态位（OR），识别已打上班/下班/补卡槽位。
+// 某日期状态点（可并排多个）。规则见 attendance-logic.dotsOf。
+// 薄包装：把组件响应式状态接入纯函数，测逻辑时直接测 attendance-logic 里的纯函数。
 function dayStateOf(dateStr: string): number {
-  let s = 0
-  for (const r of dayMap.value.get(dateStr)?.records ?? []) s |= (r.state || 0)
-  return s
+  return aggDayState(dayMap.value.get(dateStr)?.records ?? [])
 }
-
 function dotsOf(dateStr: string): DotKind[] {
-  const day = dayMap.value.get(dateStr)
-  const ds = dayStateOf(dateStr)
-  const hasWork = (ds & S_WORK) !== 0 // 已打/补上班卡
-  const hasOff = (ds & S_OFF) !== 0 // 已打/补下班卡
-  const atts = monthAtts.value.filter((a) => a.date === dateStr)
-  const approved = atts.filter((a) => a.status === 'approved')
-  const hasApprovedAtt = approved.some((a) => a.type === 'make_up' || a.type === 'leave' || a.type === 'comp_time')
-  const out: DotKind[] = []
-  if (hasApprovedAtt) {
-    // 申请通过 → 算正常(不显示异常黄)；当天有打卡(含补卡落库) → 蓝+紫两圈；整天申请无打卡 → 只紫
-    if (day && (hasWork || hasOff)) out.push('blue')
-    out.push('purple')
-  } else {
-    // 无通过申请：按当天综合状态判定。迟到/早退/缺卡/单次只上班/被拦截 → 黄；正常(上下班都打) → 蓝。
-    // 缺卡/单卡用 state 位判断（上班&下班位都齐才正常），不再按打卡次数硬分。
-    const st = day?.status
-    const abnormal = (!!day && (st === 'late' || st === 'early' || st === 'late_early' || st === 'none' || !(hasWork && hasOff)))
-      || rejectedDays.value.has(dateStr)
-    if (day && !abnormal) out.push('blue')
-    else if (abnormal) out.push('yellow')
-    if (atts.some((a) => a.status === 'pending')) out.push('purple') // 待审申请
-  }
-  return out
+  return dotsLogic({
+    dateStr,
+    dayMap: dayMap.value,
+    monthAtts: monthAtts.value,
+    rejectedDays: rejectedDays.value,
+  })
 }
 
 // ── 当天详情弹窗 ──
@@ -156,12 +130,7 @@ async function loadMac(): Promise<void> {
 // 当天打卡次数（从当月 records 里筛 today）
 const todayCount = computed(() => dayMap.value.get(todayStr)?.count ?? 0)
 // 按钮文案：0=上班打卡；1=下班打卡；≥2=再打卡覆盖下班
-const punchLabel = computed(() => {
-  if (punching.value) return '打卡中…'
-  if (todayCount.value <= 0) return '上班打卡'
-  if (todayCount.value === 1) return '下班打卡'
-  return '下班打卡（覆盖）'
-})
+const punchLabel = computed(() => punchLabelLogic(todayCount.value, punching.value))
 
 // ── 当天状态（checkin:status:get）──
 type StatusKind = 'rest' | 'none' | 'normal' | 'late' | 'early' | 'late_early'
@@ -170,19 +139,8 @@ const dayStatus = ref<DayStatus | null>(null)
 const statusLabel: Record<StatusKind, string> = {
   rest: '休息日', none: '暂无打卡记录', normal: '正常', late: '迟到', early: '早退', late_early: '迟到+早退'
 }
-// 记录标签着色：迟到/早退红、补卡蓝、请假/调休紫、上班/下班灰。
-function recCls(label?: string): string {
-  if (!label) return 'ci-rec-lbl'
-  if (label === '迟到' || label === '早退') return 'ci-rec-lbl warn'
-  if (label === '补上班' || label === '补下班') return 'ci-rec-lbl make'
-  if (label === '请假' || label === '调休') return 'ci-rec-lbl leave'
-  return 'ci-rec-lbl'
-}
-// 当天通过加班申请 → "加班 21:00 - 22:00 1小时"（仅申请通过才显示）。
-function fmtOvertime(o: OvertimeItem): string {
-  const h = Math.round(o.durationHours * 100) / 100
-  return `加班 ${fmtTime(o.startTime)} - ${fmtTime(o.endTime)} ${h}小时`
-}
+// 记录标签着色：迟到/早退红、补卡蓝、请假/调休紫、上班/下班灰（纯逻辑见 attendance-logic.recCls）。
+// 当天通过加班申请 → "加班 21:00 - 22:00 1小时"（仅申请通过才显示；纯逻辑见 attendance-logic.fmtOvertime）。
 const statusCls: Record<StatusKind, string> = {
   rest: 'rest', none: 'none', normal: 'ok', late: 'warn', early: 'warn', late_early: 'warn'
 }
@@ -218,9 +176,6 @@ const macEnabled = ref(false)          // 只允许指定 MAC 打卡开关
 const macListText = ref('')            // MAC 列表文本（逗号/换行分隔）
 const ipWhitelist = ref<string[]>([])  // 保留既有 IP 白名单，不做界面编辑
 const showMacEditor = ref(false)       // MAC 列表编辑弹窗
-function parseMacText(text: string): string[] {
-  return text.split(/[\n,，;；]+/).map(s => s.trim()).filter(Boolean)
-}
 async function loadSettings(): Promise<void> {
   if (!companyId.value) return
   try {
@@ -317,44 +272,15 @@ async function doCheckin(): Promise<void> {
 const measureDate = ref<string>('')
 const measureInfo = ref<{ date: string; stdStart: string; stdEnd: string } | null>(null)
 
-// "HH:MM" → 当天分钟数。
-function hm(t: string): number { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0) }
-
-// 补卡资格：只有「已定论的异常」才提供补卡——
-//   - 历史日期（< 今天）：已过上班+下班，可补；
-//   - 今天迟到（上班异常，已过上班时间）→ 可补上班卡；
-//   - 今天缺上班卡且已过上班时间 → 可补上班卡；
-//   - 今天缺下班卡/早退且已过下班时间 → 可补下班卡；
-//   - 今天未到对应时间（如正常上班但还没到下班时间）→ 不提供补卡。
+// 补卡资格：委托 attendance-logic.canMakeup（组件签名 date:string → 纯函数参数）。
 function canMakeup(date: string): boolean {
-  if (date < todayStr) {
-    // 历史已定论，可补；但目标槽位已补过则不能再补（补上班/补下班各一次，防无限补）。
-    const ds = dayStateOf(date)
-    const hasWork = (ds & S_WORK) !== 0
-    const hasOff = (ds & S_OFF) !== 0
-    const targetOff = hasWork && !hasOff
-    const alreadyWorkMakeup = (ds & (S_WORK | S_MAKEUP)) === (S_WORK | S_MAKEUP) // 补上班卡(9)已存在
-    const alreadyOffMakeup = (ds & (S_OFF | S_MAKEUP)) === (S_OFF | S_MAKEUP) // 补下班卡(10)已存在
-    if (targetOff && alreadyOffMakeup) return false
-    if (!targetOff && alreadyWorkMakeup) return false
-    return true
-  }
-  const mi = measureInfo.value, st = dayStatus.value
-  if (!mi || !st) return false
-  const ds = dayStateOf(date)
-  const alreadyWorkMakeup = (ds & (S_WORK | S_MAKEUP)) === (S_WORK | S_MAKEUP) // 补上班卡(9)已存在
-  const alreadyOffMakeup = (ds & (S_OFF | S_MAKEUP)) === (S_OFF | S_MAKEUP) // 补下班卡(10)已存在
-  const targetOff = !(mi.date === todayStr && st.status === 'late') && (ds & S_WORK) !== 0
-  // 目标槽位已补过 → 不能再补（防止一个迟到无限补卡）。
-  if (targetOff && alreadyOffMakeup) return false
-  if (!targetOff && alreadyWorkMakeup) return false
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes()
-  const ws = hm(mi.stdStart || '09:00')
-  const we = hm(mi.stdEnd || '18:00')
-  if (st.status === 'late') return true // 迟到已过上班时间 → 可补上班卡
-  if (st.missingWork) return nowMin > ws // 缺上班卡已过上班时间 → 可补上班卡
-  if (st.missingOff || st.status === 'early' || st.status === 'late_early') return nowMin > we // 缺下班/早退已过下班时间 → 可补下班卡
-  return false
+  return canMakeupLogic({
+    date,
+    todayStr,
+    records: dayMap.value.get(date)?.records ?? [],
+    dayStatus: dayStatus.value,
+    measureInfo: measureInfo.value,
+  })
 }
 const hasInMeasure = computed(() => {
   const mi = measureInfo.value
@@ -429,8 +355,8 @@ async function loadMonthAtts(): Promise<void> {
     const out: MonthAtt[] = []
     for (const r of reqs) {
       // 补卡(make_up)无 startTime，用目标日期 makeupDate（补卡落到被补那天，跨天补下班也正确匹配）；
-      // 无 makeupDate/startTime 才回退 createdAt。
-      const ds = r.makeupDate ? fmtDate(r.makeupDate) : (r.startTime ? fmtDate(r.startTime) : fmtDate(r.createdAt))
+      // 无 makeupDate/startTime 才回退 createdAt（纯逻辑见 attendance-logic.attDateOf）。
+      const ds = attDateOf(r)
       out.push({ date: ds, type: r.type, status: r.status })
     }
     monthAtts.value = out

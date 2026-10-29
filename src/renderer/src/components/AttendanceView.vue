@@ -8,6 +8,7 @@ import CompanyContactPicker from './CompanyContactPicker.vue'
 import { toPlain } from '../utils/plain'
 import { addPending, removePending } from '../utils/reminder'
 import { attendanceDeepLinkId, clearAttendanceDeepLink } from '../utils/attendance-deeplink'
+import { buildAttendancePayload, cardBody as tabCardBody, applyMakeupPrefill, overtimeDefault } from '../utils/attendance-logic'
 
 // ── 类型（与服务端冻结协议对齐）──
 type AttType = 'make_up' | 'leave' | 'comp_time' | 'overtime'
@@ -39,8 +40,6 @@ interface AttendanceRequest {
 // 草稿结构（按类型存 localStorage；含审批人/抄送人选择）
 interface Draft {
   punchTime: string
-  makeupDate: string
-  makeupSlot: 'work' | 'off' | ''
   leaveType: string
   compType: string
   startTime: string
@@ -69,13 +68,6 @@ const tab = ref<AttType>('make_up')
 
 // ── 表单 ──
 const punchTime = ref('')
-// 从打卡页进入的补卡锁定「被补日期」（YYYY-MM-DD）：落库/槽位以它为准，
-// 允许补卡时刻跨天到次日凌晨（下班区间 = 当天下班 ~ 次日 4 点，补 10-27 下班卡可选 10-28 02:00）。
-const makeupDate = ref('')
-// 补卡槽位：work(补上班)|off(补下班)；打卡页进入时确定，服务端据此落槽位（补下班跨天也算下班）。
-const makeupSlot = ref<'work' | 'off' | ''>('')
-// 标记本次 tab 切换是否由打卡页预填触发（是则保留 makeupDate/makeupSlot，否则手动切 tab 清空防残留）。
-let prefilled = false
 const leaveType = ref(LEAVE_TYPES[0])
 const compType = ref(COMP_TYPES[0])
 const startTime = ref('')
@@ -98,7 +90,7 @@ const myNick = computed(() => app.members.find((m) => m.userId === meId.value)?.
 const draftKey = (t: AttType) => `mochi:oa:att:draft:${t}`
 function currentDraft(): Draft {
   return {
-    punchTime: punchTime.value, makeupDate: makeupDate.value, makeupSlot: makeupSlot.value,
+    punchTime: punchTime.value,
     leaveType: leaveType.value, compType: compType.value,
     startTime: startTime.value, endTime: endTime.value, durationHours: durationHours.value, reason: reason.value,
     approverIds: [...approverIds.value], ccIds: [...ccIds.value]
@@ -106,8 +98,6 @@ function currentDraft(): Draft {
 }
 function applyDraft(d: Draft): void {
   punchTime.value = d.punchTime || ''
-  makeupDate.value = d.makeupDate || ''
-  makeupSlot.value = d.makeupSlot || ''
   leaveType.value = d.leaveType || LEAVE_TYPES[0]
   compType.value = d.compType || COMP_TYPES[0]
   startTime.value = d.startTime || ''
@@ -122,12 +112,10 @@ function loadDraft(t: AttType): void {
   try {
     const raw = localStorage.getItem(draftKey(t))
     const d = raw ? (JSON.parse(raw) as Draft) : null
-    const base = d ?? { punchTime: '', makeupDate: '', makeupSlot: '' as const, leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] }
-    // 从打卡页预填进入（makeupDate 非空）：保留已预填的被补日期/槽位/补卡时间，避免被草稿覆盖丢失。
-    if (makeupDate.value) {
+    const base = d ?? { punchTime: '', leaveType: LEAVE_TYPES[0], compType: COMP_TYPES[0], startTime: '', endTime: '', durationHours: null, reason: '', approverIds: [], ccIds: [] }
+    // 从打卡页预填进入（punchTime 非空）：保留已预填的补卡时间，避免被草稿覆盖丢失。
+    if (punchTime.value) {
       base.punchTime = punchTime.value
-      base.makeupDate = makeupDate.value
-      base.makeupSlot = makeupSlot.value || 'work'
     }
     applyDraft(base)
   } catch (e) { console.error('[考勤] 草稿读取失败', e) }
@@ -175,10 +163,10 @@ function namesOf(ids: number[]): string {
 // ── 提交申请 ──
 // 卡片正文：补卡→补卡时间；请假/调休/加班→时间段
 function cardBody(): string {
-  return tab.value === 'make_up' ? '补卡时间 ' + (punchTime.value || '—') : `${startTime.value || '—'} ~ ${endTime.value || '—'}`
+  return tabCardBody(tab.value, punchTime.value || '', startTime.value || '', endTime.value || '')
 }
 function cardBodyOf(r: AttendanceRequest): string {
-  return r.type === 'make_up' ? '补卡时间 ' + (r.punchTime || '—') : `${r.startTime || '—'} ~ ${r.endTime || '—'}`
+  return tabCardBody(r.type, r.punchTime || '', r.startTime || '', r.endTime || '')
 }
 // 给申请人私聊发审批结果卡片（非本人审批时；参照备用金/报销）
 function sendResultCard(r: AttendanceRequest, status: 'approved' | 'rejected'): void {
@@ -194,33 +182,22 @@ async function submit(): Promise<void> {
   err.value = ''
   okMsg.value = ''
   if (tab.value === 'make_up' && !punchTime.value) { err.value = '请选择补卡时间'; return }
-  if (tab.value === 'make_up' && !makeupDate.value) { err.value = '请选择被补日期'; return }
-  if (tab.value === 'make_up' && !makeupSlot.value) { err.value = '请选择补卡类型（补上班/补下班）'; return }
   if (tab.value !== 'make_up' && (!startTime.value || !endTime.value)) { err.value = '请选择开始与结束时间'; return }
   if (!approverIds.value.length) { err.value = '请选择审批人'; return }
   if (!reason.value.trim()) { err.value = '请填写事由'; return }
   submitting.value = true
   try {
-    const payload: Record<string, unknown> = {
-      companyId: companyId.value, type: tab.value, reason: reason.value,
-      approverIds: approverIds.value, ccIds: ccIds.value
-    }
-    if (tab.value === 'make_up') {
-      // PunchTime 为实际打卡时刻（允许跨天到次日凌晨补下班卡，如补 10-27 卡选 10-28 02:00）。
-      payload.punchTime = punchTime.value
-      // 目标日期 + 槽位由打卡页预填携带：服务端据此落库（checkDate=被补那天，槽位=补上班/补下班），
-      // 而非按 PunchTime 字面日期/时刻邻近判定——从而跨天补下班卡也能正确落到被补那天。
-      if (makeupDate.value) payload.makeupDate = makeupDate.value
-      if (makeupSlot.value) payload.makeupSlot = makeupSlot.value
-    }
-    else {
-      payload.startTime = startTime.value
-      payload.endTime = endTime.value
-      payload.durationHours = durationHours.value
-      if (tab.value === 'leave') payload.leaveType = leaveType.value
-      else if (tab.value === 'comp_time') payload.compType = compType.value
-      // overtime：只传时间段，时长由服务端计算；不设请假/调休类型
-    }
+    // 载荷构造走纯逻辑 attendance-logic.buildAttendancePayload：
+    // 补卡只传 punchTime；请假传 leaveType；调休传 compType；加班只传时间段（时长服务端算）。
+    const payload = buildAttendancePayload({
+      tab: tab.value, punchTime: punchTime.value,
+      startTime: startTime.value, endTime: endTime.value,
+      durationHours: durationHours.value,
+      leaveType: leaveType.value, compType: compType.value,
+      reason: reason.value,
+      approverIds: approverIds.value, ccIds: ccIds.value,
+      companyId: companyId.value,
+    })
     const ack = await window.pantry.serverAttendanceCreate(toPlain(payload))
     if (!ack.ok) { console.error('[考勤] 提交失败', ack.error); err.value = ack.error || '提交失败'; return }
     const req = (ack.data as { request?: AttendanceRequest })?.request
@@ -238,7 +215,7 @@ async function submit(): Promise<void> {
     // 提交成功 → 清空该类型草稿并重置表单
     clearDraft(tab.value)
     punchTime.value = ''; startTime.value = ''; endTime.value = ''; durationHours.value = null; reason.value = ''
-    approverIds.value = []; ccIds.value = []; makeupDate.value = ''; makeupSlot.value = ''
+    approverIds.value = []; ccIds.value = []
     sendCard.value = false
     await loadList()
   } catch (e) { console.error('[考勤] 提交异常', e); err.value = '提交异常' }
@@ -370,18 +347,12 @@ async function snoozeRemind(r: AttendanceRequest): Promise<void> {
 watch(tab, () => { okMsg.value = ''; err.value = '' })
 // 切申请类型 → 载入该类型草稿
 watch(tab, (t) => {
-  // 手动切 tab（非打卡页预填）：清空补卡锁定，防残留误传。
-  if (!prefilled) { makeupDate.value = ''; makeupSlot.value = '' }
-  prefilled = false
   loadDraft(t)
-  // 补卡手动发起（非打卡页预填）：默认被补日=今天、类型=补上班、补卡时间=当天 09:00，
-  // 用户可改（跨天补下班卡时把补卡时间改到次日凌晨、类型改补下班）。
-  if (t === 'make_up' && !makeupDate.value) makeupDate.value = todayStr()
-  if (t === 'make_up' && !makeupSlot.value) makeupSlot.value = 'work'
-  if (t === 'make_up' && !punchTime.value) punchTime.value = `${makeupDate.value}T09:00`
+  // 补卡手动发起（非打卡页预填）：默认补卡时间=今天 09:00，用户可改（跨天补下班卡时把补卡时间改到次日凌晨）。
+  if (t === 'make_up' && !punchTime.value) punchTime.value = `${todayStr()}T09:00`
   if (t === 'overtime') void fillOvertimeDefault()
 })
-// 加班申请自动填充当日下班时间（开始=当日下班，结束默认 +1 小时，可改）。
+// 加班申请自动填充当日下班时间（开始=当日下班，结束默认 +1 小时，可改；判定走 attendance-logic.overtimeDefault）。
 async function fillOvertimeDefault(): Promise<void> {
   if (!companyId.value || startTime.value) return // 已有草稿/预填则不覆盖
   try {
@@ -392,20 +363,10 @@ async function fillOvertimeDefault(): Promise<void> {
     let wr = d.week_rules
     if (typeof wr === 'string') { try { wr = JSON.parse(wr) } catch { return } }
     if (!Array.isArray(wr) || wr.length !== 7) return
-    const now = new Date()
-    const dow = (now.getDay() + 6) % 7 // 周一=0
-    const p0 = (n: number) => String(n).padStart(2, '0')
-    const td = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`
-    const day = wr[dow]
-    if (!day || day.rest || !day.end) return // 今天休息无下班时间 → 留给用户手填
-    const hh = day.end.slice(0, 2)
-    const mm = day.end.slice(3, 5)
-    if (!/^\d{2}$/.test(hh) || !/^\d{2}$/.test(mm)) return
-    startTime.value = `${td}T${hh}:${mm}`
-    // 结束默认下班后 1 小时（跨天到次日也正确）。
-    const e = new Date(`${td}T${hh}:${mm}`)
-    e.setHours(e.getHours() + 1)
-    endTime.value = `${e.getFullYear()}-${p0(e.getMonth() + 1)}-${p0(e.getDate())}T${p0(e.getHours())}:${p0(e.getMinutes())}`
+    const def = overtimeDefault(new Date(), wr as Array<{ dow: number; start: string; end: string; rest: boolean }>)
+    if (!def) return // 今天休息/无下班时间 → 留给用户手填
+    startTime.value = def.startTime
+    endTime.value = def.endTime
   } catch (e) { console.error('[考勤] 加班默认时间填充失败', e) }
 }
 // 切历史类型 → 重置分页并加载
@@ -440,24 +401,19 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => window.removeEventListener('mochi:attendance:openApply', onOpenApply))
 
-// 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, slot?, time?}。
-type Prefill = { type?: AttType; date?: string; slot?: 'work' | 'off'; time?: string }
+// 打卡页点「补卡/请假」后的跨页预填。p = {type:'make_up'|'leave', date, time?}。
+type Prefill = { type?: AttType; date?: string; time?: string }
 function applyPrefill(p: Prefill | undefined): void {
   if (!p || (p.type !== 'make_up' && p.type !== 'leave')) return
   topTab.value = 'apply'
   tab.value = p.type
-  prefilled = true // 本次 tab 切换由打卡页预填触发，不清空补卡锁定
   if (p.type === 'make_up') {
-    // 补卡：预填该日期 + 正常上下班时间
-    const t = p.time && /^\d{2}:\d{2}$/.test(p.time) ? p.time : '09:00'
-    makeupDate.value = p.date || ''
-    makeupSlot.value = p.slot === 'off' ? 'off' : 'work'
-    punchTime.value = `${p.date}T${t}`
-    okMsg.value = '已按该日期预填补卡时间，请补充事由并选择审批人'
+    // 补卡：预填完整补卡时间（含日期），服务端自动判定槽位（纯逻辑见 attendance-logic.applyMakeupPrefill）。
+    const pre = applyMakeupPrefill({ type: p.type, date: p.date, time: p.time })
+    punchTime.value = pre.punchTime
+    okMsg.value = pre.okMsg
   } else if (p.type === 'leave') {
     // 请假：预填该日期区间
-    makeupDate.value = ''
-    makeupSlot.value = ''
     startTime.value = p.date || ''
     endTime.value = p.date || ''
     okMsg.value = '已按该日期预填请假区间，请选择类型并补充事由'
@@ -494,21 +450,9 @@ function onOpenApply(e: Event): void {
 
       <!-- 补卡 -->
       <template v-if="tab === 'make_up'">
-        <div class="at-row">
-          <div>
-            <label class="at-lab">被补日期 <i class="req">*</i></label>
-            <DateTimeInput v-model="makeupDate" :time="false" placeholder="选择被补日期" />
-          </div>
-          <div>
-            <label class="at-lab">补卡类型 <i class="req">*</i></label>
-            <div class="at-seg">
-              <button :class="{ on: makeupSlot === 'work' }" @click="makeupSlot = 'work'">补上班</button>
-              <button :class="{ on: makeupSlot === 'off' }" @click="makeupSlot = 'off'">补下班</button>
-            </div>
-          </div>
-        </div>
         <label class="at-lab">补卡时间 <i class="req">*</i></label>
-        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间（可跨天到次日凌晨）" />
+        <DateTimeInput v-model="punchTime" time placeholder="选择补卡时间（含日期，可跨天到次日凌晨）" />
+        <div class="at-tip">系统将根据补卡时间自动判定补上班或补下班</div>
       </template>
       <!-- 请假 / 调休 / 加班（共用时间段表单） -->
       <template v-else>
