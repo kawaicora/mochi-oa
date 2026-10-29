@@ -12,6 +12,5 @@ electron.vite.config.*.mjs
 .dsh-verify
 .doubao-workspace
 .ai-workspace
-tools
 .ringtestcur.txt
 
