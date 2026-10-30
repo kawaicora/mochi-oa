@@ -12,6 +12,12 @@
       },
       "args": ["."],
       "outputCapture": "std"
+    },
+    {
+      "name": "Attach to Electron",
+      "type": "node",
+      "request": "attach",
+      "port": 9229
     }
   ]
 }

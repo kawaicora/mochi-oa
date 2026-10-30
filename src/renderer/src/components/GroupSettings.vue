@@ -55,6 +55,7 @@ function flash(msg: string): void {
   document.body.appendChild(el)
   setTimeout(() => el.remove(), 2200)
 }
+const groupOwnerCompanyId = app.groups.find(g => g.id === app.groupSettingsId)?.companyId ?? null
 
 async function doSetAdmin(m: ServerGroupMember): Promise<void> {
   if (!window.confirm(`确定将 ${m.nick || m.username} 设为群管理员？`)) return
@@ -203,12 +204,17 @@ function opsOf(m: ServerGroupMember): string[] {
             {{ pickMode === 'add' ? '添加成员' : pickMode === 'invite' ? '邀请入群' : '转让群主' }}
             <button class="gs-close" @click="pickMode = null"><i class="fas fa-times"></i></button>
           </div>
-          <div class="gs-pick-list">
+          <div  class="gs-pick-list content-scroll">
             <div v-if="pickMode === 'transfer' && !transferTargets.length" class="gs-hint">没有可转让的成员</div>
-            <div v-else-if="pickMode !== 'transfer' && !candidates.length" class="gs-hint">没有可添加的公司成员</div>
-            <div v-for="u in (pickMode === 'transfer' ? transferTargets : candidates)" :key="u.userId" class="gs-pick-item" @click="doPick(u)">
+            <div v-else-if="pickMode !== 'transfer' && !candidates.length && groupOwnerCompanyId" class="gs-hint">没有可添加的公司成员</div>
+            <div v-else-if="pickMode !=='transfer' && !groupOwnerCompanyId && !app.friends.length" class="gs-hint">没有可添加好友成员 </div>
+            <div v-if="groupOwnerCompanyId" v-for="u in (pickMode === 'transfer' ? transferTargets : candidates)" :key="u.userId" class="gs-pick-item" @click="doPick(u)">
               <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="30" />
               <span>{{ u.nick || u.username }}</span>
+            </div>
+            <div v-else-if="!groupOwnerCompanyId" v-for="f in (pickMode === 'transfer' ? transferTargets : app.friends)" :key="f.userId" class="gs-pick-item" @click="doPick(f)">
+              <UserAvatar :nick="f.nick || f.username" :avatar="f.avatar" :size="30" />
+              <span>{{ f.nick || f.username }}</span>
             </div>
           </div>
         </div>

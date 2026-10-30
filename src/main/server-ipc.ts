@@ -450,7 +450,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverMessageHardDelete, (_e, conversationId, messageId) =>
     serverClient.hardDeleteMessage(Number(conversationId) || 0, String(messageId))
   )
-
+  
   // 好友
   ipcMain.handle(IpcChannels.serverFriends, () => serverClient.listFriends())
   ipcMain.handle(IpcChannels.serverHolidays, (_e, year) => serverClient.listHolidays(year ? Number(year) : undefined))
@@ -1285,7 +1285,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const buf = Buffer.from(b64, 'base64')
       const out = join(tmpdir(), `shot-${Date.now()}.png`)
       await writeFile(out, buf)
-      console.log("写入截图文件")
       if (screenshotWin && !screenshotWin.isDestroyed()) screenshotWin.close()
       sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, out)
       return { ok: true, path: out }

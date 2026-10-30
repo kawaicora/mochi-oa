@@ -8,7 +8,7 @@ import DeptAdmin from './DeptAdmin.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import type { OrgMember, Group, FriendItem } from '@shared/server-types'
 import type { ContactsScope } from './ContactsNav.vue'
-
+const doListMembers = true
 const props = defineProps<{ scope: ContactsScope; deptId: number | null }>()
 
 const app = useAppStore()
@@ -301,12 +301,13 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
       <div class="content-head"><i class="fas fa-user-plus"></i><span class="content-title">新的好友</span></div>
       <div class="content-scroll">
         <div class="form-block">
-          <div class="form-row">
+          <!-- 搜索服务器用户 -->
+          <div v-if="!doListMembers" class="form-row">
             <input v-model="friendKeyword" class="input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="doSearchFriend" />
             <button class="dt-btn dt-btn-primary" :disabled="friendSearching" @click="doSearchFriend"><i class="fas fa-search"></i> 搜索</button>
           </div>
-          <div class="form-hint">支持用户 ID、用户名、昵称搜索，选择目标后添加为好友。</div>
-          <div class="friend-results">
+          <div v-if="!doListMembers" class="form-hint">支持用户 ID、用户名、昵称搜索，选择目标后添加为好友。</div>
+          <div v-if="!doListMembers" class="friend-results">
             <div v-if="friendSearching" class="hint pad">搜索中…</div>
             <template v-else-if="friendResults.length">
               <div v-for="u in friendResults" :key="u.id" class="member-row" style="cursor:default">
@@ -320,6 +321,19 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
             </template>
             <div v-else-if="friendKeyword.trim()" class="hint pad">未找到匹配用户</div>
           </div>
+          <!-- 搜索服务器用户借宿 -->
+          <!-- 直接列出服务器所有用户 -->
+          <div  v-if="doListMembers" >
+            <div v-for="u in app.members" :key="u.userId" class="member-row" style="cursor:default">
+                <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="36" />
+                <div class="member-info">
+                  <div class="member-name">{{ u.nick || u.username }}</div>
+                  <div class="member-sub">@{{ u.username }} · ID {{ u.userId }}</div>
+                </div>
+                <button class="dt-btn dt-btn-primary" @click="doAddFriendUser({id: u.userId,username:u.username, nick:u.nick})"><i class="fas fa-user-plus"></i> 添加</button>
+            </div>
+          </div>
+          <!-- 直接列出服务器所有用户借宿 -->
         </div>
       </div>
     </template>
