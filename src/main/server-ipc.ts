@@ -19,6 +19,7 @@ import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
+
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
 
@@ -1284,6 +1285,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const buf = Buffer.from(b64, 'base64')
       const out = join(tmpdir(), `shot-${Date.now()}.png`)
       await writeFile(out, buf)
+      console.log("写入截图文件")
       if (screenshotWin && !screenshotWin.isDestroyed()) screenshotWin.close()
       sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, out)
       return { ok: true, path: out }

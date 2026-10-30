@@ -162,7 +162,7 @@ let readRoot: HTMLElement | null = null
 let readTimer: ReturnType<typeof setTimeout> | undefined
 /** 已上报的位置（按会话），避免滚动过程中重复上报同一个位置 */
 let sentRead = { convId: 0, id: 0 }
-
+const screenshot = ref(false)
 function ensureReadObserver(): void {
   const root = msgListEl.value
   if (!root) return
