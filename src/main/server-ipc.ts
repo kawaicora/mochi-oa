@@ -7,8 +7,7 @@ import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } f
 import { join, basename } from 'node:path'
 import { tmpdir, networkInterfaces } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
-import { existsSync, mkdirSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { existsSync} from 'node:fs'
 import { spawn } from 'node:child_process'
 import * as iconv from 'iconv-lite'
 import { setSystemProxy, clearSystemProxy } from './system-proxy'
@@ -129,7 +128,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 推送 → renderer
   serverClient.on('state', (s) => {
     sendToMainWindow(getMainWindow(), IpcEvents.serverState, s)
-    void console.log(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
+    console.log(`state connected=${s.connected} url=${s.serverUrl} user=${s.nick || s.username || ''} token=${s.token ? '有' : '无'}`)
     // 会话丢失（登出/被踢/过期/断线退回登录页）：主界面会切回登录页，
     // 多余的独立窗口（会议、任务详情、预览、远程…）必须一起关掉，否则会留下
     // 「已经退出登录，会议窗口还开着」这种拿着旧会话数据的窗口。
@@ -144,14 +143,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     // 上报出去只会给服务端留下一堆无主设备。
     const loggedIn = s.connected && s.userId != null
     if (loggedIn) {
-      void console.log(`startSysReport 启动（被控端系统上报）user=${s.username ?? ''} id=${s.userId}`)
+      console.log(`startSysReport 启动（被控端系统上报）user=${s.username ?? ''} id=${s.userId}`)
       startSysReport(async (p, onAck) => {
         try {
           const ack = await serverClient.devSys(p)
           // 服务端 ack 为 { ok, status }，normalizeAck 会把 status 归入 data，故从 ack.data.status 读取
           const status = (ack as { data?: { status?: string } }).data?.status ?? (ack?.ok ? 'updated' : 'lost')
           onAck?.(status)
-          // void console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
+          // console.log(`dev:sys deviceId=${p.deviceId} ack=${status}`)
           if (!ack?.ok || status === 'lost') {
             const info = (p.info ?? {}) as Record<string, unknown>
             const ips = (info.ips as Array<{ name?: string; address?: string; internal?: boolean }> | undefined) ?? []
@@ -159,19 +158,19 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
             const st = serverClient.state
             const regAck = await serverClient.devRegister({
               deviceId: p.deviceId,
-              name: String(info.hostname ?? '电脑').slice(0, 64),
-              os: `${info.type ?? ''} ${info.release ?? ''}`.trim().slice(0, 128),
+              name: String(info.hostname?.toString() ?? '电脑').slice(0, 64),
+              os: `${info.type?.toString() ?? ''} ${info.release?.toString() ?? ''}`.trim().slice(0, 128),
               ip: pub,
               username: st.nick || st.username || ''
             })
-            void console.log(`服务端返回 ${status}，已重发全量注册 regAck=${(regAck as { data?: { status?: string } }).data?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
+            console.log(`服务端返回 ${status}，已重发全量注册 regAck=${(regAck as { data?: { status?: string } }).data?.status ?? (regAck?.ok ? 'ok' : regAck?.error)}`)
           }
         } catch (e) {
-          void console.log(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
+          console.log(`dev:sys 上报异常: ${e instanceof Error ? e.message : String(e)}`)
         }
       })
     } else {
-      void console.log(`stopSysReport（${s.connected ? '已连接但未登录' : '未连接'}）`)
+      console.log(`stopSysReport（${s.connected ? '已连接但未登录' : '未连接'}）`)
       stopSysReport()
     }
   })

@@ -13,6 +13,7 @@ import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
 import { patchConsoleToFile } from './log-helper'
+import { checkUpdateJoin } from './check-update'
 /**
  * Linux 沙箱兜底（必须在 app ready 之前、越早越好）。
  *
@@ -325,6 +326,9 @@ app.whenReady().then(() => {
   })
 
   registerServerIpcHandlers(getMainWindow)
+  checkUpdateJoin().catch((err) => {
+    console.error("自动更新失败", err)
+  })
   createWindow()
   initNotifManager(showMainWindow, getMainWindow)
 
