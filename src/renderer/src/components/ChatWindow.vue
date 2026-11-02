@@ -1053,7 +1053,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           <button class="chat-tool" title="发送图片" @click="onPickImage"><i class="far fa-image"></i></button>
           <button class="chat-tool" title="发送视频" @click="onPickVideo"><i class="far fa-file-video"></i></button>
           <button class="chat-tool" title="发送音频" @click="onPickAudio"><i class="far fa-file-audio"></i></button>
-          <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button>
+          <!-- <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button> -->
           <button class="chat-tool" title="发送文件" @click="onPickFile"><i class="fas fa-paperclip"></i></button>
           <button class="chat-tool" title="发送文件夹" @click="onPickFolder"><i class="far fa-folder-open"></i></button>
         </div>
