@@ -373,12 +373,14 @@ async function onPickAudio(): Promise<void> {
 async function onScreenshot(): Promise<void> {
   if (sending.value) return
   const shot = await window.pantry.captureScreen()
+  console.log(`[screenshot] 截屏完成，dataUrl 长度=${shot?.dataUrl.length ?? 0} width=${shot?.width ?? 0} height=${shot?.height ?? 0}`)
   if (!shot) {
     flashToast('截屏失败')
     return
   }
   // 打开独立全屏截屏窗口；保存后主进程会回传临时 PNG 路径，由下方监听发送
   await window.pantry.openScreenshotWindow({ dataUrl: shot.dataUrl, width: shot.width, height: shot.height })
+  console.log(`[screenshot] 截屏窗口已打开`)
 }
 // 独立截屏窗口保存完成 → 把临时 PNG 发送到当前会话
 onMounted(() => {
@@ -387,6 +389,7 @@ onMounted(() => {
     sending.value = true
     try {
       await app.sendFile(path)
+      console.log(`[screenshot] 发送截图完成 -> ${path}`)
     } finally {
       sending.value = false
     }

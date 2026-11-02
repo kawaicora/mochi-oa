@@ -1284,8 +1284,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const buf = Buffer.from(b64, 'base64')
       const out = join(tmpdir(), `shot-${Date.now()}.png`)
       await writeFile(out, buf)
-      if (screenshotWin && !screenshotWin.isDestroyed()) screenshotWin.close()
+      console.log(`[screenshot] 保存截图 -> ${out} ${buf.length}B`)
+      if (screenshotWin && !screenshotWin.isDestroyed()){
+        screenshotWin.close()
+        console.log(`[screenshot] 截图窗口已关闭`)
+      }
+      
       sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, out)
+      console.log(`[screenshot] 保存截图完成事件 -> ${out} ${buf.length}B`)
       return { ok: true, path: out }
     } catch (e) {
       return { ok: false, error: String(e) }
