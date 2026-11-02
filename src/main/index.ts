@@ -12,7 +12,7 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
-
+import { patchConsoleToFile } from './log-helper'
 /**
  * Linux 沙箱兜底（必须在 app ready 之前、越早越好）。
  *
@@ -66,37 +66,8 @@ applyLinuxSandboxFallback()
 
 // ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
 // 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
-function safeStr(v: unknown): string {
-  if (typeof v === 'string') return v
-  try { const s = JSON.stringify(v); return s == null ? String(v) : s } catch { return String(v) }
-}
-function patchMainConsoleToFile(): void {
-  const file = () => {
-    const dir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    return join(dir, 'renderer-console.log')
-  }
-  const wrap = (fn: (...a: unknown[]) => void, tag: string) => {
-    const orig = fn.bind(console)
-    return (...args: unknown[]): void => {
-      orig(...args)
-      const line = `[${new Date().toISOString()}] [${tag}] ${args.map(safeStr).join(' ')}`
-      try { appendFileSync(file(), line + '\n', 'utf8') } catch { /* 忽略 */ }
-      // 转发到所有窗口渲染层控制台（Ctrl+Shift+I 可见），保证主进程日志也输出到控制台
-      try {
-        for (const wc of webContents.getAllWebContents()) {
-          if (!wc.isDestroyed()) wc.send('__main_console', line)
-        }
-      } catch { /* 忽略 */ }
-    }
-  }
-  console.log = wrap(console.log, 'main')
-  console.info = wrap(console.info, 'main-info')
-  console.warn = wrap(console.warn, 'main-warn')
-  console.error = wrap(console.error, 'main-error')
-  console.debug = wrap(console.debug, 'main-verbose') // verbose 也落盘 + 保留控制台输出
-}
-patchMainConsoleToFile()
+
+patchConsoleToFile()
 
 // ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log 且同时 console.error（统一到渲染层控制台），避免报错闪现丢失 ----
 function logMainError(tag: string, err: unknown): void {

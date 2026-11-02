@@ -75,7 +75,38 @@ export interface Ack {
   data?: unknown
 }
 
+export type AdvCategory = 'travel' | 'purchase' | 'daily' | 'project' | 'other'
+export type AdvStatus = 'pending' | 'approved' | 'rejected'
 
+export interface Draft {
+  category: AdvCategory
+  amount: number | null
+  reason: string
+  evidence: string[]
+  evidenceNames: string[]
+  approverIds: number[]
+  ccIds: number[]
+}
+
+export interface AdvanceRequest {
+  id: number
+  companyId: number
+  userId: number
+  category: AdvCategory
+  amount: number
+  reason: string
+  evidence: string[]
+  status: AdvStatus
+  approverIds: number[]
+  ccIds: number[]
+  approverId: number | null
+  approvalNote: string | null
+  approvedAt: string | null
+  createdAt: string
+  nick?: string
+  username?: string
+  viewed?: boolean
+}
 /** 服务端客户端状态（桥接到渲染进程） */
 export interface ServerClientState {
   connected: boolean

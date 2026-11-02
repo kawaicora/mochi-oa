@@ -88,6 +88,9 @@ onBeforeUnmount(() => {
 
 const selected = computed(() => app.selected)
 const myId = computed(() => server.state.userId)
+const canManageGroup = computed(()=> app.canManageGroup)
+
+
 
 // 群成员弹窗数据
 const groupMembers = ref<Array<{ userId: number; nick?: string; avatar?: string; online?: boolean; role: string }>>([])
@@ -162,7 +165,7 @@ let readRoot: HTMLElement | null = null
 let readTimer: ReturnType<typeof setTimeout> | undefined
 /** 已上报的位置（按会话），避免滚动过程中重复上报同一个位置 */
 let sentRead = { convId: 0, id: 0 }
-
+const screenshot = ref(false)
 function ensureReadObserver(): void {
   const root = msgListEl.value
   if (!root) return
@@ -590,7 +593,7 @@ function startGroupVideo(): void {
 
 function openMsgMenu(e: MouseEvent, id: string): void {
   e.preventDefault()
-  showMsgMenu.value = { id, x: e.clientX, y: e.clientY }
+  showMsgMenu.value = { id, x: e.clientX, y: e.clientY  }
 }
 
 function closeMsgMenu(): void {
@@ -1050,7 +1053,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           <button class="chat-tool" title="发送图片" @click="onPickImage"><i class="far fa-image"></i></button>
           <button class="chat-tool" title="发送视频" @click="onPickVideo"><i class="far fa-file-video"></i></button>
           <button class="chat-tool" title="发送音频" @click="onPickAudio"><i class="far fa-file-audio"></i></button>
-          <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button>
+          <!-- <button class="chat-tool" title="截屏发送" @click="onScreenshot"><i class="far fa-camera"></i></button> -->
           <button class="chat-tool" title="发送文件" @click="onPickFile"><i class="fas fa-paperclip"></i></button>
           <button class="chat-tool" title="发送文件夹" @click="onPickFolder"><i class="far fa-folder-open"></i></button>
         </div>
@@ -1097,7 +1100,8 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg && menuMsg.kind === 'image'" class="ctx-item" @click="onCopyImage"><i class="far fa-copy"></i> 复制图片</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
-      <button class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
+      <button v-if="menuMsg?.fromId == myId || 
+                    (canManageGroup && menuMsg?.type == 'group')" class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
     </div>
 
     <!-- 下载进度卡片：大文件下载期间给出明确反馈，避免"点了没反应"的错觉 -->

@@ -19,6 +19,7 @@ import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
+
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
 
@@ -449,7 +450,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverMessageHardDelete, (_e, conversationId, messageId) =>
     serverClient.hardDeleteMessage(Number(conversationId) || 0, String(messageId))
   )
-
+  
   // 好友
   ipcMain.handle(IpcChannels.serverFriends, () => serverClient.listFriends())
   ipcMain.handle(IpcChannels.serverHolidays, (_e, year) => serverClient.listHolidays(year ? Number(year) : undefined))
