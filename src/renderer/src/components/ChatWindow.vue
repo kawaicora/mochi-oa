@@ -388,8 +388,8 @@ onMounted(() => {
     if (!path || sending.value) return
     sending.value = true
     try {
+      console.log(`[screenshot] 开始发送截图 -> ${path}`)
       await app.sendFile(path)
-      console.log(`[screenshot] 发送截图完成 -> ${path}`)
     } finally {
       sending.value = false
     }
