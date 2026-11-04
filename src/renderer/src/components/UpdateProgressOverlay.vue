@@ -9,7 +9,7 @@ interface ProgressPayload {
 }
 
 interface StatePayload {
-  state: 'downloading' | 'installing' | 'error' | 'done'
+  state: string
   version?: string
   message?: string
 }
@@ -42,8 +42,8 @@ function onProgress(d: ProgressPayload): void {
   received.value = d.received
   total.value = d.total
   stateText.value = total.value > 0
-    ? `${fmtSize(received)} / ${fmtSize(total)}`
-    : `${fmtSize(received)}`
+    ? `${fmtSize(received.value)} / ${fmtSize(total.value)}`
+    : `${fmtSize(received.value)}`
 }
 
 function onState(d: StatePayload): void {

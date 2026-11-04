@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useServerStore } from '../stores/server'
 import { useRtcStore } from '../stores/rtc'
@@ -8,6 +8,7 @@ import DeptAdmin from './DeptAdmin.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import type { OrgMember, Group, FriendItem } from '@shared/server-types'
 import type { ContactsScope } from './ContactsNav.vue'
+// 标志：true=直接列出服务器所有用户；false=按关键词搜索（两种模式互不相干）
 const doListMembers = true
 const props = defineProps<{ scope: ContactsScope; deptId: number | null }>()
 
@@ -148,12 +149,27 @@ async function doJoinGroup(): Promise<void> {
   if (!joinGroupCode.value.trim()) return
   if (await run(() => app.joinGroup(joinGroupCode.value.trim()))) { showJoinGroup.value = false; joinGroupCode.value = '' }
 }
+// 列出服务器所有用户（serverMembers 空 companyId → 服务端返回全部，与公司无关）
+const listUsers = ref<Array<{ id: number; username: string; nick?: string; avatar?: string }>>([])
+async function loadAllUsers(): Promise<void> {
+  friendSearching.value = true
+  try {
+    const ack = await window.pantry.serverMembers(0)
+    const ms = (ack.data as { members?: Array<{ userId: number; username: string; nick?: string; avatar?: string }> } | undefined)?.members ?? []
+    listUsers.value = ms.map((m) => ({ id: m.userId, username: m.username, nick: m.nick, avatar: m.avatar }))
+  } catch {
+    listUsers.value = []
+  } finally {
+    friendSearching.value = false
+  }
+}
 async function doSearchFriend(): Promise<void> {
   const k = friendKeyword.value.trim()
   if (!k) { friendResults.value = []; return }
   friendSearching.value = true
   promptMsg.value = ''
   try {
+    // 搜索模式：走 user:search（跨公司关键字搜索），与"列出全部"互不相干
     friendResults.value = await app.searchUsers(k)
   } catch {
     friendResults.value = []
@@ -162,13 +178,24 @@ async function doSearchFriend(): Promise<void> {
     friendSearching.value = false
   }
 }
+// 是否已是好友（用于列表/搜索结果中置灰"已添加"）
+function isFriendOf(u: { id: number }): boolean {
+  return app.friends.some((f) => f.userId === u.id)
+}
 async function doAddFriendUser(u: { id: number; username: string; nick?: string }): Promise<void> {
   if (await run(() => app.addFriend(u.id))) {
     promptMsg.value = `已添加 ${u.nick || u.username}`
-    friendResults.value = []
     friendKeyword.value = ''
+    friendResults.value = []
+    // 列出模式下添加完重新拉取全部用户
+    if (doListMembers) void loadAllUsers()
   }
 }
+
+// 进入"新的好友"：列出模式自动拉取服务器全部用户
+onMounted(() => {
+  if (props.scope === 'newfriend' && doListMembers) void loadAllUsers()
+})
 
 // 右键
 function openMemberMenu(e: MouseEvent, user: OrgMember): void { e.preventDefault(); memberMenu.value = { user, x: e.clientX, y: e.clientY } }
@@ -301,39 +328,41 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
       <div class="content-head"><i class="fas fa-user-plus"></i><span class="content-title">新的好友</span></div>
       <div class="content-scroll">
         <div class="form-block">
-          <!-- 搜索服务器用户 -->
-          <div v-if="!doListMembers" class="form-row">
-            <input v-model="friendKeyword" class="input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="doSearchFriend" />
-            <button class="dt-btn dt-btn-primary" :disabled="friendSearching" @click="doSearchFriend"><i class="fas fa-search"></i> 搜索</button>
-          </div>
-          <div v-if="!doListMembers" class="form-hint">支持用户 ID、用户名、昵称搜索，选择目标后添加为好友。</div>
-          <div v-if="!doListMembers" class="friend-results">
+          <!-- 搜索模式：按关键词跨公司搜索 -->
+          <template v-if="!doListMembers">
+            <div class="form-row">
+              <input v-model="friendKeyword" class="input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="doSearchFriend" />
+              <button class="dt-btn dt-btn-primary" :disabled="friendSearching" @click="doSearchFriend"><i class="fas fa-search"></i> 搜索</button>
+            </div>
+            <div class="form-hint">支持用户 ID、用户名、昵称搜索，选择目标后添加为好友。</div>
             <div v-if="friendSearching" class="hint pad">搜索中…</div>
-            <template v-else-if="friendResults.length">
+            <template v-else>
               <div v-for="u in friendResults" :key="u.id" class="member-row" style="cursor:default">
                 <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="36" />
                 <div class="member-info">
                   <div class="member-name">{{ u.nick || u.username }}</div>
                   <div class="member-sub">@{{ u.username }} · ID {{ u.id }}</div>
                 </div>
-                <button class="dt-btn dt-btn-primary" @click="doAddFriendUser(u)"><i class="fas fa-user-plus"></i> 添加</button>
+                <button class="dt-btn" :class="isFriendOf(u) ? 'dt-btn-gray' : 'dt-btn-primary'" :disabled="isFriendOf(u)" @click="!isFriendOf(u) && doAddFriendUser(u)"><i class="fas fa-user-plus"></i> {{ isFriendOf(u) ? '已添加' : '添加' }}</button>
               </div>
+              <div v-if="friendKeyword.trim() && friendResults.length === 0" class="hint pad">未找到匹配用户</div>
             </template>
-            <div v-else-if="friendKeyword.trim()" class="hint pad">未找到匹配用户</div>
-          </div>
-          <!-- 搜索服务器用户借宿 -->
-          <!-- 直接列出服务器所有用户 -->
-          <div  v-if="doListMembers" >
-            <div v-for="u in app.members" :key="u.userId" class="member-row" style="cursor:default">
+          </template>
+          <!-- 列出模式：直接列出服务器所有用户（与公司无关） -->
+          <template v-else>
+            <div v-if="friendSearching" class="hint pad">加载中…</div>
+            <template v-else>
+              <div v-for="u in listUsers" :key="u.id" class="member-row" style="cursor:default">
                 <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="36" />
                 <div class="member-info">
                   <div class="member-name">{{ u.nick || u.username }}</div>
-                  <div class="member-sub">@{{ u.username }} · ID {{ u.userId }}</div>
+                  <div class="member-sub">@{{ u.username }} · ID {{ u.id }}</div>
                 </div>
-                <button class="dt-btn dt-btn-primary" @click="doAddFriendUser({id: u.userId,username:u.username, nick:u.nick})"><i class="fas fa-user-plus"></i> 添加</button>
-            </div>
-          </div>
-          <!-- 直接列出服务器所有用户借宿 -->
+                <button class="dt-btn" :class="isFriendOf(u) ? 'dt-btn-gray' : 'dt-btn-primary'" :disabled="isFriendOf(u)" @click="!isFriendOf(u) && doAddFriendUser(u)"><i class="fas fa-user-plus"></i> {{ isFriendOf(u) ? '已添加' : '添加' }}</button>
+              </div>
+              <div v-if="listUsers.length === 0" class="hint pad">暂无用户</div>
+            </template>
+          </template>
         </div>
       </div>
     </template>
@@ -548,6 +577,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 .dt-btn:hover { border-color: var(--dt-primary); color: var(--dt-primary); }
 .dt-btn-primary { background: var(--dt-primary); color: #fff; border-color: var(--dt-primary); }
 .dt-btn-primary:hover { color: #fff; }
+.dt-btn-gray { background: #f0f1f3; color: #a6aab2; border-color: #e6e8eb; cursor: not-allowed; }
 .dt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ctx-menu { position: fixed; background: #fff; border: 1px solid var(--dt-border-light); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14); padding: 4px; z-index: 120; }
 .ctx-item { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 6px; font-size: 13px; color: var(--dt-text); width: 100%; text-align: left; white-space: nowrap; }
