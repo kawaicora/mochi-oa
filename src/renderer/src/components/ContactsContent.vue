@@ -11,6 +11,7 @@ import type { ContactsScope } from './ContactsNav.vue'
 // 标志：true=直接列出服务器所有用户；false=按关键词搜索（两种模式互不相干）
 const doListMembers = true
 const props = defineProps<{ scope: ContactsScope; deptId: number | null }>()
+const emit = defineEmits<{ (e: 'change-scope', v: ContactsScope): void }>()
 
 const app = useAppStore()
 const srv = useServerStore()
@@ -192,9 +193,8 @@ async function doAddFriendUser(u: { id: number; username: string; nick?: string 
   }
 }
 
-// 进入"新的好友"：列出模式自动拉取服务器全部用户
 onMounted(() => {
-  if (props.scope === 'newfriend' && doListMembers) void loadAllUsers()
+  if (doListMembers) void loadAllUsers()
 })
 
 // 右键
@@ -307,7 +307,10 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 
     <!-- 我的好友 -->
     <template v-else-if="scope === 'friends'">
-      <div class="content-head"><i class="far fa-heart"></i><span class="content-title">我的好友</span></div>
+      <div class="content-head">
+        <i class="far fa-heart"></i><span class="content-title">我的好友</span>
+        <button class="dt-btn dt-btn-primary head-add" @click="emit('change-scope', 'newfriend')"><i class="fas fa-user-plus"></i> 添加好友</button>
+      </div>
       <div class="content-scroll">
         <div class="member-list">
           <div v-for="f in app.friends" :key="f.userId" class="member-row"
