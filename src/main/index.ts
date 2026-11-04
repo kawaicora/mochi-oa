@@ -12,7 +12,7 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
-import { patchConsoleToFile } from './log-helper'
+import { logMainError, logRendererConsole, patchConsoleToFile } from './log-helper'
 import { checkUpdateJoin } from './check-update'
 /**
  * Linux 沙箱兜底（必须在 app ready 之前、越早越好）。
@@ -64,60 +64,10 @@ function applyLinuxSandboxFallback(): void {
   }
 }
 applyLinuxSandboxFallback()
-
-// ---- 主进程 console 也统一落盘到 renderer-console.log（与渲染层一个文件，便于排查）----
-// 覆盖 log/warn/error/debug(verbose)，保留原控制台输出（orig 调用），追加到 userData/logs/renderer-console.log。
-
 patchConsoleToFile()
-
-// ---- 主进程全局错误日志：异常写入 userData/logs/main-error.log 且同时 console.error（统一到渲染层控制台），避免报错闪现丢失 ----
-function logMainError(tag: string, err: unknown): void {
-  const line = `[${new Date().toISOString()}] [${tag}] ${err instanceof Error ? (err.stack || err.message) : String(err)}`
-  console.error(line) // 走 patchMainConsoleToFile：终端 + renderer-console.log + 渲染层控制台
-  try {
-    const dir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    appendFileSync(join(dir, 'main-error.log'), line + '\n', 'utf8')
-  } catch {
-    /* 日志写入失败静默，避免二次抛错 */
-  }
-}
 process.on('uncaughtException', (e) => { logMainError('uncaughtException', e) })
 process.on('unhandledRejection', (r) => { logMainError('unhandledRejection', r) })
-// 渲染进程日志统一走 console → 下方 web-contents-created 的 console-message 捕获落盘，无需 logError IPC。
 
-// ---- 渲染层全量 console 落盘：userData/logs/renderer-console.log ----
-// 覆盖所有窗口（主窗口 / meeting / task / 通知等）的 console.log/warn/error。
-// 这样 WebRTC、socket 等渲染层日志无需开 DevTools 也能查看，排查直连/中转、ICE、协商过程。
-// 仅允许 console 输出（不改各渲染层代码），这里统一捕获转发到文件。
-function logRendererConsole(contents: Electron.WebContents): void {
-  const file = join(app.getPath('userData'), 'logs', 'renderer-console.log')
-  try {
-    const dir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  } catch { console.warn('[logRendererConsole] create log directory failed'); return }
-  // Electron 版本差异：新版事件为 (event: Event<{...params}>)；旧版为 (event, level, message, line, sourceId)。两者兼容。
-  contents.on('console-message', (event: unknown, ...rest: unknown[]) => {
-    try {
-      let level = 'info', message = '', line = '', source = ''
-      const ev = event as { params?: { level?: number; message?: string; lineNumber?: number; sourceId?: string }; level?: number; message?: string; lineNumber?: number; sourceId?: string }
-      if (ev && typeof ev === 'object' && 'params' in ev && ev.params) {
-        const p = ev.params
-        level = ['verbose', 'info', 'warning', 'error'][p.level ?? 1] ?? 'info'
-        message = p.message ?? ''
-        line = String(p.lineNumber ?? '')
-        source = p.sourceId ?? ''
-      } else {
-        const lvl = typeof ev.level === 'number' ? ev.level : Number(rest[0] ?? 1)
-        level = ['verbose', 'info', 'warning', 'error'][lvl] ?? 'info'
-        message = String(typeof ev.message === 'string' && ev.message ? ev.message : rest[1] ?? '')
-        line = String(ev.lineNumber ?? rest[3] ?? '')
-        source = String(ev.sourceId ?? rest[4] ?? '')
-      }
-      appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${message} (${source}:${line})\n`, 'utf8')
-    } catch { console.warn('[logRendererConsole] write log failed') }
-  })
-}
 app.on('web-contents-created', (_e, contents) => {
   logRendererConsole(contents)
 })

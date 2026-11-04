@@ -35,6 +35,7 @@ import type { SfuAckFields } from '../shared/sfu'
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   const wrapped = (_e: unknown, payload: T): void => listener(payload)
   ipcRenderer.on(channel, wrapped)
+  console.log(`[preload] 订阅通道 ${channel}，返回退订函数`)
   return () => ipcRenderer.removeListener(channel, wrapped)
 }
 
@@ -65,7 +66,11 @@ function toPlain(v: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
 // 统一包装 invoke：所有参数先深拷贝去 Proxy，再交给结构化克隆
 const _invoke = ipcRenderer.invoke.bind(ipcRenderer)
 const safeInvoke = (channel: string, ...args: unknown[]): Promise<any> =>
-  _invoke(channel, ...args.map((a) => toPlain(a)))
+{
+  console.log(`[preload] 调用通道 ${channel}，参数：`, args)
+  return _invoke(channel, ...args.map((a) => toPlain(a)))
+}
+ 
 
 const api = {
   // 应用 / 窗口
@@ -531,6 +536,12 @@ const api = {
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l),
   onDownloadProgress: (l: (d: { url: string; received: number; total: number; percent: number }) => void) =>
     subscribe<{ url: string; received: number; total: number; percent: number }>(IpcEvents.downloadProgress, l),
+  /** 自动更新下载进度：{ phase, received, total, percent } */
+  onUpdateProgress: (l: (d: { phase: string; received: number; total: number; percent: number }) => void) =>
+    subscribe<{ phase: string; received: number; total: number; percent: number }>(IpcEvents.updateProgress, l),
+  /** 自动更新状态：{ state, version?, message? } */
+  onUpdateState: (l: (d: { state: string; version?: string; message?: string }) => void) =>
+    subscribe<{ state: string; version?: string; message?: string }>(IpcEvents.updateState, l),
   onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l),
   // 消息右键「复制」：文本/表情 → writeClipboardText；图片 → writeClipboardImage(本地绝对路径)
   writeClipboardText: (text: string): Promise<{ ok: boolean; error?: string }> =>
