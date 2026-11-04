@@ -4,6 +4,7 @@ import { notify } from "./notif";
 import { spawn } from "node:child_process";
 import {
     mkdir,
+    open,
     readFile,
     rename,
     rm,
@@ -241,10 +242,10 @@ async function downloadInstaller(
 
     // 手动分块读取：既能统计下载进度（推送给渲染层进度条），
     // 又能让“长时间无响应”的 stallTimer 在字节到达时保持不中断。
+    // 注意：必须用顶部静态导入的 open，不能运行时 import("node:fs/promises")，
+    // 否则 Electron 主进程会报 "a dynamic import callback was not specified"。
     const reader = (response.body as any).getReader();
-    const fileHandle = await import("node:fs/promises").then(
-        (m) => m.open(tempPath, "w")
-    );
+    const fileHandle = await open(tempPath, "w");
 
     try {
         for (;;) {
