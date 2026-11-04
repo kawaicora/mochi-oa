@@ -536,6 +536,12 @@ const api = {
   onUploadProgress: (l: (d: { clientId: string; percent: number }) => void) => subscribe<{ clientId: string; percent: number }>(IpcEvents.uploadProgress, l),
   onDownloadProgress: (l: (d: { url: string; received: number; total: number; percent: number }) => void) =>
     subscribe<{ url: string; received: number; total: number; percent: number }>(IpcEvents.downloadProgress, l),
+  /** 自动更新下载进度：{ phase, received, total, percent } */
+  onUpdateProgress: (l: (d: { phase: string; received: number; total: number; percent: number }) => void) =>
+    subscribe<{ phase: string; received: number; total: number; percent: number }>(IpcEvents.updateProgress, l),
+  /** 自动更新状态：{ state, version?, message? } */
+  onUpdateState: (l: (d: { state: string; version?: string; message?: string }) => void) =>
+    subscribe<{ state: string; version?: string; message?: string }>(IpcEvents.updateState, l),
   onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l),
   // 消息右键「复制」：文本/表情 → writeClipboardText；图片 → writeClipboardImage(本地绝对路径)
   writeClipboardText: (text: string): Promise<{ ok: boolean; error?: string }> =>

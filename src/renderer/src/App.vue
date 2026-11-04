@@ -6,6 +6,7 @@ import { useRtcStore } from './stores/rtc'
 import LoginScreen from './components/LoginScreen.vue'
 import MainScreen from './components/MainScreen.vue'
 import IncomingCallModal from './components/IncomingCallModal.vue'
+import UpdateProgressOverlay from './components/UpdateProgressOverlay.vue'
 import RemoteViewer from './remote/RemoteViewer.vue'
 import { remoteSlaveState } from './remote/RemoteUi'
 import type { NewDeviceLoginEvent, SessionRevokedEvent } from '@shared/server-types'
@@ -88,6 +89,9 @@ onMounted(async () => {
 
   <!-- 全局通话：来电弹窗 + 全屏通话浮层 -->
   <IncomingCallModal />
+
+  <!-- 自动更新进度条浮层（右上角，优雅进度条） -->
+  <UpdateProgressOverlay />
 
   <!-- 远程控制：控制端查看面板 + 被控端被控提示 -->
   <RemoteViewer />

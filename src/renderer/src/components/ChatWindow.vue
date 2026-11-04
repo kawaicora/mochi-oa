@@ -383,8 +383,11 @@ async function onScreenshot(): Promise<void> {
   console.log(`[screenshot] 截屏窗口已打开`)
 }
 // 独立截屏窗口保存完成 → 把临时 PNG 发送到当前会话
+// 必须保存退订函数并在 onBeforeUnmount 移除，否则组件每次重新挂载都会叠加一个监听，
+// 保存截图时各监听各自 sendFile 一次 → 同一张截图被重复发送（ipcRenderer.on 不受发送窗口生命周期约束）。
+let offScreenshotSaved: (() => void) | null = null
 onMounted(() => {
-  window.pantry.onScreenshotSaved(async (path) => {
+  offScreenshotSaved = window.pantry.onScreenshotSaved(async (path) => {
     if (!path || sending.value) return
     sending.value = true
     try {
@@ -394,6 +397,10 @@ onMounted(() => {
       sending.value = false
     }
   })
+})
+onBeforeUnmount(() => {
+  offScreenshotSaved?.()
+  offScreenshotSaved = null
 })
 
 // ─── 拖放上传 ───

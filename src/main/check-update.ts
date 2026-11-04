@@ -1,9 +1,7 @@
 
-import { app, dialog } from "electron";
+import { app, BrowserWindow, webContents } from "electron";
+import { notify } from "./notif";
 import { spawn } from "node:child_process";
-import {
-    createWriteStream
-} from "node:fs";
 import {
     mkdir,
     readFile,
@@ -13,8 +11,6 @@ import {
     writeFile
 } from "node:fs/promises";
 import { join } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
 import semver from "semver";
 
 // 修改为你项目中 loadServerConfig 的实际导入路径
@@ -34,6 +30,21 @@ interface UpdateInfo {
 const UPDATE_DIR = "mochi-update";
 const INSTALLER_NAME = "update.exe";
 const SUCCESS_FLAG = "update-success.flag";
+
+// 下载“长时间无响应”判定（毫秒）：安装包可达数百 MB，这里不设整体硬超时，
+// 只在流式传输中断流（长时间收不到任何字节）时才中止，避免大文件被固定超时误杀。
+const NO_RESPONSE_TIMEOUT = 2 * 60 * 1000;
+
+// 主进程 → 渲染进程的更新进度 / 状态事件通道（渲染层 UpdateProgressOverlay 订阅）
+const UPDATE_PROGRESS_EVENT = "update:event:progress";
+const UPDATE_STATE_EVENT = "update:event:state";
+
+/** 把事件推送给所有打开的渲染窗口（登录窗/主窗都算）。 */
+function broadcastUpdate(channel: string, payload: unknown): void {
+    for (const wc of webContents.getAllWebContents()) {
+        wc.send(channel, payload);
+    }
+}
 
 let updatePromise: Promise<void> | null = null;
 
@@ -130,11 +141,25 @@ async function checkUpdate(): Promise<void> {
             serverUrl
         ).toString();
 
+        // 通知渲染层：发现新版本，开始下载
+        broadcastUpdate(UPDATE_STATE_EVENT, {
+            state: "downloading",
+            version: latestVersion,
+            message: `发现新版本 ${latestVersion}，开始下载更新包…`
+        });
+
         // 下载更新包
         const installerPath = await downloadInstaller(
             downloadUrl,
             headers
         );
+
+        // 通知渲染层：下载完成，准备安装
+        broadcastUpdate(UPDATE_STATE_EVENT, {
+            state: "installing",
+            version: latestVersion,
+            message: "下载完成，正在启动安装…"
+        });
 
         // 启动安装
         await installUpdate(installerPath);
@@ -142,11 +167,15 @@ async function checkUpdate(): Promise<void> {
     } catch (err) {
         console.error("自动更新失败", err);
 
-        await dialog.showMessageBox({
-            type: "warning",
+        broadcastUpdate(UPDATE_STATE_EVENT, {
+            state: "error",
+            message: err instanceof Error ? err.message : String(err)
+        });
+
+        notify({
+            kind: "system",
             title: "自动更新失败",
-            message: "更新过程中发生错误",
-            detail: err instanceof Error
+            body: err instanceof Error
                 ? err.message
                 : String(err)
         });
@@ -175,27 +204,89 @@ async function downloadInstaller(
 
     console.log("自动更新：开始下载", url);
 
-    const response = await fetch(url, {
-        method: "GET",
-        headers,
-        signal: AbortSignal.timeout(10 * 60 * 1000)
-    });
+    // 流式下载：不在整体下载上设置硬超时（安装包可达数百 MB，
+    // 固定超时会在正常下载中被意外打断）。仅在“长时间无响应”
+    // （超过 NO_RESPONSE_TIMEOUT 没有任何数据到达）时中断。
+    const controller = new AbortController();
+    const stallTimer = setTimeout(
+        () => controller.abort(),
+        NO_RESPONSE_TIMEOUT
+    );
+
+    let downloaded = 0;
+
+    let response: Response;
+
+    try {
+        response = await fetch(url, {
+            method: "GET",
+            headers,
+            signal: controller.signal
+        });
+    } catch (err) {
+        clearTimeout(stallTimer);
+        throw classifyDownloadError(err, url);
+    }
 
     if (!response.ok || !response.body) {
+        clearTimeout(stallTimer);
         throw new Error(
-            `下载更新包失败：HTTP ${response.status}`
+            `下载更新包失败：HTTP ${response.status} ${response.statusText}`
         );
     }
 
-    await pipeline(
-        Readable.fromWeb(response.body as any),
-        createWriteStream(tempPath)
+    const expectedSize = Number(
+        response.headers.get("content-length") ?? 0
     );
+
+    // 手动分块读取：既能统计下载进度（推送给渲染层进度条），
+    // 又能让“长时间无响应”的 stallTimer 在字节到达时保持不中断。
+    const reader = (response.body as any).getReader();
+    const fileHandle = await import("node:fs/promises").then(
+        (m) => m.open(tempPath, "w")
+    );
+
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+            await fileHandle.write(chunk);
+            downloaded += chunk.length;
+            if (expectedSize > 0) {
+                broadcastUpdate(UPDATE_PROGRESS_EVENT, {
+                    phase: "download",
+                    received: downloaded,
+                    total: expectedSize,
+                    percent: Math.min(
+                        100,
+                        Math.round((downloaded / expectedSize) * 100)
+                    )
+                });
+            }
+        }
+    } catch (err) {
+        throw classifyDownloadError(err, url);
+    } finally {
+        clearTimeout(stallTimer);
+        await fileHandle.close().catch(() => {});
+        void reader.cancel().catch(() => {});
+    }
 
     const fileStat = await stat(tempPath);
 
     if (fileStat.size <= 0) {
         throw new Error("下载的更新包为空");
+    }
+
+    if (
+        expectedSize > 0 &&
+        fileStat.size !== expectedSize
+    ) {
+        await rm(tempPath, { force: true });
+        throw new Error(
+            `下载的更新包不完整：期望 ${expectedSize} 字节，实际 ${fileStat.size} 字节`
+        );
     }
 
     await rm(installerPath, { force: true });
@@ -207,6 +298,46 @@ async function downloadInstaller(
     );
 
     return installerPath;
+}
+
+/**
+ * 将下载过程中的异常归类为对用户友好的中文提示。
+ */
+function classifyDownloadError(
+    err: unknown,
+    url: string
+): Error {
+    if (err instanceof Error && err.name === "AbortError") {
+        return new Error(
+            `下载更新包超时（长时间无响应）：${url}`
+        );
+    }
+
+    if (err instanceof Error && "cause" in err) {
+        const cause = (err as { cause?: { code?: string } }).cause;
+        if (cause && (cause.code === "ECONNREFUSED" || cause.code === "ENOTFOUND")) {
+            return new Error(
+                `无法连接下载服务器（${cause.code}）：${url}`
+            );
+        }
+        if (cause && cause.code === "ECONNRESET") {
+            return new Error(
+                `下载连接被重置：${url}，请稍后重试`
+            );
+        }
+    }
+
+    if (err instanceof Error && err.name === "TimeoutError") {
+        return new Error(
+            `下载更新包超时：${url}`
+        );
+    }
+
+    return new Error(
+        err instanceof Error
+            ? `下载更新包失败：${err.message}`
+            : `下载更新包失败：${String(err)}`
+    );
 }
 
 /**
@@ -249,11 +380,10 @@ async function installUpdate(
 
         await rm(flagPath, { force: true });
 
-        await dialog.showMessageBox({
-            type: "error",
+        notify({
+            kind: "system",
             title: "更新失败",
-            message: "无法启动安装程序",
-            detail: err.message
+            body: "无法启动安装程序：" + err.message
         });
     });
 
@@ -279,11 +409,10 @@ export async function checkUpdateSuccess(): Promise<void> {
 
         await rm(flagPath, { force: true });
 
-        await dialog.showMessageBox({
-            type: "info",
+        notify({
+            kind: "system",
             title: "更新完成",
-            message: "程序已成功更新",
-            detail: `当前版本：${app.getVersion()}`
+            body: `程序已成功更新，当前版本：${app.getVersion()}`
         });
 
     } catch {
