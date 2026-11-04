@@ -32,10 +32,6 @@ const UPDATE_DIR = "mochi-update";
 const INSTALLER_NAME = "update.exe";
 const SUCCESS_FLAG = "update-success.flag";
 
-// 下载“长时间无响应”判定（毫秒）：安装包可达数百 MB，这里不设整体硬超时，
-// 只在流式传输中断流（长时间收不到任何字节）时才中止，避免大文件被固定超时误杀。
-const NO_RESPONSE_TIMEOUT = 2 * 60 * 1000;
-
 // 主进程 → 渲染进程的更新进度 / 状态事件通道（渲染层 UpdateProgressOverlay 订阅）
 const UPDATE_PROGRESS_EVENT = "update:event:progress";
 const UPDATE_STATE_EVENT = "update:event:state";
@@ -205,15 +201,8 @@ async function downloadInstaller(
 
     console.log("自动更新：开始下载", url);
 
-    // 流式下载：不在整体下载上设置硬超时（安装包可达数百 MB，
-    // 固定超时会在正常下载中被意外打断）。仅在“长时间无响应”
-    // （超过 NO_RESPONSE_TIMEOUT 没有任何数据到达）时中断。
-    const controller = new AbortController();
-    const stallTimer = setTimeout(
-        () => controller.abort(),
-        NO_RESPONSE_TIMEOUT
-    );
-
+    // 流式下载：不设任何超时（安装包可达数百 MB，避免正常下载被超时误杀），
+    // 下载完成后通过 Content-Length 校验完整性。
     let downloaded = 0;
 
     let response: Response;
@@ -221,16 +210,13 @@ async function downloadInstaller(
     try {
         response = await fetch(url, {
             method: "GET",
-            headers,
-            signal: controller.signal
+            headers
         });
     } catch (err) {
-        clearTimeout(stallTimer);
         throw classifyDownloadError(err, url);
     }
 
     if (!response.ok || !response.body) {
-        clearTimeout(stallTimer);
         throw new Error(
             `下载更新包失败：HTTP ${response.status} ${response.statusText}`
         );
@@ -240,8 +226,7 @@ async function downloadInstaller(
         response.headers.get("content-length") ?? 0
     );
 
-    // 手动分块读取：既能统计下载进度（推送给渲染层进度条），
-    // 又能让“长时间无响应”的 stallTimer 在字节到达时保持不中断。
+    // 手动分块读取：统计下载进度（推送给渲染层进度条）。
     // 注意：必须用顶部静态导入的 open，不能运行时 import("node:fs/promises")，
     // 否则 Electron 主进程会报 "a dynamic import callback was not specified"。
     const reader = (response.body as any).getReader();
@@ -269,7 +254,6 @@ async function downloadInstaller(
     } catch (err) {
         throw classifyDownloadError(err, url);
     } finally {
-        clearTimeout(stallTimer);
         await fileHandle.close().catch(() => {});
         void reader.cancel().catch(() => {});
     }
