@@ -1,5 +1,5 @@
 <script lang="ts">
-export type ContactsScope = 'friends' | 'newfriend' | 'invites' | 'create' | 'org' | 'groups'
+export type ContactsScope = 'friends' | 'invites' | 'create' | 'org' | 'groups'
 </script>
 
 <script setup lang="ts">
@@ -20,7 +20,6 @@ const app = useAppStore()
 const subTabs: { key: ContactsScope; label: string; icon: string }[] = [
   { key: 'groups', label: '群聊', icon: 'fas fa-users' },
   { key: 'friends', label: '我的好友', icon: 'far fa-heart' },
-  { key: 'newfriend', label: '新的好友', icon: 'fas fa-user-plus' },
   { key: 'invites', label: '企业/团队邀请', icon: 'far fa-envelope' },
   { key: 'create', label: '创建或加入企业/团队', icon: 'fas fa-building' }
 ]

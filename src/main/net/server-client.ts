@@ -536,6 +536,7 @@ export class ServerClient extends EventEmitter {
     socket.on('group:added', (d: { groupId: number }) => this.emit('groupAdded', d))
     socket.on('group:removed', (d: { groupId: number }) => this.emit('groupRemoved', d))
     socket.on('friends:updated', () => this.emit('friendsUpdated'))
+    socket.on('friend:request', (d: unknown) => this.emit('friendRequest', d))
     socket.on('holiday:updated', () => this.emit('holidaysUpdated'))
     socket.on('task:tasksUpdated', (d: { companyId?: number }) => this.emit('tasksUpdated', d))
     socket.on('task:projectsUpdated', (d: { companyId?: number }) => this.emit('projectsUpdated', d))
@@ -1101,6 +1102,26 @@ export class ServerClient extends EventEmitter {
   async removeFriend(userId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'friend:remove', { userId })
+  }
+
+  async listFriendRequests(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'friend:requests', {})
+  }
+
+  async respondFriendRequest(requestId: number, accept: boolean): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'friend:respond', { requestId, accept })
+  }
+
+  async requestJoinGroup(groupId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'group:requestJoin', { groupId })
+  }
+
+  async requestJoinCompany(companyId: number): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'company:requestJoin', { companyId })
   }
 
   // ─── CSV 导入 ───────────────────────────────────────────

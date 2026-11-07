@@ -96,6 +96,10 @@ export const IpcChannels = {
   serverFriends: 'server:friends',
   serverFriendAdd: 'server:friend:add',
   serverFriendRemove: 'server:friend:remove',
+  serverFriendRequests: 'server:friend:requests',
+  serverFriendRespond: 'server:friend:respond',
+  serverGroupRequestJoin: 'server:group:requestJoin',
+  serverCompanyRequestJoin: 'server:company:requestJoin',
 
   // 假期（全局日历：法定/调休/自定义，多端同步）
   serverHolidays: 'server:holidays',
@@ -447,6 +451,7 @@ export const IpcEvents = {
   groupAdded: 'server:event:group:added',
   groupRemoved: 'server:event:group:removed',
   friendsUpdated: 'server:event:friends:updated',
+  friendRequest: 'server:event:friend:request',
   holidaysUpdated: 'server:event:holidays:updated',
   tasksUpdated: 'server:event:tasks:updated',
   projectsUpdated: 'server:event:projects:updated',

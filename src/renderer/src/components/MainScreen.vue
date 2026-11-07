@@ -313,7 +313,7 @@ function openJoin(): void {
       <!-- 2.3 大内容区 -->
       <div class="content">
         <template v-if="nav === 'message'"><ChatWindow /></template>
-        <template v-else-if="nav === 'contacts'"><ContactsContent :scope="cScope" :dept-id="cDept" /></template>
+        <template v-else-if="nav === 'contacts'"><ContactsContent :scope="cScope" :dept-id="cDept" @change-scope="(s: ContactsScope) => { cScope = s; cDept = null }" /></template>
         <template v-else-if="nav === 'meeting'">
           <div class="m-content">
             <div class="m-big"><i class="fas fa-video"></i></div>

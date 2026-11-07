@@ -611,9 +611,17 @@ function closeMsgMenu(): void {
   showEmoji.value = false
 }
 
+// 撤回消息确认弹窗
+const recallConfirmId = ref<string | null>(null)
+
 async function onDelete(messageId: string): Promise<void> {
   closeMsgMenu()
-  await app.deleteMessage(messageId)
+  recallConfirmId.value = messageId
+}
+async function confirmRecall(): Promise<void> {
+  const id = recallConfirmId.value
+  recallConfirmId.value = null
+  if (id) await app.deleteMessage(id)
 }
 
 
@@ -1155,6 +1163,18 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 
     <!-- 群设置 -->
     <GroupSettings v-if="app.groupSettingsOpen" />
+
+    <!-- 撤回消息确认 -->
+    <div v-if="recallConfirmId" class="recall-mask" @click.self="recallConfirmId = null">
+      <div class="recall-box">
+        <div class="recall-title">确认撤回消息？</div>
+        <div class="recall-desc">撤回后对方将看不到这条消息，此操作不可恢复。</div>
+        <div class="recall-btns">
+          <button class="dt-btn" @click="recallConfirmId = null">取消</button>
+          <button class="dt-btn dt-btn-danger" @click="confirmRecall">确认撤回</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -1838,5 +1858,40 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 }
 .ctx-item:hover {
   background: var(--dt-hover);
+}
+
+/* 撤回消息确认弹窗 */
+.recall-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+.recall-box {
+  width: 340px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+.recall-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dt-text);
+  margin-bottom: 8px;
+}
+.recall-desc {
+  font-size: 13px;
+  color: var(--dt-text-3);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.recall-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>
