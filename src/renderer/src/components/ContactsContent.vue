@@ -8,8 +8,6 @@ import DeptAdmin from './DeptAdmin.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import type { OrgMember, Group, FriendItem } from '@shared/server-types'
 import type { ContactsScope } from './ContactsNav.vue'
-// 标志：true=直接列出服务器所有用户；false=按关键词搜索（两种模式互不相干）
-const doListMembers = true
 const props = defineProps<{ scope: ContactsScope; deptId: number | null }>()
 const emit = defineEmits<{ (e: 'change-scope', v: ContactsScope): void }>()
 
@@ -111,17 +109,154 @@ async function copyJoinCode(): Promise<void> {
 // 表单
 const newCompanyName = ref('')
 const joinCompanyCode = ref('')
-const newGroupName = ref('')
-const joinGroupCode = ref('')
-const createGroupDept = ref<number>(0)
-const friendKeyword = ref('')
-const friendResults = ref<Array<{ id: number; username: string; nick?: string; avatar?: string }>>([])
-const friendSearching = ref(false)
 const showCreateCompany = ref(false)
 const showJoinCompany = ref(false)
 const showCreateDept = ref(false)
-const showCreateGroup = ref(false)
-const showJoinGroup = ref(false)
+
+// ── 右上角「+」快捷操作弹窗 ──
+const showQuickAdd = ref(false)
+const quickAddTab = ref<'addFriend' | 'joinGroup' | 'createGroup' | 'joinCompany' | 'createCompany' | 'joinMeeting' | 'createMeeting'>('addFriend')
+const qJoinCode = ref('')
+const qGroupName = ref('')
+const qSelectedUsers = ref<Set<number>>(new Set())
+const qFriendKeyword = ref('')
+const qFriendResults = ref<Array<{ id: number; username: string; nick?: string; avatar?: string }>>([])
+const qFriendSearching = ref(false)
+// 群搜索
+const qGroupKeyword = ref('')
+const qGroupResults = ref<Array<{ id: number; name: string; companyId: number; code: string; joined: boolean }>>([])
+const qGroupSearching = ref(false)
+// 公司搜索
+const qCompanyKeyword = ref('')
+const qCompanyResults = ref<Array<{ id: number; name: string; code: string; joined: boolean }>>([])
+const qCompanySearching = ref(false)
+// 创建公司
+const qNewCompanyName = ref('')
+
+function openQuickAdd(tab: typeof quickAddTab.value): void {
+  quickAddTab.value = tab
+  showQuickAdd.value = true
+  qJoinCode.value = ''
+  qGroupName.value = ''
+  qSelectedUsers.value = new Set()
+  qFriendKeyword.value = ''
+  qFriendResults.value = []
+  qGroupKeyword.value = ''
+  qGroupResults.value = []
+  qCompanyKeyword.value = ''
+  qCompanyResults.value = []
+  qNewCompanyName.value = ''
+}
+
+// 可选成员列表：好友 + 公司成员（去重）
+interface PickUser { id: number; username: string; nick?: string; avatar?: string }
+const pickUsers = computed<PickUser[]>(() => {
+  const map = new Map<number, PickUser>()
+  for (const f of app.friends) {
+    map.set(f.userId, { id: f.userId, username: f.username, nick: f.nick, avatar: f.avatar })
+  }
+  for (const m of app.members) {
+    if (!map.has(m.userId)) {
+      map.set(m.userId, { id: m.userId, username: m.username, nick: m.nick, avatar: m.avatar })
+    }
+  }
+  return [...map.values()]
+})
+
+function togglePickUser(id: number): void {
+  const s = new Set(qSelectedUsers.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  qSelectedUsers.value = s
+}
+
+async function qDoJoinGroup(): Promise<void> {
+  if (!qJoinCode.value.trim()) return
+  const ok = await run(() => app.joinGroup(qJoinCode.value.trim()))
+  if (ok) showQuickAdd.value = false
+}
+async function qDoCreateGroup(): Promise<void> {
+  if (!qGroupName.value.trim()) return
+  const ok = await run(() => app.createGroup(qGroupName.value.trim(), undefined, [...qSelectedUsers.value]))
+  if (ok) showQuickAdd.value = false
+}
+async function qDoSearchFriend(): Promise<void> {
+  const k = qFriendKeyword.value.trim()
+  if (!k) { qFriendResults.value = []; return }
+  qFriendSearching.value = true
+  try {
+    qFriendResults.value = await app.searchUsers(k)
+  } catch {
+    qFriendResults.value = []
+  } finally {
+    qFriendSearching.value = false
+  }
+}
+async function qDoAddFriend(u: PickUser): Promise<void> {
+  const r = await app.addFriend(u.id)
+  if (r.ok) {
+    if (r.direct) {
+      qFriendKeyword.value = ''
+      qFriendResults.value = []
+    } else {
+      // 申请已发送，标记为待发送状态
+      qFriendResults.value = qFriendResults.value.filter((x) => x.id !== u.id)
+      promptMsg.value = `已向 ${u.nick || u.username} 发送好友申请`
+    }
+  }
+}
+function qIsFriendOf(u: PickUser): boolean {
+  return app.friends.some((f) => f.userId === u.id)
+}
+
+// 群搜索
+async function qDoSearchGroups(): Promise<void> {
+  const k = qGroupKeyword.value.trim()
+  qGroupSearching.value = true
+  try {
+    const ack = await window.pantry.serverSearchGroups(undefined, k)
+    qGroupResults.value = (ack.data as { groups?: typeof qGroupResults.value })?.groups ?? []
+  } catch {
+    qGroupResults.value = []
+  } finally {
+    qGroupSearching.value = false
+  }
+}
+async function qDoRequestJoinGroup(gid: number): Promise<void> {
+  const ack = await window.pantry.serverGroupRequestJoin(gid)
+  if (ack.ok) {
+    qGroupResults.value = qGroupResults.value.filter((g) => g.id !== gid)
+    promptMsg.value = '已发送加入申请，等待群主/管理员同意'
+  }
+}
+
+// 公司搜索
+async function qDoSearchCompanies(): Promise<void> {
+  const k = qCompanyKeyword.value.trim()
+  qCompanySearching.value = true
+  try {
+    const ack = await window.pantry.serverSearchCompanies(k)
+    qCompanyResults.value = (ack.data as { companies?: typeof qCompanyResults.value })?.companies ?? []
+  } catch {
+    qCompanyResults.value = []
+  } finally {
+    qCompanySearching.value = false
+  }
+}
+async function qDoRequestJoinCompany(cid: number): Promise<void> {
+  const ack = await window.pantry.serverCompanyRequestJoin(cid)
+  if (ack.ok) {
+    qCompanyResults.value = qCompanyResults.value.filter((c) => c.id !== cid)
+    promptMsg.value = '已发送加入申请，等待管理员同意'
+  }
+}
+async function qDoCreateCompany(): Promise<void> {
+  if (!qNewCompanyName.value.trim()) return
+  const r = await app.createCompany(qNewCompanyName.value.trim())
+  if (r.ok) {
+    showQuickAdd.value = false
+  }
+}
 
 // 成员右键菜单
 const memberMenu = ref<{ user: OrgMember; x: number; y: number } | null>(null)
@@ -141,60 +276,9 @@ async function doJoinCompany(): Promise<void> {
   if (!joinCompanyCode.value.trim()) return
   if (await run(() => app.joinCompany(joinCompanyCode.value.trim()))) { showJoinCompany.value = false; joinCompanyCode.value = '' }
 }
-async function doCreateGroup(): Promise<void> {
-  if (!newGroupName.value.trim()) return
-  const dept = createGroupDept.value === 0 ? undefined : Number(createGroupDept.value)
-  if (await run(() => app.createGroup(newGroupName.value.trim(), dept))) { showCreateGroup.value = false; newGroupName.value = '' }
-}
-async function doJoinGroup(): Promise<void> {
-  if (!joinGroupCode.value.trim()) return
-  if (await run(() => app.joinGroup(joinGroupCode.value.trim()))) { showJoinGroup.value = false; joinGroupCode.value = '' }
-}
-// 列出服务器所有用户（serverMembers 空 companyId → 服务端返回全部，与公司无关）
-const listUsers = ref<Array<{ id: number; username: string; nick?: string; avatar?: string }>>([])
-async function loadAllUsers(): Promise<void> {
-  friendSearching.value = true
-  try {
-    const ack = await window.pantry.serverMembers(0)
-    const ms = (ack.data as { members?: Array<{ userId: number; username: string; nick?: string; avatar?: string }> } | undefined)?.members ?? []
-    listUsers.value = ms.map((m) => ({ id: m.userId, username: m.username, nick: m.nick, avatar: m.avatar }))
-  } catch {
-    listUsers.value = []
-  } finally {
-    friendSearching.value = false
-  }
-}
-async function doSearchFriend(): Promise<void> {
-  const k = friendKeyword.value.trim()
-  if (!k) { friendResults.value = []; return }
-  friendSearching.value = true
-  promptMsg.value = ''
-  try {
-    // 搜索模式：走 user:search（跨公司关键字搜索），与"列出全部"互不相干
-    friendResults.value = await app.searchUsers(k)
-  } catch {
-    friendResults.value = []
-    promptMsg.value = '搜索失败，请重试'
-  } finally {
-    friendSearching.value = false
-  }
-}
-// 是否已是好友（用于列表/搜索结果中置灰"已添加"）
-function isFriendOf(u: { id: number }): boolean {
-  return app.friends.some((f) => f.userId === u.id)
-}
-async function doAddFriendUser(u: { id: number; username: string; nick?: string }): Promise<void> {
-  if (await run(() => app.addFriend(u.id))) {
-    promptMsg.value = `已添加 ${u.nick || u.username}`
-    friendKeyword.value = ''
-    friendResults.value = []
-    // 列出模式下添加完重新拉取全部用户
-    if (doListMembers) void loadAllUsers()
-  }
-}
 
 onMounted(() => {
-  if (doListMembers) void loadAllUsers()
+  void app.refreshFriendRequests()
 })
 
 // 右键
@@ -309,9 +393,27 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
     <template v-else-if="scope === 'friends'">
       <div class="content-head">
         <i class="far fa-heart"></i><span class="content-title">我的好友</span>
-        <button class="dt-btn dt-btn-primary head-add" @click="emit('change-scope', 'newfriend')"><i class="fas fa-user-plus"></i> 添加好友</button>
+        <button class="dt-btn dt-btn-primary head-add" @click="openQuickAdd('addFriend')"><i class="fas fa-plus"></i></button>
       </div>
       <div class="content-scroll">
+        <!-- 待处理好友申请 -->
+        <template v-if="app.friendRequests.length">
+          <div class="block-title">新的申请（{{ app.friendRequests.length }}）</div>
+          <div class="member-list" style="margin-bottom:16px">
+            <div v-for="r in app.friendRequests" :key="r.id" class="member-row">
+              <UserAvatar :nick="r.fromNick || r.fromName" :avatar="r.fromAvatar" :size="36" />
+              <div class="member-info">
+                <div class="member-name">{{ r.fromNick || r.fromName }}</div>
+                <div class="member-sub">@{{ r.fromName }} 请求添加你为好友</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="dt-btn dt-btn-primary" @click="app.respondFriendRequest(r.id, true)"><i class="fas fa-check"></i> 同意</button>
+                <button class="dt-btn" @click="app.respondFriendRequest(r.id, false)"><i class="fas fa-times"></i> 拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div class="block-title">全部好友（{{ app.friends.length }}）</div>
         <div class="member-list">
           <div v-for="f in app.friends" :key="f.userId" class="member-row"
                @contextmenu.prevent="openFriendMenu($event, f)" @click="app.openDm(f.userId, f.nick || f.username)">
@@ -321,51 +423,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
               <div class="member-sub"><i class="fas fa-user"></i> {{ f.username }}</div>
             </div>
           </div>
-          <div v-if="app.friends.length === 0" class="hint">暂无好友，可在「新的好友」中添加</div>
-        </div>
-      </div>
-    </template>
-
-    <!-- 新的好友 -->
-    <template v-else-if="scope === 'newfriend'">
-      <div class="content-head"><i class="fas fa-user-plus"></i><span class="content-title">新的好友</span></div>
-      <div class="content-scroll">
-        <div class="form-block">
-          <!-- 搜索模式：按关键词跨公司搜索 -->
-          <template v-if="!doListMembers">
-            <div class="form-row">
-              <input v-model="friendKeyword" class="input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="doSearchFriend" />
-              <button class="dt-btn dt-btn-primary" :disabled="friendSearching" @click="doSearchFriend"><i class="fas fa-search"></i> 搜索</button>
-            </div>
-            <div class="form-hint">支持用户 ID、用户名、昵称搜索，选择目标后添加为好友。</div>
-            <div v-if="friendSearching" class="hint pad">搜索中…</div>
-            <template v-else>
-              <div v-for="u in friendResults" :key="u.id" class="member-row" style="cursor:default">
-                <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="36" />
-                <div class="member-info">
-                  <div class="member-name">{{ u.nick || u.username }}</div>
-                  <div class="member-sub">@{{ u.username }} · ID {{ u.id }}</div>
-                </div>
-                <button class="dt-btn" :class="isFriendOf(u) ? 'dt-btn-gray' : 'dt-btn-primary'" :disabled="isFriendOf(u)" @click="!isFriendOf(u) && doAddFriendUser(u)"><i class="fas fa-user-plus"></i> {{ isFriendOf(u) ? '已添加' : '添加' }}</button>
-              </div>
-              <div v-if="friendKeyword.trim() && friendResults.length === 0" class="hint pad">未找到匹配用户</div>
-            </template>
-          </template>
-          <!-- 列出模式：直接列出服务器所有用户（与公司无关） -->
-          <template v-else>
-            <div v-if="friendSearching" class="hint pad">加载中…</div>
-            <template v-else>
-              <div v-for="u in listUsers" :key="u.id" class="member-row" style="cursor:default">
-                <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="36" />
-                <div class="member-info">
-                  <div class="member-name">{{ u.nick || u.username }}</div>
-                  <div class="member-sub">@{{ u.username }} · ID {{ u.id }}</div>
-                </div>
-                <button class="dt-btn" :class="isFriendOf(u) ? 'dt-btn-gray' : 'dt-btn-primary'" :disabled="isFriendOf(u)" @click="!isFriendOf(u) && doAddFriendUser(u)"><i class="fas fa-user-plus"></i> {{ isFriendOf(u) ? '已添加' : '添加' }}</button>
-              </div>
-              <div v-if="listUsers.length === 0" class="hint pad">暂无用户</div>
-            </template>
-          </template>
+          <div v-if="app.friends.length === 0" class="hint">暂无好友，点击右上角 + 添加</div>
         </div>
       </div>
     </template>
@@ -399,29 +457,26 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 
     <!-- 群聊（独立：不在公司内也可创建/加入群） -->
     <template v-else-if="scope === 'groups'">
-      <div class="content-head"><i class="fas fa-users"></i><span class="content-title">群聊</span></div>
+      <div class="content-head">
+        <i class="fas fa-users"></i><span class="content-title">群聊</span>
+        <button class="dt-btn dt-btn-primary head-add" @click="openQuickAdd('joinGroup')"><i class="fas fa-plus"></i></button>
+      </div>
       <div class="content-scroll">
-        <div class="card">
-          <div class="card-title"><i class="fas fa-plus"></i> 创建群</div>
-          <div class="form-row">
-            <input v-model="newGroupName" class="input" placeholder="群名称" maxlength="64" />
-            <button class="dt-btn dt-btn-primary" :disabled="!newGroupName.trim()" @click="doCreateGroup">创建</button>
-          </div>
-          <div v-if="app.departments.length" class="form-row" style="margin-top:10px">
-            <select v-model="createGroupDept" class="input">
-              <option :value="0">不挂部门</option>
-              <option v-for="d in app.departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-            </select>
-          </div>
-          <div class="form-hint">不在公司内也可以创建群；在公司内可将群挂到指定部门。</div>
-        </div>
-        <div class="card">
-          <div class="card-title"><i class="fas fa-sign-in-alt"></i> 加入群</div>
-          <div class="form-row">
-            <input v-model="joinGroupCode" class="input" placeholder="输入群加入码" maxlength="32" />
-            <button class="dt-btn dt-btn-primary" :disabled="!joinGroupCode.trim()" @click="doJoinGroup">加入</button>
+        <!-- 已加入的群列表（含非公司群） -->
+        <div v-if="app.groups.length" class="member-list">
+          <div v-for="g in app.groups" :key="g.id" class="member-row" @contextmenu.prevent="openGroupMenu($event, g)" @click="app.openGroup(g.id, g.name)">
+            <div class="member-av group">{{ g.name.slice(0, 1) }}</div>
+            <div class="member-info">
+              <div class="member-name">{{ g.name }}</div>
+              <div class="member-sub">
+                <span v-if="g.companyId === 0" class="tag" style="color:#9aa4b2;border-color:#9aa4b2">非公司群</span>
+                <span v-else-if="!isMainGroup(g)"><i class="fas fa-hashtag"></i> {{ g.code }}</span>
+                <span v-else class="tag" style="color:#1677ff;border-color:#1677ff">总群</span>
+              </div>
+            </div>
           </div>
         </div>
+        <div v-else class="hint pad">暂无群，点击右上角 + 创建或加入</div>
       </div>
     </template>
 
@@ -492,6 +547,160 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
       <button class="ctx-item" @click="doLeaveGroup(groupMenu.group.id)"><i class="fas fa-sign-out-alt"></i> 退出群</button>
     </div>
 
+    <!-- 快捷操作弹窗：7 个标签页 -->
+    <div v-if="showQuickAdd" class="qa-mask" @click.self="showQuickAdd = false">
+      <div class="qa-box">
+        <div class="qa-tabs">
+          <button class="qa-tab" :class="{ active: quickAddTab === 'addFriend' }" @click="quickAddTab = 'addFriend'"><i class="fas fa-user-plus"></i> 添加好友</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'joinGroup' }" @click="quickAddTab = 'joinGroup'"><i class="fas fa-sign-in-alt"></i> 加入群聊</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'createGroup' }" @click="quickAddTab = 'createGroup'"><i class="fas fa-users"></i> 创建群聊</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'joinCompany' }" @click="quickAddTab = 'joinCompany'"><i class="fas fa-building"></i> 加入公司</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'createCompany' }" @click="quickAddTab = 'createCompany'"><i class="fas fa-plus-square"></i> 创建公司</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'joinMeeting' }" @click="quickAddTab = 'joinMeeting'"><i class="fas fa-video"></i> 加入会议</button>
+          <button class="qa-tab" :class="{ active: quickAddTab === 'createMeeting' }" @click="quickAddTab = 'createMeeting'"><i class="fas fa-video"></i> 创建会议</button>
+        </div>
+
+        <!-- 添加好友 -->
+        <div v-if="quickAddTab === 'addFriend'" class="qa-body">
+          <div class="qa-field">
+            <input v-model="qFriendKeyword" class="input" placeholder="搜索用户 ID / 用户名 / 昵称" maxlength="64" @keyup.enter="qDoSearchFriend" />
+            <button class="dt-btn dt-btn-primary" :disabled="qFriendSearching" @click="qDoSearchFriend"><i class="fas fa-search"></i></button>
+          </div>
+          <div class="qa-pick-list">
+            <div v-if="qFriendSearching" class="qa-empty">搜索中…</div>
+            <template v-else>
+              <div v-for="u in qFriendResults" :key="u.id" class="qa-pick-item" style="cursor:default">
+                <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="28" />
+                <div class="qa-pick-info">
+                  <div class="qa-pick-name">{{ u.nick || u.username }}</div>
+                  <div class="qa-pick-sub">@{{ u.username }} · ID {{ u.id }}</div>
+                </div>
+                <button class="dt-btn" :class="qIsFriendOf(u) ? 'dt-btn-gray' : 'dt-btn-primary'" :disabled="qIsFriendOf(u)" @click="!qIsFriendOf(u) && qDoAddFriend(u)">
+                  {{ qIsFriendOf(u) ? '已添加' : '添加' }}
+                </button>
+              </div>
+              <div v-if="qFriendKeyword.trim() && qFriendResults.length === 0" class="qa-empty">未找到匹配用户</div>
+            </template>
+          </div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">关闭</button>
+          </div>
+        </div>
+
+        <!-- 加入群聊（搜索 + 申请加入） -->
+        <div v-else-if="quickAddTab === 'joinGroup'" class="qa-body">
+          <div class="qa-field">
+            <input v-model="qGroupKeyword" class="input" placeholder="搜索群 ID / 群名称 / 输入群加入码" maxlength="64" @keyup.enter="qDoSearchGroups" />
+            <button class="dt-btn dt-btn-primary" :disabled="qGroupSearching" @click="qDoSearchGroups"><i class="fas fa-search"></i></button>
+          </div>
+          <!-- 群加入码直接加入 -->
+          <div class="qa-field" style="margin-top:8px">
+            <input v-model="qJoinCode" class="input" placeholder="群加入码（直接加入）" maxlength="32" @keyup.enter="qDoJoinGroup" />
+            <button class="dt-btn dt-btn-primary" :disabled="!qJoinCode.trim()" @click="qDoJoinGroup">直接加入</button>
+          </div>
+          <div class="qa-pick-list">
+            <div v-if="qGroupSearching" class="qa-empty">搜索中…</div>
+            <template v-else>
+              <div v-for="g in qGroupResults" :key="g.id" class="qa-pick-item" style="cursor:default">
+                <div class="member-av group" style="width:28px;height:28px;font-size:12px">{{ g.name.slice(0,1) }}</div>
+                <div class="qa-pick-info">
+                  <div class="qa-pick-name">{{ g.name }}</div>
+                  <div class="qa-pick-sub">ID {{ g.id }}<span v-if="g.companyId === 0" class="tag" style="margin-left:6px">非公司群</span></div>
+                </div>
+                <button v-if="!g.joined" class="dt-btn dt-btn-primary" @click="qDoRequestJoinGroup(g.id)">申请加入</button>
+                <span v-else class="qa-pick-check" style="color:var(--dt-primary)"><i class="fas fa-check"></i> 已加入</span>
+              </div>
+              <div v-if="qGroupKeyword.trim() && qGroupResults.length === 0" class="qa-empty">未找到匹配群</div>
+            </template>
+          </div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">关闭</button>
+          </div>
+        </div>
+
+        <!-- 创建群聊（选人） -->
+        <div v-else-if="quickAddTab === 'createGroup'" class="qa-body">
+          <div class="qa-field">
+            <input v-model="qGroupName" class="input" placeholder="群名称" maxlength="64" />
+          </div>
+          <div class="qa-pick-label">选择成员（{{ qSelectedUsers.size }} 已选）</div>
+          <div class="qa-pick-list">
+            <div v-for="u in pickUsers" :key="u.id" class="qa-pick-item" :class="{ selected: qSelectedUsers.has(u.id) }" @click="togglePickUser(u.id)">
+              <UserAvatar :nick="u.nick || u.username" :avatar="u.avatar" :size="28" />
+              <span class="qa-pick-name">{{ u.nick || u.username }}</span>
+              <i v-if="qSelectedUsers.has(u.id)" class="fas fa-check qa-pick-check"></i>
+            </div>
+            <div v-if="pickUsers.length === 0" class="qa-empty">暂无可选成员</div>
+          </div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">取消</button>
+            <button class="dt-btn dt-btn-primary" :disabled="!qGroupName.trim()" @click="qDoCreateGroup">创建</button>
+          </div>
+        </div>
+
+        <!-- 加入公司（搜索 + 申请加入） -->
+        <div v-else-if="quickAddTab === 'joinCompany'" class="qa-body">
+          <div class="qa-field">
+            <input v-model="qCompanyKeyword" class="input" placeholder="搜索公司 ID / 公司名称 / 输入公司加入码" maxlength="64" @keyup.enter="qDoSearchCompanies" />
+            <button class="dt-btn dt-btn-primary" :disabled="qCompanySearching" @click="qDoSearchCompanies"><i class="fas fa-search"></i></button>
+          </div>
+          <!-- 公司加入码直接加入 -->
+          <div class="qa-field" style="margin-top:8px">
+            <input v-model="joinCompanyCode" class="input" placeholder="公司加入码（直接加入）" maxlength="32" @keyup.enter="doJoinCompany" />
+            <button class="dt-btn dt-btn-primary" :disabled="!joinCompanyCode.trim()" @click="doJoinCompany">直接加入</button>
+          </div>
+          <div class="qa-pick-list">
+            <div v-if="qCompanySearching" class="qa-empty">搜索中…</div>
+            <template v-else>
+              <div v-for="c in qCompanyResults" :key="c.id" class="qa-pick-item" style="cursor:default">
+                <div class="member-av group" style="width:28px;height:28px;font-size:12px">{{ c.name.slice(0,1) }}</div>
+                <div class="qa-pick-info">
+                  <div class="qa-pick-name">{{ c.name }}</div>
+                  <div class="qa-pick-sub">ID {{ c.id }}</div>
+                </div>
+                <button v-if="!c.joined" class="dt-btn dt-btn-primary" @click="qDoRequestJoinCompany(c.id)">申请加入</button>
+                <span v-else class="qa-pick-check" style="color:var(--dt-primary)"><i class="fas fa-check"></i> 已加入</span>
+              </div>
+              <div v-if="qCompanyKeyword.trim() && qCompanyResults.length === 0" class="qa-empty">未找到匹配公司</div>
+            </template>
+          </div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">关闭</button>
+          </div>
+        </div>
+
+        <!-- 创建公司 -->
+        <div v-else-if="quickAddTab === 'createCompany'" class="qa-body">
+          <div class="qa-field">
+            <input v-model="qNewCompanyName" class="input" placeholder="公司名称" maxlength="64" />
+          </div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">取消</button>
+            <button class="dt-btn dt-btn-primary" :disabled="!qNewCompanyName.trim()" @click="qDoCreateCompany">创建</button>
+          </div>
+        </div>
+
+        <!-- 加入会议 -->
+        <div v-else-if="quickAddTab === 'joinMeeting'" class="qa-body">
+          <div class="qa-field">
+            <input class="input" placeholder="输入会议码加入会议" maxlength="64" />
+          </div>
+          <div class="qa-empty">会议码加入功能在「会议」标签页中使用</div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">关闭</button>
+          </div>
+        </div>
+
+        <!-- 创建会议 -->
+        <div v-else-if="quickAddTab === 'createMeeting'" class="qa-body">
+          <div class="qa-empty">创建会议请在「会议」标签页中操作</div>
+          <div class="qa-foot">
+            <button class="dt-btn" @click="showQuickAdd = false">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="promptMsg" class="prompt-toast">{{ promptMsg }}</div>
   </div>
 </template>
@@ -504,6 +713,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
   color: var(--dt-primary); font-size: 15px;
 }
 .content-title { font-weight: 600; color: var(--dt-text); }
+.head-add { margin-left: auto; height: 30px; padding: 0 12px; font-size: 12px; }
 .company-logo { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; flex-shrink: 0; background: #f2f4f7; }
 .ch-logo-fallback { color: var(--dt-primary); font-size: 16px; flex-shrink: 0; }
 .ch-sub { font-size: 12px; color: var(--dt-text-4); font-weight: 400; }
@@ -604,4 +814,26 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
 .t-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; font-size: 13px; }
 .t-item:hover { background: #e6f4ff; }
 .t-empty { padding: 20px; text-align: center; color: #bbb; font-size: 13px; }
+
+/* 快捷操作弹窗 */
+.qa-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 250; }
+.qa-box { width: 520px; max-height: 70vh; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.18); overflow: hidden; }
+.qa-tabs { display: flex; border-bottom: 1px solid var(--dt-border-light); flex-shrink: 0; overflow-x: auto; }
+.qa-tab { flex: 1 0 auto; padding: 12px 10px; text-align: center; font-size: 13px; color: var(--dt-text-3); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; white-space: nowrap; }
+.qa-tab:hover { color: var(--dt-text); }
+.qa-tab.active { color: var(--dt-primary); border-bottom-color: var(--dt-primary); font-weight: 600; }
+.qa-body { flex: 1; display: flex; flex-direction: column; padding: 16px; overflow: hidden; }
+.qa-field { display: flex; gap: 8px; margin-bottom: 12px; }
+.qa-field .input { flex: 1; }
+.qa-pick-label { font-size: 12px; color: var(--dt-text-3); margin-bottom: 8px; }
+.qa-pick-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.qa-pick-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.qa-pick-item:hover { background: var(--dt-hover); }
+.qa-pick-item.selected { background: var(--dt-active-weak, #f0f5ff); }
+.qa-pick-name { flex: 1; font-size: 14px; color: var(--dt-text); }
+.qa-pick-info { flex: 1; min-width: 0; }
+.qa-pick-sub { font-size: 12px; color: var(--dt-text-3); }
+.qa-pick-check { color: var(--dt-primary); font-size: 14px; }
+.qa-empty { padding: 20px; text-align: center; color: var(--dt-text-4); font-size: 13px; }
+.qa-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--dt-border-light); flex-shrink: 0; }
 </style>

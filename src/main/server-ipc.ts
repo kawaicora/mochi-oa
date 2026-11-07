@@ -223,6 +223,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('groupAdded', (d) => broadcastToAllWindows(IpcEvents.groupAdded, d))
   serverClient.on('groupRemoved', (d) => broadcastToAllWindows(IpcEvents.groupRemoved, d))
   serverClient.on('friendsUpdated', () => broadcastToAllWindows(IpcEvents.friendsUpdated, {}))
+  serverClient.on('friendRequest', (d) => broadcastToAllWindows(IpcEvents.friendRequest, d))
   serverClient.on('holidaysUpdated', () => broadcastToAllWindows(IpcEvents.holidaysUpdated, {}))
   serverClient.on('tasksUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.tasksUpdated, d ?? {}))
   serverClient.on('projectsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.projectsUpdated, d ?? {}))
@@ -460,6 +461,10 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverHolidayReset, () => serverClient.resetHolidays())
   ipcMain.handle(IpcChannels.serverFriendAdd, (_e, userId) => serverClient.addFriend(Number(userId) || 0))
   ipcMain.handle(IpcChannels.serverFriendRemove, (_e, userId) => serverClient.removeFriend(Number(userId) || 0))
+  ipcMain.handle(IpcChannels.serverFriendRequests, () => serverClient.listFriendRequests())
+  ipcMain.handle(IpcChannels.serverFriendRespond, (_e, requestId, accept) => serverClient.respondFriendRequest(Number(requestId) || 0, Boolean(accept)))
+  ipcMain.handle(IpcChannels.serverGroupRequestJoin, (_e, groupId) => serverClient.requestJoinGroup(Number(groupId) || 0))
+  ipcMain.handle(IpcChannels.serverCompanyRequestJoin, (_e, companyId) => serverClient.requestJoinCompany(Number(companyId) || 0))
 
   // 任务流程系统
   ipcMain.handle(IpcChannels.serverTaskProjects, (_e, companyId) => serverClient.taskListProjects(Number(companyId) || 0))

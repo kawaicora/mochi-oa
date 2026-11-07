@@ -318,6 +318,9 @@ export const useAppStore = defineStore('app', () => {
   window.pantry.onFriendsUpdated(() => {
     void refreshFriends()
   })
+  window.pantry.onFriendRequest(() => {
+    void refreshFriendRequests()
+  })
   window.pantry.onUserProfileUpdated(() => {
     void refreshFriends()
     if (activeCompanyId.value) void refreshMembers()
@@ -843,10 +846,16 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ─── 群操作 ───
-  async function createGroup(name: string, departmentId?: number): Promise<{ ok: boolean; error?: string; groupId?: number }> {
+  async function createGroup(name: string, departmentId?: number, memberIds?: number[]): Promise<{ ok: boolean; error?: string; groupId?: number }> {
     const ack = await window.pantry.serverCreateGroup(activeCompanyId.value, name, departmentId)
     const g = d<{ group: Group }>(ack)?.group
     if (ack.ok) {
+      // 批量拉人入群
+      if (g?.id && memberIds?.length) {
+        for (const uid of memberIds) {
+          try { await window.pantry.serverGroupAdd(g.id, uid) } catch { /* 逐个失败不阻断 */ }
+        }
+      }
       await refreshGroups()
       await refreshConversations()
       if (g?.id) await openGroup(g.id, g.name)
@@ -880,14 +889,39 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ─── 好友 ───
-  async function addFriend(userId: number): Promise<{ ok: boolean; error?: string }> {
+  async function addFriend(userId: number): Promise<{ ok: boolean; error?: string; direct?: boolean }> {
     const ack = await window.pantry.serverAddFriend(userId)
-    if (ack.ok) await refreshFriends()
-    return { ok: ack.ok, error: ack.error }
+    const direct = Boolean((ack.data as { direct?: boolean })?.direct)
+    if (ack.ok && direct) await refreshFriends()
+    return { ok: ack.ok, error: ack.error, direct }
   }
   async function removeFriend(userId: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverRemoveFriend(userId)
     if (ack.ok) await refreshFriends()
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  // 好友申请
+  interface FriendRequestItem {
+    id: number
+    fromId: number
+    fromName: string
+    fromNick: string
+    fromAvatar: string
+    status: string
+    createdAt: string
+  }
+  const friendRequests = ref<FriendRequestItem[]>([])
+  async function refreshFriendRequests(): Promise<void> {
+    const ack = await window.pantry.serverFriendRequests()
+    friendRequests.value = d<{ requests: FriendRequestItem[] }>(ack)?.requests ?? []
+  }
+  async function respondFriendRequest(requestId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverFriendRespond(requestId, accept)
+    if (ack.ok) {
+      await refreshFriendRequests()
+      if (accept) await refreshFriends()
+    }
     return { ok: ack.ok, error: ack.error }
   }
 
@@ -1379,6 +1413,9 @@ export const useAppStore = defineStore('app', () => {
     kickGroupMember,
     addFriend,
     removeFriend,
+    friendRequests,
+    refreshFriendRequests,
+    respondFriendRequest,
     openGroup,
     openDm,
     openConversation,
