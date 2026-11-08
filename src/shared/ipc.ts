@@ -15,6 +15,7 @@ export const IpcChannels = {
   // 开机自启
   setAutoLaunch: 'app:setAutoLaunch',
   getAutoLaunch: 'app:getAutoLaunch',
+  isElevated: 'app:isElevated',
   // 远程设备控制（被控端 → 服务端）
   devRegister: 'dev:register',
   devHeartbeat: 'dev:heartbeat',

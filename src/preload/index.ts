@@ -134,6 +134,7 @@ const api = {
   getAutoLaunch: (): Promise<boolean> => safeInvoke(IpcChannels.getAutoLaunch),
   setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean; method?: string; error?: string }> =>
     safeInvoke(IpcChannels.setAutoLaunch, openAtLogin),
+  isElevated: (): Promise<boolean> => safeInvoke(IpcChannels.isElevated),
 
   // 连接 / 状态 / 设置
   serverConnect: (serverUrl: string, token?: string): Promise<void> =>

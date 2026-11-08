@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readBranding } from './branding'
+import { runElevated, isElevated } from './elevate'
 
 /** 开机自启时附带的参数：静默启动（只进托盘，不弹窗） */
 export const HIDDEN_ARG = '--hidden'
@@ -51,10 +52,14 @@ function launchCommand(): { exe: string; args: string[] } {
 
 // ─── Windows：注册表 Run 键 ──────────────────────────────
 const WIN_RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+/** 完整路径调用 reg.exe，避免 Electron 子进程 PATH 缺失 */
+const REG_EXE = process.env.SystemRoot
+  ? join(process.env.SystemRoot, 'System32', 'reg.exe')
+  : 'reg.exe'
 
 function winGet(): boolean {
   try {
-    const out = execFileSync('reg', ['query', WIN_RUN_KEY, '/v', ENTRY_NAME], { encoding: 'utf8', windowsHide: true })
+    const out = execFileSync(REG_EXE, ['query', WIN_RUN_KEY, '/v', ENTRY_NAME], { encoding: 'utf8', windowsHide: true })
     return new RegExp(ENTRY_NAME, 'i').test(out)
   } catch {
     // 值不存在时 reg query 返回非 0 退出码
@@ -67,12 +72,18 @@ function winSet(enabled: boolean): void {
     const { exe, args } = launchCommand()
     // 值形如："C:\path\app.exe" --hidden（路径带空格必须加引号，否则开机启动会失败）
     const value = `"${exe}"${args.length ? ' ' + args.join(' ') : ''}`
-    execFileSync('reg', ['add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true })
-    console.log(`[auto-launch] 已写入注册表 Run：${ENTRY_NAME} = ${value}`)
+    try {
+      execFileSync(REG_EXE, ['add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true })
+      console.log(`[auto-launch] 已写入注册表 Run：${ENTRY_NAME} = ${value}`)
+    } catch (e) {
+      // HKCU 写入失败 → 尝试提权写 HKLM（所有用户）
+      console.warn(`[auto-launch] HKCU 写入失败，尝试提权：${e instanceof Error ? e.message : e}`)
+      throw new Error('HKCU 写入失败，请允许管理员授权')
+    }
     return
   }
   try {
-    execFileSync('reg', ['delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'], { windowsHide: true })
+    execFileSync(REG_EXE, ['delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'], { windowsHide: true })
     console.log(`[auto-launch] 已删除注册表 Run：${ENTRY_NAME}`)
   } catch {
     // 本来就没有 → 视为已关闭
@@ -192,11 +203,29 @@ export function getAutoLaunch(): AutoLaunchState {
   }
 }
 
-export function setAutoLaunch(enabled: boolean): AutoLaunchState {
+export async function setAutoLaunch(enabled: boolean): Promise<AutoLaunchState> {
   try {
-    if (process.platform === 'win32') winSet(enabled)
-    else if (process.platform === 'darwin') macSet(enabled)
-    else linuxSet(enabled)
+    if (process.platform === 'win32') {
+      try {
+        winSet(enabled)
+      } catch (e) {
+        // HKCU 失败 → 提权重试
+        console.warn(`[auto-launch] 直接写入失败，请求管理员权限：${e instanceof Error ? e.message : e}`)
+        const { exe, args } = launchCommand()
+        const value = `"${exe}"${args.length ? ' ' + args.join(' ') : ''}`
+        if (enabled) {
+          const r = await runElevated([REG_EXE, 'add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'])
+          if (!r.ok && !r.cancelled) throw new Error(r.error || '提权写入失败')
+        } else {
+          const r = await runElevated([REG_EXE, 'delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'])
+          if (!r.ok && !r.cancelled) throw new Error(r.error || '提权删除失败')
+        }
+      }
+    } else if (process.platform === 'darwin') {
+      macSet(enabled)
+    } else {
+      linuxSet(enabled)
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error(`[auto-launch] 设置失败 enabled=${enabled}：${msg}`)

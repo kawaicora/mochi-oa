@@ -12,6 +12,7 @@ import { setupTray, destroyTray, stopFlashTray } from './tray'
 import { notify as notifyManager, initNotifManager } from './notif'
 import { readBranding, brandingIconPath } from './branding'
 import { getAutoLaunch, setAutoLaunch, launchedHidden } from './auto-launch'
+import { isElevated } from './elevate'
 import { logMainError, logRendererConsole, patchConsoleToFile } from './log-helper'
 import { checkUpdateJoin } from './check-update'
 /**
@@ -235,8 +236,9 @@ app.whenReady().then(() => {
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
   // 开机自启：三平台各自的原生做法（Windows 注册表 Run / Linux XDG 自启动项+systemd 用户服务 / macOS 登录项）
   ipcMain.handle(IpcChannels.getAutoLaunch, () => getAutoLaunch().enabled)
-  ipcMain.handle(IpcChannels.setAutoLaunch, (_e, openAtLogin: unknown) => {
-    const st = setAutoLaunch(!!openAtLogin)
+  ipcMain.handle(IpcChannels.isElevated, () => isElevated())
+  ipcMain.handle(IpcChannels.setAutoLaunch, async (_e, openAtLogin: unknown) => {
+    const st = await setAutoLaunch(!!openAtLogin)
     return { ok: st.ok, openAtLogin: st.enabled, method: st.method, error: st.error }
   })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {

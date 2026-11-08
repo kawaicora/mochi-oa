@@ -47,12 +47,15 @@ const autoDownload = ref(true)
 const autoLaunch = ref(false)
 /** 开机自启设置失败的原因（注册表被策略拦、自启动文件没权限等） */
 const autoLaunchError = ref('')
+/** 当前是否以管理员/root 运行 */
+const elevated = ref(false)
 
 
 onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
   autoDownload.value = cfg.autoDownload !== false
   autoLaunch.value = await window.pantry.getAutoLaunch()
+  elevated.value = await window.pantry.isElevated()
   // 回填当前用户头像（登录/重启后从服务端 auth:me 载入，不再回退默认）
   avatar.value = server.state.avatar || ''
   // 回填手机号与紧急联系人（拓展信息 JSON）
@@ -125,10 +128,12 @@ async function onAutoLaunchChange(): Promise<void> {
   if (!r.ok || r.openAtLogin !== want) {
     autoLaunchError.value = r.error
       ? `设置开机自启失败：${r.error}`
-      : '设置开机自启失败，系统未接受该设置'
+      : '设置开机自启失败，系统未接受该设置（可能需要管理员权限）'
   } else {
     autoLaunchError.value = ''
   }
+  // 刷新提权状态
+  elevated.value = await window.pantry.isElevated()
 }
 
 async function onChangePassword(): Promise<void> {
@@ -375,6 +380,12 @@ async function onSaveMainMail(): Promise<void> {
           <p class="sec-hint">
             Windows 写入注册表启动项，Linux 写入 ~/.config/autostart（并注册 systemd 用户服务），
             macOS 写入系统登录项；开机后静默驻留托盘，不弹窗。
+          </p>
+          <p v-if="!elevated" class="sec-hint" style="color:var(--dt-text-3)">
+            <i class="fas fa-shield-alt"></i> 当前非管理员运行，设置开机自启时会请求系统授权
+          </p>
+          <p v-else class="sec-hint" style="color:#52c41a">
+            <i class="fas fa-shield-alt"></i> 已以管理员权限运行
           </p>
           <p v-if="autoLaunchError" class="sec-hint sec-hint-error">{{ autoLaunchError }}</p>
         </div>
