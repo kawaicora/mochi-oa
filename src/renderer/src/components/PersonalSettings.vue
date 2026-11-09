@@ -121,19 +121,21 @@ async function onAutoDownloadChange(): Promise<void> {
 }
 
 async function onAutoLaunchChange(): Promise<void> {
-  const want = autoLaunch.value
-  const r = await window.pantry.setAutoLaunch(want)
-  // 写注册表/自启动文件可能被系统策略拦下：以主进程回读的值为准，失败要说清楚
-  autoLaunch.value = r.openAtLogin
-  if (!r.ok || r.openAtLogin !== want) {
-    autoLaunchError.value = r.error
-      ? `设置开机自启失败：${r.error}`
-      : '设置开机自启失败，系统未接受该设置（可能需要管理员权限）'
-  } else {
-    autoLaunchError.value = ''
+  const want = !autoLaunch.value  // 先切换：点开关就是要反转当前状态
+  try {
+    const r = await window.pantry.setAutoLaunch(want)
+    autoLaunch.value = r.openAtLogin
+    if (!r.ok || r.openAtLogin !== want) {
+      autoLaunchError.value = r.error
+        ? `设置开机自启失败：${r.error}`
+        : '设置开机自启失败，系统未接受该设置（可能需要管理员权限）'
+    } else {
+      autoLaunchError.value = ''
+    }
+    elevated.value = await window.pantry.isElevated()
+  } catch (e) {
+    autoLaunchError.value = `调用失败：${e instanceof Error ? e.message : String(e)}`
   }
-  // 刷新提权状态
-  elevated.value = await window.pantry.isElevated()
 }
 
 async function onChangePassword(): Promise<void> {
@@ -300,7 +302,7 @@ async function onSaveMainMail(): Promise<void> {
           <div v-if="pwdError" class="ps-error">{{ pwdError }}</div>
           <div v-if="pwdTip" class="ps-tip">{{ pwdTip }}</div>
         </div>
-
+<!-- 
         <div class="sec-group">
           <div class="sec-title"><i class="fas fa-download"></i>&nbsp;文件下载</div>
           <label class="switch-row">
@@ -310,7 +312,7 @@ async function onSaveMainMail(): Promise<void> {
             </span>
           </label>
           <p class="sec-hint">文件夹等不可预览的仍需手动下载</p>
-        </div>
+        </div> -->
 
         <!-- 通知：消息 / 来电分开控制；闹钟自带铃声不走这里 -->
         <div class="sec-group">

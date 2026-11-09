@@ -235,10 +235,20 @@ app.whenReady().then(() => {
   // 品牌配置：软件名/图标（随安装包打包，运行时只读）
   ipcMain.handle(IpcChannels.brandingGet, () => readBranding())
   // 开机自启：三平台各自的原生做法（Windows 注册表 Run / Linux XDG 自启动项+systemd 用户服务 / macOS 登录项）
-  ipcMain.handle(IpcChannels.getAutoLaunch, () => getAutoLaunch().enabled)
-  ipcMain.handle(IpcChannels.isElevated, () => isElevated())
+  ipcMain.handle(IpcChannels.getAutoLaunch, async () => {
+    const st = await getAutoLaunch()
+    console.log(`[auto-launch] IPC getAutoLaunch: enabled=${st.enabled}, ok=${st.ok}`)
+    return st.enabled
+  })
+  ipcMain.handle(IpcChannels.isElevated, () => {
+    const elevated = isElevated()
+    console.log(`[auto-launch] IPC isElevated: ${elevated}`)
+    return elevated
+  })
   ipcMain.handle(IpcChannels.setAutoLaunch, async (_e, openAtLogin: unknown) => {
+    console.log(`[auto-launch] IPC setAutoLaunch: ${openAtLogin}`)
     const st = await setAutoLaunch(!!openAtLogin)
+    console.log(`[auto-launch] IPC setAutoLaunch result: ok=${st.ok}, enabled=${st.enabled}, error=${st.error}`)
     return { ok: st.ok, openAtLogin: st.enabled, method: st.method, error: st.error }
   })
   ipcMain.handle(IpcChannels.getWindowState, (e) => {

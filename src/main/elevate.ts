@@ -11,6 +11,8 @@
  */
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
+import { tmpdir } from 'node:os'
+import { writeFileSync, unlinkSync } from 'node:fs'
 
 const execFileAsync = promisify(execFile)
 
@@ -27,8 +29,11 @@ export interface ElevatedResult {
 export function isElevated(): boolean {
   if (process.platform === 'win32') {
     try {
-      // net session 只有管理员能跑
-      execFileSync('net', ['session'], { windowsHide: true, stdio: 'ignore' })
+      // net session 只有管理员能跑（用完整路径避免 PATH 缺失）
+      const netExe = process.env.SystemRoot
+        ? `${process.env.SystemRoot}\\System32\\net.exe`
+        : 'net.exe'
+      execFileSync(netExe, ['session'], { windowsHide: true, stdio: 'ignore' })
       return true
     } catch {
       return false
@@ -123,12 +128,12 @@ export async function winElevatedRegAdd(keyPath: string, valueName: string, valu
   // 生成 .reg 文件内容
   const escapedKey = keyPath.replace(/\\/g, '\\\\')
   const regContent = `Windows Registry Editor Version 5.00\r\n\r\n[${escapedKey}]\r\n"${valueName}"="${valueData.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\r\n`
-  const tmpFile = require('node:os').tmpdir() + '\\mochi-oa-elevate.reg'
-  require('node:fs').writeFileSync(tmpFile, regContent, 'utf8')
+  const tmpFile = tmpdir() + '\\mochi-oa-elevate.reg'
+  writeFileSync(tmpFile, regContent, 'utf8')
   // 提权导入 reg 文件
   const r = await runElevated(['reg', 'import', tmpFile])
   // 清理临时文件
-  try { require('node:fs').unlinkSync(tmpFile) } catch { /* 忽略 */ }
+  try { unlinkSync(tmpFile) } catch { /* 忽略 */ }
   return r
 }
 
