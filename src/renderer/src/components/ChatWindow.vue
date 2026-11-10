@@ -603,7 +603,15 @@ function startGroupVideo(): void {
 
 function openMsgMenu(e: MouseEvent, id: string): void {
   e.preventDefault()
-  showMsgMenu.value = { id, x: e.clientX, y: e.clientY  }
+  const menuW = 200
+  const menuH = 280
+  let x = e.clientX
+  let y = e.clientY
+  // 右侧空间不够 → 往左弹出
+  if (x + menuW > window.innerWidth) x = Math.max(0, x - menuW)
+  // 下方空间不够 → 往上弹出
+  if (y + menuH > window.innerHeight) y = Math.max(0, y - menuH)
+  showMsgMenu.value = { id, x, y }
 }
 
 function closeMsgMenu(): void {
