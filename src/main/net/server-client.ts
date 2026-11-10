@@ -558,6 +558,7 @@ export class ServerClient extends EventEmitter {
     socket.on('dev:termOpen', (d: { deviceId?: string; shell?: string }) => this.emit('devTermOpen', d))
     socket.on('dev:termIn', (d: { deviceId?: string; data?: string }) => this.emit('devTermIn', d))
     socket.on('dev:termClose', (d: { deviceId?: string }) => this.emit('devTermClose', d))
+    socket.on('dev:execResult', (d: { deviceId?: string; ok?: boolean; exitCode?: number; stdout?: string; stderr?: string }) => this.emit('devExecResult', d))
   }
 
   disconnect(): void {
@@ -1122,6 +1123,73 @@ export class ServerClient extends EventEmitter {
   async requestJoinCompany(companyId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'company:requestJoin', { companyId })
+  }
+
+  // ─── 管理后台（server_admin） ────────────────────────────
+
+  async adminVerify(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'admin:verify', {})
+  }
+
+  async adminListRooms(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'rtc:listRooms', {})
+  }
+
+  async adminListDevices(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'admin:listDevices', {})
+  }
+
+  async adminListUsers(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'admin:listUsers', {})
+  }
+
+  async adminSysInfo(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'sys:info', {})
+  }
+
+  async adminSysPerf(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'sys:perf', {})
+  }
+
+  async adminSysProcesses(): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'sys:processes', {})
+  }
+
+  async adminSysExec(cmd: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'sys:exec', { cmd })
+  }
+
+  async adminRtcJoin(roomId: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'rtc:join', { roomId })
+  }
+
+  async adminDevView(deviceId: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'dev:view', { deviceId })
+  }
+
+  async adminDevExec(deviceId: string, cmd: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'dev:execRemote', { deviceId, cmd })
+  }
+
+  async adminDevStart(deviceId: string, kind: string, device?: unknown): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'dev:start', { deviceId, kind, device })
+  }
+
+  async adminDevStop(deviceId: string): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'dev:stop', { deviceId })
   }
 
   // ─── CSV 导入 ───────────────────────────────────────────

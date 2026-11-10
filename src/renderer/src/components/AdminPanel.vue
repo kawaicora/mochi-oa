@@ -1,0 +1,352 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+
+interface Room {
+  id: string
+  type: string
+  title?: string
+  members?: number
+}
+interface Device {
+  id: string
+  name: string
+  username: string
+  os: string
+  ip: string
+  online: boolean
+  remote: boolean
+}
+
+const emit = defineEmits<{ joinRoom: [roomId: string] }>()
+
+const verified = ref(false)
+const verifying = ref(true)
+const authError = ref('')
+const activeTab = ref<'rooms' | 'devices'>('rooms')
+const selectedDevice = ref<Device | null>(null)
+
+const rooms = ref<Room[]>([])
+const devices = ref<Device[]>([])
+// dev:view 返回的完整 sys 数据（info + perf）
+const devInfo = ref<Record<string, any> | null>(null)
+const devPerf = ref<Record<string, any> | null>(null)
+
+function openPreview(): void {
+  if (!selectedDevice.value) return
+  void window.pantry.openAdminDevPreview({
+    deviceId: selectedDevice.value.id,
+    deviceName: selectedDevice.value.name
+  })
+}
+
+function openTerminal(): void {
+  if (!selectedDevice.value) return
+  void window.pantry.openAdminDevTerminal({
+    deviceId: selectedDevice.value.id,
+    deviceName: selectedDevice.value.name
+  })
+}
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+
+async function doVerify(): Promise<void> {
+  verifying.value = true
+  authError.value = ''
+  try {
+    const ack = await window.pantry.serverAdminVerify()
+    if (ack.ok && ack.data?.token) {
+      verified.value = true
+      void loadRooms()
+      void loadDevices()
+      startRefresh()
+    } else {
+      authError.value = ack.error || '无权限'
+    }
+  } catch (e: any) {
+    authError.value = e?.message || '验证失败'
+  } finally {
+    verifying.value = false
+  }
+}
+
+async function loadRooms(): Promise<void> {
+  try {
+    const ack = await window.pantry.serverAdminListRooms()
+    if (ack.ok && ack.data?.rooms) rooms.value = ack.data.rooms
+  } catch { /* ignore */ }
+}
+
+async function loadDevices(): Promise<void> {
+  try {
+    const ack = await window.pantry.serverAdminListDevices()
+    if (ack.ok && ack.data?.devices) devices.value = ack.data.devices
+  } catch { /* ignore */ }
+}
+
+function startRefresh(): void {
+  refreshTimer = setInterval(() => {
+    void loadRooms()
+    void loadDevices()
+    // 如果已选中设备，刷新其 sys 数据
+    if (selectedDevice.value) void loadDeviceSys(selectedDevice.value)
+  }, 5000)
+}
+
+function goBack(): void {
+  selectedDevice.value = null
+  devInfo.value = null
+  devPerf.value = null
+  execOutput.value = ''
+  activeTab.value = 'devices'
+}
+
+async function loadDeviceSys(d: Device): Promise<void> {
+  if (d.id === 'local') {
+    try {
+      const [infoAck, perfAck] = await Promise.all([
+        window.pantry.serverAdminSysInfo(),
+        window.pantry.serverAdminSysPerf()
+      ])
+      if (infoAck.ok) devInfo.value = infoAck.data
+      if (perfAck.ok) devPerf.value = perfAck.data
+    } catch { /* ignore */ }
+  } else {
+    try {
+      const ack = await window.pantry.serverAdminDevView(d.id)
+      console.log('[admin] dev:view response:', ack)
+      if (ack.ok && ack.data?.sys) {
+        const s = ack.data.sys
+        if (s.info) devInfo.value = s.info
+        if (s.perf) devPerf.value = s.perf
+      } else if (ack.ok) {
+        // sys 为空：用 ack 里的基础信息填充，避免永远"加载中"
+        devInfo.value = {
+          hostname: ack.data?.name || d.name,
+          type: ack.data?.os || d.os,
+          ips: [{ address: ack.data?.ip || d.ip }],
+        }
+      }
+    } catch (e) {
+      console.warn('[admin] dev:view failed:', e)
+    }
+  }
+}
+
+async function selectDevice(d: Device): Promise<void> {
+  selectedDevice.value = d
+  execOutput.value = ''
+  // 立即用列表里的基础信息填充，不卡在"加载中"
+  devInfo.value = {
+    hostname: d.name,
+    type: d.os,
+    ips: [{ address: d.ip }],
+    username: d.username,
+  }
+  devPerf.value = null
+  // 后台拉详细信息
+  await loadDeviceSys(d)
+}
+
+function fmtUptime(sec: number): string {
+  if (!sec || sec < 0) return '—'
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  return d > 0 ? `${d}天 ${h}时 ${m}分` : `${h}时 ${m}分`
+}
+function fmtBytes(b: number): string {
+  if (!b) return '—'
+  const gb = b / (1024 * 1024 * 1024)
+  return gb >= 100 ? gb.toFixed(0) + ' GB' : gb.toFixed(1) + ' GB'
+}
+const roomTypeLabel = (t: string) => ({ conf: '会议', dm: '私聊', group: '群聊' } as Record<string, string>)[t] || t
+
+onMounted(() => { void doVerify() })
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
+</script>
+
+<template>
+  <div class="ap">
+    <div v-if="verifying" class="ap-center"><i class="fas fa-spinner fa-spin"></i> 验证管理员权限…</div>
+    <div v-else-if="!verified" class="ap-center ap-err">
+      <i class="fas fa-shield-alt"></i><p>{{ authError }}</p>
+      <button class="ap-btn" @click="doVerify">重新验证</button>
+    </div>
+
+    <template v-else>
+      <div class="ap-tabs">
+        <button :class="{ on: activeTab === 'rooms' && !selectedDevice }" @click="activeTab = 'rooms'; selectedDevice = null">
+          <i class="fas fa-video"></i> 房间列表 <span class="ap-badge">{{ rooms.length }}</span>
+        </button>
+        <button :class="{ on: activeTab === 'devices' && !selectedDevice }" @click="activeTab = 'devices'">
+          <i class="fas fa-desktop"></i> 在线设备 <span class="ap-badge">{{ devices.filter(d => d.online).length }}</span>
+        </button>
+        <button v-if="selectedDevice" class="ap-back" @click="goBack">
+          <i class="fas fa-arrow-left"></i> 返回设备列表
+        </button>
+      </div>
+
+      <!-- 房间列表 -->
+      <div v-if="activeTab === 'rooms' && !selectedDevice" class="ap-list">
+        <div v-if="rooms.length === 0" class="ap-empty">暂无进行中的房间</div>
+        <div v-for="r in rooms" :key="r.id" class="ap-row" @click="emit('joinRoom', r.id)">
+          <span class="ap-tag" :class="r.type">{{ roomTypeLabel(r.type) }}</span>
+          <span class="ap-title">{{ r.title || r.id }}</span>
+          <span class="ap-meta">{{ r.members || 0 }} 人</span>
+          <button class="ap-btn-sm">加入</button>
+        </div>
+      </div>
+
+      <!-- 设备列表 -->
+      <div v-else-if="activeTab === 'devices' && !selectedDevice" class="ap-grid">
+        <div v-if="devices.length === 0" class="ap-empty">暂无在线设备</div>
+        <div v-for="d in devices" :key="d.id" class="ap-card" :class="{ off: !d.online }" @click="selectDevice(d)">
+          <i class="fas fa-desktop ap-card-icon"></i>
+          <div class="ap-card-name">{{ d.name }}</div>
+          <div class="ap-card-sub">{{ d.username }} · {{ d.os.split(' ')[0] }}</div>
+          <span class="ap-status" :class="d.online ? 'on' : 'off'">{{ d.online ? '在线' : '离线' }}</span>
+        </div>
+      </div>
+
+      <!-- 设备详情 -->
+      <div v-else-if="selectedDevice" class="ap-detail">
+        <h3>{{ selectedDevice.name }} <span class="ap-detail-sub">{{ selectedDevice.username }} · {{ selectedDevice.os }} · {{ selectedDevice.ip }}</span></h3>
+
+        <!-- 系统信息网格 -->
+        <div v-if="devInfo" class="ap-info-grid">
+          <div v-if="devInfo.hostname"><label>主机名</label><span>{{ devInfo.hostname }}</span></div>
+          <div v-if="devInfo.ips?.length"><label>IP 地址</label><span>{{ devInfo.ips.map((i: any) => i.address || i.ip4).filter(Boolean).join(', ') }}</span></div>
+          <div v-if="devInfo.type || devInfo.release"><label>操作系统</label><span>{{ devInfo.type }} {{ devInfo.release || '' }} {{ devInfo.arch || '' }}</span></div>
+          <div v-if="devInfo.cpuModel"><label>CPU</label><span>{{ devInfo.cpuModel }} · {{ devInfo.cpuCores }} 核</span></div>
+          <div v-if="devInfo.totalMem"><label>内存总量</label><span>{{ fmtBytes(devInfo.totalMem) }}</span></div>
+          <div v-if="devInfo.board"><label>主板</label><span>{{ typeof devInfo.board === 'string' ? devInfo.board : (devInfo.board?.manufacturer || '') + ' ' + (devInfo.board?.model || '') }}</span></div>
+          <div v-if="devInfo.gpuInfo || devInfo.gpu"><label>显卡</label><span>{{ typeof devInfo.gpu === 'string' ? devInfo.gpu : (devInfo.gpuInfo?.[0]?.name || devInfo.gpuInfo?.[0]?.vendor || '') }}</span></div>
+          <div v-if="devInfo.uptime"><label>运行时长</label><span>{{ fmtUptime(devInfo.uptime) }}</span></div>
+        </div>
+        <div v-else class="ap-empty">正在加载系统信息…</div>
+
+        <!-- 实时图表 + 磁盘 -->
+        <div class="ap-charts-row">
+          <div v-if="devPerf" class="ap-charts">
+            <div class="ap-chart">
+              <label>CPU 使用率</label>
+              <div class="ap-bar"><div class="ap-bar-fill cpu" :style="{ width: (devPerf.cpu || 0) + '%' }"></div></div>
+              <span>{{ devPerf.cpu || 0 }}%</span>
+            </div>
+            <div class="ap-chart">
+              <label>内存</label>
+              <div class="ap-bar"><div class="ap-bar-fill mem" :style="{ width: (devPerf.memPercent || 0) + '%' }"></div></div>
+              <span>{{ devPerf.memPercent || 0 }}%（{{ fmtBytes(devPerf.memUsed) }} / {{ fmtBytes(devPerf.memTotal) }}）</span>
+            </div>
+          </div>
+
+          <!-- 磁盘信息 -->
+          <div v-if="devInfo?.disk" class="ap-disk">
+            <label>磁盘</label>
+            <div v-if="Array.isArray(devInfo.disk) || typeof devInfo.disk === 'string'">
+              <pre>{{ typeof devInfo.disk === 'string' ? devInfo.disk : JSON.stringify(devInfo.disk, null, 2) }}</pre>
+            </div>
+            <div v-else-if="Array.isArray(devInfo.disk)" class="ap-disk-list">
+              <div v-for="(p, i) in devInfo.disk" :key="i" class="ap-disk-row">
+                <span>{{ p.mount || p.mountpoint }}</span>
+                <div class="ap-bar"><div class="ap-bar-fill mem" :style="{ width: (p.use || 0) + '%' }"></div></div>
+                <span>{{ p.used }} / {{ p.size }} ({{ p.use }}%)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 进程列表（客户端已采集） -->
+        <div v-if="devInfo?.processes?.length" class="ap-process">
+          <label>进程数（前30）</label>
+          <div class="ap-proc-list">
+            <div v-for="p in devInfo.processes.slice(0, 30)" :key="p.pid" class="ap-proc">
+              <span>{{ p.pid }}</span><span>{{ p.name }}</span><span v-if="p.cpu">{{ p.cpu }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="ap-actions">
+          <button class="ap-btn" @click="openTerminal">
+            <i class="fas fa-terminal"></i> 终端
+          </button>
+          <button class="ap-btn" @click="openPreview">
+            <i class="fas fa-video"></i> 远程预览
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.ap { height: 100%; width: 100%; display: flex; flex-direction: column; background: #f5f6f8; }
+.ap-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #888; }
+.ap-err { color: #d92b3a; }
+.ap-btn { padding: 8px 16px; border-radius: 8px; border: none; background: var(--dt-primary); color: #fff; cursor: pointer; font-size: 13px; }
+.ap-actions { display: flex; gap: 10px; padding: 4px 0; }
+.ap-btn-sm { padding: 4px 10px; border-radius: 6px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 12px; }
+.ap-btn-sm:hover { border-color: var(--dt-primary); color: var(--dt-primary); }
+
+.ap-tabs { display: flex; gap: 4px; padding: 10px 14px; background: #fff; border-bottom: 1px solid var(--dt-border-light); align-items: center; }
+.ap-tabs button { padding: 6px 14px; border-radius: 8px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--dt-text-2); }
+.ap-tabs button.on { background: #e3edff; color: var(--dt-primary); }
+.ap-tabs .ap-back { margin-left: auto; color: #888; }
+.ap-badge { background: #ddd; border-radius: 10px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+
+.ap-list { flex: 1; overflow-y: auto; padding: 12px; }
+.ap-empty { text-align: center; color: #aaa; padding: 40px; }
+.ap-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+.ap-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.ap-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: #fff; }
+.ap-tag.conf { background: #4a90d9; } .ap-tag.dm { background: #67b26f; } .ap-tag.group { background: #d9a44a; }
+.ap-title { flex: 1; font-size: 13px; }
+.ap-meta { font-size: 12px; color: #999; }
+
+.ap-grid { flex: 1; overflow-y: auto; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; align-content: start; }
+.ap-card { background: #fff; border-radius: 10px; padding: 16px; text-align: center; cursor: pointer; position: relative; }
+.ap-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+.ap-card.off { opacity: .5; }
+.ap-card-icon { font-size: 28px; color: #4a90d9; margin-bottom: 8px; }
+.ap-card-name { font-size: 13px; font-weight: 600; }
+.ap-card-sub { font-size: 11px; color: #999; margin-top: 2px; }
+.ap-status { position: absolute; top: 8px; right: 8px; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+.ap-status.on { background: #e6f9e6; color: #2a9d3a; }
+.ap-status.off { background: #f0f0f0; color: #999; }
+
+.ap-detail { flex: 1; overflow-y: auto; padding: 16px 20px; width: 100%; box-sizing: border-box; }
+.ap-detail h3 { margin: 0 0 14px; font-size: 16px; }
+.ap-detail-sub { font-size: 12px; color: #999; font-weight: normal; margin-left: 8px; }
+.ap-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px 20px; background: #fff; padding: 16px 18px; border-radius: 10px; margin-bottom: 12px; }
+.ap-info-grid > div { font-size: 12px; }
+.ap-info-grid label { display: block; color: #999; margin-bottom: 2px; }
+.ap-info-grid span { color: var(--dt-text); }
+
+.ap-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.ap-charts { background: #fff; padding: 14px; border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.ap-chart { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ap-chart label { width: 80px; color: #666; }
+.ap-bar { flex: 1; height: 10px; background: #eee; border-radius: 5px; overflow: hidden; }
+.ap-bar-fill { height: 100%; border-radius: 5px; transition: width .5s; }
+.ap-bar-fill.cpu { background: #4a90d9; } .ap-bar-fill.mem { background: #67b26f; }
+
+.ap-disk { background: #fff; padding: 14px; border-radius: 10px; }
+.ap-disk label { display: block; color: #999; margin-bottom: 6px; font-size: 12px; }
+.ap-disk pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 12px; }
+.ap-disk-row { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+.ap-disk-row .ap-bar { flex: 2; }
+
+.ap-process { background: #fff; padding: 14px; border-radius: 10px; margin-bottom: 12px; }
+.ap-process label { display: block; color: #999; font-size: 12px; margin-bottom: 6px; }
+.ap-proc-list { max-height: 200px; overflow-y: auto; }
+.ap-proc { display: flex; gap: 12px; padding: 3px 0; font-size: 11px; font-family: monospace; }
+
+.ap-exec { background: #fff; padding: 14px; border-radius: 10px; margin-bottom: 12px; }
+.ap-exec label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
+.ap-exec-row { display: flex; gap: 8px; }
+.ap-exec-row input { flex: 1; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+.ap-exec-out { background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; margin-top: 8px; white-space: pre-wrap; }
+
+.ap-remote { text-align: center; padding: 10px; }
+</style>

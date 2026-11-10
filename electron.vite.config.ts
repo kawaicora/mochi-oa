@@ -45,7 +45,9 @@ export default defineConfig({
           screenshot: resolve(__dirname, 'src/renderer/screenshot.html'),
           toolbar: resolve(__dirname, 'src/renderer/toolbar.html'),
           preview: resolve(__dirname, 'src/renderer/preview.html'),
-          remote: resolve(__dirname, 'src/renderer/remote.html')
+          remote: resolve(__dirname, 'src/renderer/remote.html'),
+          devPreview: resolve(__dirname, 'src/renderer/dev-preview.html'),
+          devTerminal: resolve(__dirname, 'src/renderer/dev-terminal.html')
         }
       }
     }
