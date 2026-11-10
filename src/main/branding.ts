@@ -32,10 +32,11 @@ export interface Branding {
   name: string
   iconPath: string | null
   defaultServerUrl: string | null
+  fallbackServerUrl: string | null
   rtc: BrandingRtc | null
 }
 
-const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null, defaultServerUrl: null, rtc: null }
+const DEFAULTS: Branding = { name: '麻薯OA', iconPath: null, defaultServerUrl: null, fallbackServerUrl: null, rtc: null }
 
 let cached: Branding | null = null
 
@@ -94,6 +95,9 @@ export function readBranding(): Branding {
       }
       if (typeof raw['defaultServerUrl'] === 'string' && String(raw['defaultServerUrl']).trim()) {
         cached.defaultServerUrl = String(raw['defaultServerUrl']).trim().slice(0, 512)
+      }
+      if (typeof raw['fallbackServerUrl'] === 'string' && String(raw['fallbackServerUrl']).trim()) {
+        cached.fallbackServerUrl = String(raw['fallbackServerUrl']).trim().slice(0, 512)
       }
       // LiveKit SFU 配置（视频聊天/视频会议/视频连线使用）
       const rtcRaw = raw['rtc']
