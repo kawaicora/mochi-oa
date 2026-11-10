@@ -315,6 +315,8 @@ export const IpcChannels = {
   serverSetMainMail: 'server:mail:setMain',
   /** 下载远程文件到本地缓存目录，返回本地路径（图片/视频/3D 预览用） */
   serverDownloadFile: 'server:downloadFile',
+  /** 上传更新包到 /api/admin/update */
+  serverUploadUpdate: 'server:uploadUpdate',
   /** 读取本地文件为 ArrayBuffer（3D 模型解析用） */
   serverReadFileBytes: 'server:readFileBytes',
 

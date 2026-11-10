@@ -34,7 +34,17 @@ const devPerf = ref<Record<string, any> | null>(null)
 // 更新发布
 const updateFile = ref<File | null>(null)
 const uploadingUpdate = ref(false)
+const updateProgress = ref(0)
 const updateResult = ref<{ ok: boolean; version?: string; error?: string } | null>(null)
+
+// 监听上传进度
+if (typeof window !== 'undefined' && window.pantry.onUploadUpdateProgress) {
+  window.pantry.onUploadUpdateProgress((data) => {
+    if (!data.done && data.percent != null) {
+      updateProgress.value = data.percent
+    }
+  })
+}
 
 function onUpdateFile(e: Event): void {
   const input = e.target as HTMLInputElement
@@ -45,22 +55,22 @@ function onUpdateFile(e: Event): void {
 async function uploadUpdate(): Promise<void> {
   if (!updateFile.value) return
   uploadingUpdate.value = true
+  updateProgress.value = 0
   updateResult.value = null
   try {
-    const formData = new FormData()
-    formData.append('file', updateFile.value)
-    const state = await window.pantry.serverGetState()
-    const url = `${state.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${state.token}` },
-      body: formData
-    })
-    const data = await resp.json()
-    if (data.ok) {
-      updateResult.value = { ok: true, version: data.version }
+    // 先把文件写入临时路径，再通过主进程 IPC 上传（避免 CORS）
+    const arrayBuffer = await updateFile.value.arrayBuffer()
+    const r = await window.pantry.writeTempFile({ name: updateFile.value.name, data: arrayBuffer })
+    if (!r.ok || !r.path) {
+      updateResult.value = { ok: false, error: '临时文件写入失败' }
+      return
+    }
+    const resp = await window.pantry.serverUploadUpdate(r.path)
+    if (resp.ok) {
+      updateProgress.value = 100
+      updateResult.value = { ok: true, version: resp.version }
     } else {
-      updateResult.value = { ok: false, error: data.error || '上传失败' }
+      updateResult.value = { ok: false, error: resp.error || '上传失败' }
     }
   } catch (err) {
     updateResult.value = { ok: false, error: String(err) }
