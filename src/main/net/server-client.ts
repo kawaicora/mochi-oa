@@ -11,6 +11,7 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { getClientLocation } from './location'
 import { decodeUrlPath } from '../url-name'
+import { reportServerFailure } from '../server-config'
 import { constants, publicEncrypt, randomUUID } from 'node:crypto'
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { join, basename, normalize, sep } from 'node:path'
@@ -450,7 +451,17 @@ export class ServerClient extends EventEmitter {
       if (this.reconnectFailures >= MAX_RECONNECT_FAILURES) {
         if (!this.gaveUp) {
           this.gaveUp = true
-          this.onReconnectGaveUp(`连接服务器失败（已重试 ${this.reconnectFailures} 次）：${err.message}`)
+          // 故障转移：切换到下一个候选服务器地址并重连
+          const oldUrl = this._state.serverUrl
+          const next = reportServerFailure(oldUrl)
+          console.warn(`[failover] 服务器 ${oldUrl} 连接失败 ${this.reconnectFailures} 次 → 切换到 ${next}`)
+          // 断开旧连接，用新地址重连
+          try { this.socket?.disconnect() } catch { /* ignore */ }
+          this.socket = null
+          this.setState({ state: 'connecting', connected: false, error: '' })
+          this.reconnectFailures = 0
+          this.connect({ serverUrl: next, token: this.token })
+          this.onReconnectGaveUp(`服务器 ${oldUrl} 不可用，已切换到 ${next}`)
         } else {
           this.setState({ state: 'error', connected: false, error: err.message })
         }

@@ -10,10 +10,48 @@ import { readBranding } from './branding'
 
 const FALLBACK_SERVER_URL = 'http://127.0.0.1:3000'
 
-/** 默认服务器地址：优先 brand.json 的 defaultServerUrl，否则内置兜底 */
+/** 品牌配置中的服务器地址列表 */
+function brandUrls(): { defaultUrl: string; fallbackUrl: string } {
+  const b = readBranding()
+  return {
+    defaultUrl: b.defaultServerUrl || '',
+    fallbackUrl: b.fallbackServerUrl || ''
+  }
+}
+
+/** 默认服务器地址：优先 brand.json 的 defaultServerUrl，其次 fallbackServerUrl，最后内置兜底 */
 function defaultServerUrl(): string {
-  const fromBrand = readBranding().defaultServerUrl
-  return fromBrand || FALLBACK_SERVER_URL
+  const { defaultUrl, fallbackUrl } = brandUrls()
+  return defaultUrl || fallbackUrl || FALLBACK_SERVER_URL
+}
+
+/**
+ * 服务器地址故障转移：按顺序循环 default → fallback → 用户设置 → default ...
+ * 用户手动设置新 URL 后，下次失败从新 URL 开始循环。
+ */
+let failoverIndex = 0
+
+function candidateUrls(userUrl: string): string[] {
+  const { defaultUrl, fallbackUrl } = brandUrls()
+  const list: string[] = []
+  if (defaultUrl) list.push(defaultUrl)
+  if (fallbackUrl && fallbackUrl !== defaultUrl) list.push(fallbackUrl)
+  if (userUrl && userUrl !== defaultUrl && userUrl !== fallbackUrl) list.push(userUrl)
+  return list.length ? list : [FALLBACK_SERVER_URL]
+}
+
+/** 报告当前服务器连接失败，返回下一个应该尝试的 URL（已持久化） */
+export function reportServerFailure(currentUrl: string): string {
+  const cfg = loadServerConfig()
+  const userUrl = cfg.serverUrl
+  const urls = candidateUrls(userUrl)
+  // 找到当前 URL 在列表中的位置，取下一个
+  const idx = urls.indexOf(currentUrl)
+  failoverIndex = idx >= 0 ? (idx + 1) % urls.length : 0
+  const next = urls[failoverIndex]
+  console.warn(`[failover] 服务器 ${currentUrl} 失败 → 切换到 ${next}`)
+  saveServerConfig({ serverUrl: next })
+  return next
 }
 
 function configPath(): string {
