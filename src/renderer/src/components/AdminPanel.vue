@@ -22,7 +22,7 @@ const emit = defineEmits<{ joinRoom: [roomId: string] }>()
 const verified = ref(false)
 const verifying = ref(true)
 const authError = ref('')
-const activeTab = ref<'rooms' | 'devices'>('rooms')
+const activeTab = ref<'rooms' | 'devices' | 'update'>('rooms')
 const selectedDevice = ref<Device | null>(null)
 
 const rooms = ref<Room[]>([])
@@ -30,6 +30,44 @@ const devices = ref<Device[]>([])
 // dev:view 返回的完整 sys 数据（info + perf）
 const devInfo = ref<Record<string, any> | null>(null)
 const devPerf = ref<Record<string, any> | null>(null)
+
+// 更新发布
+const updateFile = ref<File | null>(null)
+const uploadingUpdate = ref(false)
+const updateResult = ref<{ ok: boolean; version?: string; error?: string } | null>(null)
+
+function onUpdateFile(e: Event): void {
+  const input = e.target as HTMLInputElement
+  updateFile.value = input.files?.[0] || null
+  updateResult.value = null
+}
+
+async function uploadUpdate(): Promise<void> {
+  if (!updateFile.value) return
+  uploadingUpdate.value = true
+  updateResult.value = null
+  try {
+    const formData = new FormData()
+    formData.append('file', updateFile.value)
+    const state = await window.pantry.serverGetState()
+    const url = `${state.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${state.token}` },
+      body: formData
+    })
+    const data = await resp.json()
+    if (data.ok) {
+      updateResult.value = { ok: true, version: data.version }
+    } else {
+      updateResult.value = { ok: false, error: data.error || '上传失败' }
+    }
+  } catch (err) {
+    updateResult.value = { ok: false, error: String(err) }
+  } finally {
+    uploadingUpdate.value = false
+  }
+}
 
 function openPreview(): void {
   if (!selectedDevice.value) return
@@ -181,6 +219,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
         <button :class="{ on: activeTab === 'devices' && !selectedDevice }" @click="activeTab = 'devices'">
           <i class="fas fa-desktop"></i> 在线设备 <span class="ap-badge">{{ devices.filter(d => d.online).length }}</span>
         </button>
+        <button :class="{ on: activeTab === 'update' && !selectedDevice }" @click="activeTab = 'update'; selectedDevice = null">
+          <i class="fas fa-upload"></i> 更新发布
+        </button>
         <button v-if="selectedDevice" class="ap-back" @click="goBack">
           <i class="fas fa-arrow-left"></i> 返回设备列表
         </button>
@@ -205,6 +246,26 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
           <div class="ap-card-name">{{ d.name }}</div>
           <div class="ap-card-sub">{{ d.username }} · {{ d.os.split(' ')[0] }}</div>
           <span class="ap-status" :class="d.online ? 'on' : 'off'">{{ d.online ? '在线' : '离线' }}</span>
+        </div>
+      </div>
+
+      <!-- 更新发布 -->
+      <div v-else-if="activeTab === 'update' && !selectedDevice" class="ap-update">
+        <div class="ap-update-card">
+          <h3><i class="fas fa-upload"></i> 发布更新包</h3>
+          <p class="ap-update-desc">上传 exe 安装包，自动解析版本号并写入 /files/update.exe 和 /files/version</p>
+          <div class="ap-update-row">
+            <input type="file" accept=".exe" ref="updateFileInput" @change="onUpdateFile" />
+          </div>
+          <div v-if="updateFile" class="ap-update-info">
+            <i class="fas fa-file-excel"></i> {{ updateFile.name }} ({{ fmtBytes(updateFile.size) }})
+          </div>
+          <div v-if="updateResult" class="ap-update-result" :class="{ ok: updateResult.ok, err: !updateResult.ok }">
+            {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}` : updateResult.error }}
+          </div>
+          <button class="ap-update-btn" :disabled="!updateFile || uploadingUpdate" @click="uploadUpdate">
+            {{ uploadingUpdate ? '上传中…' : '发布更新' }}
+          </button>
         </div>
       </div>
 
@@ -349,4 +410,17 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .ap-exec-out { background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; margin-top: 8px; white-space: pre-wrap; }
 
 .ap-remote { text-align: center; padding: 10px; }
+
+.ap-update { padding: 20px; }
+.ap-update-card { background: #fff; border-radius: 12px; padding: 24px; max-width: 500px; }
+.ap-update-card h3 { margin: 0 0 8px; font-size: 16px; }
+.ap-update-desc { color: #888; font-size: 13px; margin: 0 0 16px; }
+.ap-update-row { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.ap-update-row input[type=file] { font-size: 13px; }
+.ap-update-info { display: flex; align-items: center; gap: 8px; padding: 10px; background: #f5f6f8; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+.ap-update-result { padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+.ap-update-result.ok { background: #e8f5e9; color: #2e7d32; }
+.ap-update-result.err { background: #ffebee; color: #c62828; }
+.ap-update-btn { padding: 8px 20px; border: none; border-radius: 8px; background: var(--dt-primary); color: #fff; cursor: pointer; font-size: 14px; }
+.ap-update-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
