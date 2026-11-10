@@ -166,6 +166,42 @@ let readTimer: ReturnType<typeof setTimeout> | undefined
 /** 已上报的位置（按会话），避免滚动过程中重复上报同一个位置 */
 let sentRead = { convId: 0, id: 0 }
 const screenshot = ref(false)
+/** 输入框待发送文件（截图/粘贴后先预览，点发送才发出） */
+interface PendingFile { path: string; dataUrl?: string; name: string; isImage: boolean }
+const pendingFiles = ref<PendingFile[]>([])
+/** 待发送图片右键菜单位置 */
+const pendingImgMenu = ref<{ x: number; y: number; idx: number } | null>(null)
+function onPendingImgCtx(e: MouseEvent, idx: number): void {
+  e.preventDefault()
+  const menuW = 120, menuH = 80
+  let x = e.clientX, y = e.clientY
+  if (x + menuW > window.innerWidth) x -= menuW
+  if (y + menuH > window.innerHeight) y -= menuH
+  pendingImgMenu.value = { x, y, idx }
+}
+
+/** 右键待发送图片：保存到下载目录 */
+async function savePendingImage(): Promise<void> {
+  const idx = pendingImgMenu.value?.idx
+  if (idx === undefined || !pendingFiles.value[idx]) return
+  const f = pendingFiles.value[idx]
+  if (!f.isImage || !f.dataUrl) { flashToast('仅图片可保存预览'); return }
+  const r = await window.pantry.appSaveRecording({ name: `截图_${Date.now()}.png`, base64: f.dataUrl.split(',')[1] || '' })
+  if (r.ok) flashToast('已保存')
+  else flashToast('保存失败')
+}
+/** 右键待发送图片：复制到剪贴板 */
+async function copyPendingImage(): Promise<void> {
+  const idx = pendingImgMenu.value?.idx
+  if (idx === undefined || !pendingFiles.value[idx]) return
+  const f = pendingFiles.value[idx]
+  if (!f.isImage || !f.dataUrl) { flashToast('仅图片可复制'); return }
+  try {
+    const blob = await (await fetch(f.dataUrl)).blob()
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+    flashToast('已复制')
+  } catch { flashToast('复制失败') }
+}
 function ensureReadObserver(): void {
   const root = msgListEl.value
   if (!root) return
@@ -318,12 +354,20 @@ function readLabelOf(m: ServerChatMessage): string {
 }
 
 async function onSend(): Promise<void> {
-  if (!draft.value.trim() || sending.value) return
+  const text = draft.value.trim()
+  const hasFiles = pendingFiles.value.length > 0
+  if ((!text && !hasFiles) || sending.value) return
   sending.value = true
-  const text = draft.value
-  draft.value = ''
-  await app.sendText(text)
-  sending.value = false
+  try {
+    if (text) { draft.value = ''; await app.sendText(text) }
+    if (pendingFiles.value.length) {
+      const paths = pendingFiles.value.map((f) => f.path)
+      pendingFiles.value = []
+      for (const p of paths) await app.sendFile(p)
+    }
+  } finally {
+    sending.value = false
+  }
 }
 
 async function onPickFile(): Promise<void> {
@@ -391,7 +435,6 @@ onMounted(() => {
     if (!path || sending.value) return
     sending.value = true
     try {
-      console.log(`[screenshot] 开始发送截图 -> ${path}`)
       await app.sendFile(path)
     } finally {
       sending.value = false
@@ -601,23 +644,34 @@ function startGroupVideo(): void {
   if (selected.value?.groupId) void rtc.startGroupCall(selected.value.groupId, 'video')
 }
 
+const msgMenuEl = ref<HTMLElement | null>(null)
 function openMsgMenu(e: MouseEvent, id: string): void {
   e.preventDefault()
-  const menuW = 200
-  const menuH = 280
-  let x = e.clientX
-  let y = e.clientY
-  // 右侧空间不够 → 往左弹出
-  if (x + menuW > window.innerWidth) x = Math.max(0, x - menuW)
-  // 下方空间不够 → 往上弹出
-  if (y + menuH > window.innerHeight) y = Math.max(0, y - menuH)
-  showMsgMenu.value = { id, x, y }
+  showMsgMenu.value = { id, x: e.clientX, y: e.clientY }
+  // teleport 渲染后测量实际尺寸再翻转
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const el = msgMenuEl.value
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      let x = e.clientX
+      let y = e.clientY
+      if (x + rect.width > window.innerWidth) x = e.clientX - rect.width
+      if (y + rect.height > window.innerHeight) y = e.clientY - rect.height
+      showMsgMenu.value = { id, x: Math.max(0, x), y: Math.max(0, y) }
+    })
+  })
 }
 
 function closeMsgMenu(): void {
   showMsgMenu.value = null
   showEmoji.value = false
 }
+
+// 菜单 teleport 到 body 后，点击外部需手动关闭
+watch(showMsgMenu, (open) => {
+  if (open) setTimeout(() => document.addEventListener('click', closeMsgMenu, { once: true }), 0)
+})
 
 // 撤回消息确认弹窗
 const recallConfirmId = ref<string | null>(null)
@@ -726,24 +780,33 @@ async function onCopyImage(): Promise<void> {
 async function onPaste(e: ClipboardEvent): Promise<void> {
   const items = e.clipboardData?.items
   if (!items) return
-  const imgs: File[] = []
+  const files: File[] = []
   for (let i = 0; i < items.length; i++) {
     const it = items[i]
-    if (it && it.kind === 'file' && it.type.startsWith('image/')) {
+    if (it && it.kind === 'file') {
       const f = it.getAsFile()
-      if (f) imgs.push(f)
+      if (f) files.push(f)
     }
   }
-  if (!imgs.length) return
+  if (!files.length) return
   e.preventDefault()
-  for (const f of imgs) {
-    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
-    const r = await window.pantry.writeTempFile({ name: `粘贴图片_${Date.now()}.${ext}`, data: await f.arrayBuffer() })
+  for (const f of files) {
+    const isImage = f.type.startsWith('image/')
+    const ext = (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')
+    const r = await window.pantry.writeTempFile({ name: `粘贴文件_${Date.now()}.${ext}`, data: await f.arrayBuffer() })
     if (!r.ok || !r.path) {
-      flashToast(`粘贴图片失败：${r.error || '未知错误'}`)
+      flashToast(`粘贴文件失败：${r.error || '未知错误'}`)
       continue
     }
-    await app.sendFile(r.path)
+    let dataUrl: string | undefined
+    if (isImage) {
+      dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(f)
+      })
+    }
+    pendingFiles.value.push({ path: r.path, dataUrl, name: f.name, isImage })
   }
 }
 
@@ -1087,6 +1150,18 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
         <div v-if="showEmoji" class="emoji-panel">
           <button v-for="e in emojiList" :key="e" class="emoji-item" @click="insertEmoji(e)">{{ e }}</button>
         </div>
+        <!-- 待发送文件预览（截图/粘贴） -->
+        <div v-if="pendingFiles.length" class="pending-list">
+          <div v-for="(f, idx) in pendingFiles" :key="idx" class="pending-item" @contextmenu.prevent="onPendingImgCtx($event, idx)">
+            <img v-if="f.isImage && f.dataUrl" :src="f.dataUrl" :alt="f.name" />
+            <div v-else class="pending-file-icon"><i :class="fileIcon(f.name)"></i><span>{{ f.name }}</span></div>
+            <button class="pending-img-close" @click="pendingFiles.splice(idx, 1)"><i class="fas fa-times"></i></button>
+          </div>
+        </div>
+        <div v-if="pendingImgMenu" class="ctx-menu" :style="{ left: pendingImgMenu.x + 'px', top: pendingImgMenu.y + 'px' }">
+          <button class="ctx-item" @click="savePendingImage(); pendingImgMenu = null"><i class="fas fa-save"></i> 保存</button>
+          <button class="ctx-item" @click="copyPendingImage(); pendingImgMenu = null"><i class="far fa-copy"></i> 复制</button>
+        </div>
         <textarea
           v-model="draft"
           class="chat-textarea"
@@ -1094,7 +1169,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           @keydown.enter.exact.prevent="onSend"
         ></textarea>
         <div class="chat-send-row">
-          <button class="chat-send" :disabled="!draft.trim() || sending" @click="onSend">
+          <button class="chat-send" :disabled="(!draft.trim() && !pendingFiles.length) || sending" @click="onSend">
             {{ sending ? '发送中…' : '发送' }}
           </button>
         </div>
@@ -1119,8 +1194,9 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       </div>
     </div>
 
-    <!-- 消息右键菜单 -->
-    <div v-if="showMsgMenu" class="ctx-menu" :style="{ left: showMsgMenu.x + 'px', top: showMsgMenu.y + 'px' }">
+    <!-- 消息右键菜单（teleport 到 body 避免父级定位影响） -->
+    <Teleport to="body">
+    <div v-if="showMsgMenu" ref="msgMenuEl" class="ctx-menu" :style="{ left: showMsgMenu.x + 'px', top: showMsgMenu.y + 'px' }">
       <!-- 文本消息：复制文字（表情消息也是 kind='text'，内容是 emoji，所以一并覆盖） -->
       <button v-if="menuMsg && menuMsg.kind === 'text'" class="ctx-item" @click="onCopyText"><i class="far fa-copy"></i> 复制</button>
       <!-- 图片消息：把图片本身写进剪贴板（可直接粘贴到微信/Word 等） -->
@@ -1131,6 +1207,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg?.fromId == myId || 
                     (canManageGroup && menuMsg?.type == 'group')" class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
     </div>
+    </Teleport>
 
     <!-- 下载进度卡片：大文件下载期间给出明确反馈，避免"点了没反应"的错觉 -->
     <div v-if="dlProgress" class="dl-progress">
@@ -1729,6 +1806,12 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 .emoji-item:hover {
   background: #eef1f5;
 }
+.pending-list { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.pending-item { position: relative; display: inline-block; max-width: 200px; }
+.pending-item img { max-width: 200px; max-height: 150px; border-radius: 8px; border: 1px solid #ddd; display: block; }
+.pending-file-icon { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa; font-size: 12px; max-width: 200px; }
+.pending-file-icon span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-img-close { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: #333; color: #fff; border: none; cursor: pointer; font-size: 10px; display: flex; align-items: center; justify-content: center; }
 .chat-textarea {
   width: 100%;
   height: 64px;
