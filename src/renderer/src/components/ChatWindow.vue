@@ -1119,6 +1119,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg && menuMsg.kind === 'image'" class="ctx-item" @click="onCopyImage"><i class="far fa-copy"></i> 复制图片</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
+      <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="openWithSystemApp(menuMsg)"><i class="fas fa-external-link-alt"></i> 以系统默认方式打开</button>
       <button v-if="menuMsg?.fromId == myId || 
                     (canManageGroup && menuMsg?.type == 'group')" class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
     </div>

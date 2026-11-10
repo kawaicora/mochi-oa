@@ -347,7 +347,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'apply'"><ApplyHome /></template>
         <template v-else-if="nav === 'asset'"><AssetView /></template>
         <template v-else-if="nav === 'job'"><JobView /></template>
-        <template v-else-if="nav === 'admin'"><AdminPanel /></template>
+        <template v-else-if="nav === 'admin'"><AdminPanel @join-room="(roomId: string) => void window.pantry.openMeetingWindow({ mode: 'join', meetingNo: roomId })" /></template>
       </div>
     </div>
 
