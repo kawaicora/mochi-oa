@@ -50,8 +50,8 @@ const nav = ref<NavTab>('message')
 void (async () => {
   try {
     const ack = await window.pantry.serverAdminVerify()
-    if (ack.ok && ack.data?.token) isAdmin.value = true
-  } catch { /* ignore */ }
+    if (ack.ok && (ack.data as { token?: string })?.token) isAdmin.value = true
+  } catch (e) { console.warn('[admin] verify failed:', e) }
 })()
 
 // 打开任意会话（私聊/群）→ 自动切到「消息」标签显示聊天窗口（通讯录里右键/点击成员不再无反应）

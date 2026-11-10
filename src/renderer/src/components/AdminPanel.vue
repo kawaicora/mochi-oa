@@ -73,14 +73,14 @@ async function loadRooms(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListRooms()
     if (ack.ok && ack.data?.rooms) rooms.value = ack.data.rooms
-  } catch { /* ignore */ }
+  } catch (e) { console.warn('[admin] listRooms failed:', e) }
 }
 
 async function loadDevices(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListDevices()
     if (ack.ok && ack.data?.devices) devices.value = ack.data.devices
-  } catch { /* ignore */ }
+  } catch (e) { console.warn('[admin] listDevices failed:', e) }
 }
 
 function startRefresh(): void {
@@ -109,7 +109,7 @@ async function loadDeviceSys(d: Device): Promise<void> {
       ])
       if (infoAck.ok) devInfo.value = infoAck.data
       if (perfAck.ok) devPerf.value = perfAck.data
-    } catch { /* ignore */ }
+    } catch (e) { console.warn('[admin] devView failed:', e) }
   } else {
     try {
       const ack = await window.pantry.serverAdminDevView(d.id)

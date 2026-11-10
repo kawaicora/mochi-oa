@@ -79,12 +79,12 @@ async function switchKind(kind: 'screen' | 'camera' | 'mic') {
 }
 
 function close() {
-  if (room) { try { room.disconnect() } catch {} }
+  if (room) { try { room.disconnect() } catch (e) { console.warn('[remote-preview] disconnect:', e) } }
   window.close()
 }
 
 onMounted(() => { void start() })
-onUnmounted(() => { if (room) { try { room.disconnect() } catch {} } })
+onUnmounted(() => { if (room) { try { room.disconnect() } catch (e) { console.warn('[remote-preview] unmount disconnect:', e) } } })
 </script>
 
 <template>
