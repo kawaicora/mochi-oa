@@ -872,6 +872,85 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
+
+  // 上传更新包到 /api/admin/update（主进程发起 HTTP，无 CORS 限制，带进度）
+  ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, filePath: string) => {
+    try {
+      const cfg = loadServerConfig()
+      if (!cfg.serverUrl) return { ok: false, error: '未配置服务器地址' }
+      const buf = await readFile(filePath)
+      const total = buf.length
+      const boundary = '----mochiUpdate' + Date.now().toString(16)
+      const header = Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="update.exe"\r\nContent-Type: application/octet-stream\r\n\r\n`
+      )
+      const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+      const body = Buffer.concat([header, buf, footer])
+
+      const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
+      const mod = url.protocol === 'https:' ? await import('node:https') : await import('node:http')
+      const req = mod.request(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length
+        }
+      }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          try {
+            const data = JSON.parse(text)
+            event.sender.send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, error: data.error })
+          } catch {
+            event.sender.send('server:uploadUpdate:progress', { done: true, ok: false, error: `响应解析失败: ${text.slice(0, 200)}` })
+          }
+        })
+      })
+      req.on('error', (err: Error) => {
+        event.sender.send('server:uploadUpdate:progress', { done: true, ok: false, error: err.message })
+      })
+      // 按 64KB 分块写入，跟踪进度
+      const CHUNK = 64 * 1024
+      let offset = 0
+      const writeChunk = () => {
+        while (offset < body.length) {
+          const end = Math.min(offset + CHUNK, body.length)
+          const ok = req.write(body.subarray(offset, end))
+          offset = end
+          if (!ok) {
+            req.once('drain', writeChunk)
+            return
+          }
+        }
+        req.end()
+      }
+      // 定期上报进度
+      const timer = setInterval(() => {
+        const written = (req as any).socket?.bytesWritten ?? 0
+        const pct = Math.min(99, Math.round((written / body.length) * 100))
+        event.sender.send('server:uploadUpdate:progress', { done: false, percent: pct, written, total: body.length })
+      }, 200)
+      req.on('close', () => clearInterval(timer))
+      writeChunk()
+      // 等待结果（通过 promise 等待 done 事件）
+      return await new Promise<{ ok: boolean; version?: string; error?: string }>((resolve) => {
+        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; error?: string }) => {
+          if (data.done) {
+            event.sender.removeListener('server:uploadUpdate:progress', handler)
+            resolve({ ok: data.ok, version: data.version, error: data.error })
+          }
+        }
+        event.sender.on('server:uploadUpdate:progress', handler)
+      })
+    } catch (err) {
+      console.error('[update] 上传失败', err)
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // 保存通话/会议录制到 {downloadDir}/通话录制/{name}（Document=个人文档目录，默认 文档/麻薯）
   ipcMain.handle(IpcChannels.appSaveRecording, async (_e, payload) => {
     const t0 = Date.now()

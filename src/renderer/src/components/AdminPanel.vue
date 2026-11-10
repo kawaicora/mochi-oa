@@ -34,7 +34,17 @@ const devPerf = ref<Record<string, any> | null>(null)
 // 更新发布
 const updateFile = ref<File | null>(null)
 const uploadingUpdate = ref(false)
+const updateProgress = ref(0)
 const updateResult = ref<{ ok: boolean; version?: string; error?: string } | null>(null)
+
+// 监听上传进度
+if (typeof window !== 'undefined' && window.pantry.onUploadUpdateProgress) {
+  window.pantry.onUploadUpdateProgress((data) => {
+    if (!data.done && data.percent != null) {
+      updateProgress.value = data.percent
+    }
+  })
+}
 
 function onUpdateFile(e: Event): void {
   const input = e.target as HTMLInputElement
@@ -45,22 +55,22 @@ function onUpdateFile(e: Event): void {
 async function uploadUpdate(): Promise<void> {
   if (!updateFile.value) return
   uploadingUpdate.value = true
+  updateProgress.value = 0
   updateResult.value = null
   try {
-    const formData = new FormData()
-    formData.append('file', updateFile.value)
-    const state = await window.pantry.serverGetState()
-    const url = `${state.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${state.token}` },
-      body: formData
-    })
-    const data = await resp.json()
-    if (data.ok) {
-      updateResult.value = { ok: true, version: data.version }
+    // 先把文件写入临时路径，再通过主进程 IPC 上传（避免 CORS）
+    const arrayBuffer = await updateFile.value.arrayBuffer()
+    const r = await window.pantry.writeTempFile({ name: updateFile.value.name, data: arrayBuffer })
+    if (!r.ok || !r.path) {
+      updateResult.value = { ok: false, error: '临时文件写入失败' }
+      return
+    }
+    const resp = await window.pantry.serverUploadUpdate(r.path)
+    if (resp.ok) {
+      updateProgress.value = 100
+      updateResult.value = { ok: true, version: resp.version }
     } else {
-      updateResult.value = { ok: false, error: data.error || '上传失败' }
+      updateResult.value = { ok: false, error: resp.error || '上传失败' }
     }
   } catch (err) {
     updateResult.value = { ok: false, error: String(err) }
@@ -260,6 +270,10 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
           <div v-if="updateFile" class="ap-update-info">
             <i class="fas fa-file-excel"></i> {{ updateFile.name }} ({{ fmtBytes(updateFile.size) }})
           </div>
+          <div v-if="uploadingUpdate" class="ap-update-progress">
+            <div class="ap-update-progress-bar" :style="{ width: updateProgress + '%' }"></div>
+            <span class="ap-update-progress-text">{{ updateProgress }}%</span>
+          </div>
           <div v-if="updateResult" class="ap-update-result" :class="{ ok: updateResult.ok, err: !updateResult.ok }">
             {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}` : updateResult.error }}
           </div>
@@ -421,6 +435,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .ap-update-result { padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
 .ap-update-result.ok { background: #e8f5e9; color: #2e7d32; }
 .ap-update-result.err { background: #ffebee; color: #c62828; }
+.ap-update-progress { position: relative; height: 24px; background: #e9ecef; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.ap-update-progress-bar { position: absolute; left: 0; top: 0; bottom: 0; background: #4a90d9; transition: width 0.2s; }
+.ap-update-progress-text { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #333; font-weight: 500; }
 .ap-update-btn { padding: 8px 20px; border: none; border-radius: 8px; background: var(--dt-primary); color: #fff; cursor: pointer; font-size: 14px; }
 .ap-update-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
