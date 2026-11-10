@@ -175,9 +175,7 @@ const api = {
   serverUploadUpdate: (filePath: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
     safeInvoke(IpcChannels.serverUploadUpdate, filePath),
   onUploadUpdateProgress: (cb: (data: { done: boolean; percent?: number; written?: number; total?: number; ok?: boolean; version?: string; error?: string }) => void) => {
-    const listener = (_e: unknown, data: typeof cb extends (d: infer T) => void ? T : never) => cb(data)
-    window.ipcRenderer.on('server:uploadUpdate:progress', listener)
-    return () => window.ipcRenderer.removeListener('server:uploadUpdate:progress', listener)
+    return subscribe('server:uploadUpdate:progress', cb)
   },
   serverReadFileBytes: (filePath: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> =>
     safeInvoke(IpcChannels.serverReadFileBytes, filePath),

@@ -270,6 +270,10 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
           <div v-if="updateFile" class="ap-update-info">
             <i class="fas fa-file-excel"></i> {{ updateFile.name }} ({{ fmtBytes(updateFile.size) }})
           </div>
+          <div v-if="uploadingUpdate" class="ap-update-progress">
+            <div class="ap-update-progress-bar" :style="{ width: updateProgress + '%' }"></div>
+            <span class="ap-update-progress-text">{{ updateProgress }}%</span>
+          </div>
           <div v-if="updateResult" class="ap-update-result" :class="{ ok: updateResult.ok, err: !updateResult.ok }">
             {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}` : updateResult.error }}
           </div>
@@ -431,6 +435,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .ap-update-result { padding: 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
 .ap-update-result.ok { background: #e8f5e9; color: #2e7d32; }
 .ap-update-result.err { background: #ffebee; color: #c62828; }
+.ap-update-progress { position: relative; height: 24px; background: #e9ecef; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.ap-update-progress-bar { position: absolute; left: 0; top: 0; bottom: 0; background: #4a90d9; transition: width 0.2s; }
+.ap-update-progress-text { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #333; font-weight: 500; }
 .ap-update-btn { padding: 8px 20px; border: none; border-radius: 8px; background: var(--dt-primary); color: #fff; cursor: pointer; font-size: 14px; }
 .ap-update-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
