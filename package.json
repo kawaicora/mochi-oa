@@ -1,13 +1,13 @@
 {
-  "name": "mochi-oa",
+  "name": "xiaomo-oa",
   "version": "14.7.2",
-  "description": "麻薯-好用简洁的办公软件",
+  "description": "小墨办公-锦墨专属定制办公软件",
   "main": "./out/main/index.js",
   "author": "零食大礼包",
   "private": true,
   "build": {
-    "appId": "com.mochi.oa",
-    "productName": "麻薯",
+    "appId": "com.jinmo.oa",
+    "productName": "小墨办公",
     "directories": {
       "output": "release"
     },
@@ -22,7 +22,7 @@
       }
     ],
     "win": {
-      "icon": "resources\\mochi_256.png",
+      "icon": "resources\\xiaomo_256.png",
       "target": [
         {
           "target": "nsis",
@@ -34,14 +34,14 @@
       ]
     },
     "mac": {
-      "icon": "resources\\mochi_256.png",
+      "icon": "resources\\xiaomo_256.png",
       "category": "public.app-category.business",
       "target": [
         "dmg"
       ]
     },
     "linux": {
-      "icon": "resources\\mochi_256.png",
+      "icon": "resources\\xiaomo_256.png",
       "target": [
         {
           "target": "AppImage",
@@ -61,7 +61,7 @@
       "runAfterFinish": true,
       "include": "build/installer.nsh"
     },
-    "executableName": "mochi-oa"
+    "executableName": "xiaomo-oa"
   },
   "scripts": {
     "dev": "electron-vite dev",
