@@ -1007,6 +1007,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
                 :content="m.content"
                 :name="m.content"
                 :server-url="server.settings.serverUrl"
+                @dblclick="previewMedia = { kind: 'video', m }"
               />
               <img v-else-if="m.kind === 'image' && isImageUrl(m.content)" :src="app.localPreviewUrl(m)" class="msg-img" @error="app.fallbackPreview(m)" @click="previewMedia = { kind: 'image', m }" />
               <!-- 音频：内联播放控件 -->
