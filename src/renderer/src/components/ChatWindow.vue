@@ -907,7 +907,11 @@ async function ensureLocalPath(m: { content: string; id: string }): Promise<stri
   beginDownload(url, fileNameOf(m.content))
   const r = await window.pantry.serverDownloadFile(url)
   endDownload()
-  return r.ok && r.path ? r.path : null
+  if (r.ok && r.path) {
+    app.localCache[m.id] = { path: r.path }
+    return r.path
+  }
+  return null
 }
 
 /**

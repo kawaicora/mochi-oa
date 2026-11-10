@@ -834,8 +834,17 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       await mkdir(dir, { recursive: true })
       console.log(`[fs:download] 开始 url=${safeUrl(rawUrl)} name=${name} dir=${dir}`)
       const safe = name.replace(/[\\/:*?"<>|]/g, '_')
-      let dest = join(dir, safe)
+      const originalPath = join(dir, safe)
+      // 先检查同名文件是否已存在（避免重复下载同一文件）
+      try {
+        await stat(originalPath)
+        console.log(`[fs:download] 已存在，直接复用 -> ${originalPath}`)
+        return { ok: true, path: originalPath, fileUrl: `app-file:///${encodeURIComponent(originalPath)}` }
+      } catch {
+        // 不存在，继续下载
+      }
       // 同名去重：已存在则追加 (n)，避免覆盖已有文件
+      let dest = originalPath
       let n = 1
       for (;;) {
         try {
