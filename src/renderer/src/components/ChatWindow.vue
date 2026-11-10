@@ -603,7 +603,15 @@ function startGroupVideo(): void {
 
 function openMsgMenu(e: MouseEvent, id: string): void {
   e.preventDefault()
-  showMsgMenu.value = { id, x: e.clientX, y: e.clientY  }
+  const menuW = 200
+  const menuH = 280
+  let x = e.clientX
+  let y = e.clientY
+  // 右侧空间不够 → 往左弹出
+  if (x + menuW > window.innerWidth) x = Math.max(0, x - menuW)
+  // 下方空间不够 → 往上弹出
+  if (y + menuH > window.innerHeight) y = Math.max(0, y - menuH)
+  showMsgMenu.value = { id, x, y }
 }
 
 function closeMsgMenu(): void {
@@ -1007,6 +1015,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
                 :content="m.content"
                 :name="m.content"
                 :server-url="server.settings.serverUrl"
+                @dblclick="previewMedia = { kind: 'video', m }"
               />
               <img v-else-if="m.kind === 'image' && isImageUrl(m.content)" :src="app.localPreviewUrl(m)" class="msg-img" @error="app.fallbackPreview(m)" @click="previewMedia = { kind: 'image', m }" />
               <!-- 音频：内联播放控件 -->
@@ -1118,6 +1127,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg && menuMsg.kind === 'image'" class="ctx-item" @click="onCopyImage"><i class="far fa-copy"></i> 复制图片</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
+      <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="openWithSystemApp(menuMsg)"><i class="fas fa-external-link-alt"></i> 以系统默认方式打开</button>
       <button v-if="menuMsg?.fromId == myId || 
                     (canManageGroup && menuMsg?.type == 'group')" class="ctx-item" @click="onDelete(showMsgMenu!.id)"><i class="far fa-trash-alt"></i> 撤回消息</button>
     </div>

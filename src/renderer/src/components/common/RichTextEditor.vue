@@ -6,6 +6,7 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { ref, watch, nextTick } from 'vue'
 import { useAppStore } from '../../stores/app'
 import { useServerStore } from '../../stores/server'
+import ImageViewer from './ImageViewer.vue'
 
 /**
  * 自定义 video 节点：官方无扩展，自写一个块级原子节点。
@@ -280,10 +281,10 @@ watch(editor, (ed) => {
     <div v-if="err && !readonly" class="rte-err">{{ err }}</div>
 
     <!-- 点击图片/视频 → 全尺寸查看弹窗 -->
-    <div v-if="lightbox" class="rte-lightbox" @click="lightbox = null">
+    <ImageViewer v-if="lightbox?.kind === 'image'" :src="lightbox.src" @close="lightbox = null" />
+    <div v-else-if="lightbox" class="rte-lightbox" @click="lightbox = null">
       <div class="rte-lightbox-inner" @click.stop>
-        <img v-if="lightbox.kind === 'image'" :src="lightbox.src" alt="" loading="lazy" />
-        <video v-else :src="lightbox.src" controls autoplay />
+        <video :src="lightbox.src" controls autoplay />
         <div class="rte-lightbox-bar">
           <a :href="lightbox.src" target="_blank" download class="rte-lightbox-dl"><i class="fas fa-download"></i> 打开原图</a>
           <button class="rte-lightbox-close" @click="lightbox = null"><i class="fas fa-times"></i></button>

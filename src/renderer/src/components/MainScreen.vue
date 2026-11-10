@@ -20,12 +20,13 @@ import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alar
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
 import UserAvatar from './UserAvatar.vue'
+import AdminPanel from './AdminPanel.vue'
 import type { ServerSession } from '@shared/server-types'
 
 const server = useServerStore()
 const app = useAppStore()
 
-type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'checkin' | 'apply' | 'asset' | 'job'
+type NavTab = 'message' | 'contacts' | 'meeting' | 'calendar' | 'alarm' | 'todo' | 'report' | 'checkin' | 'apply' | 'asset' | 'job' | 'admin'
 const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   message: { label: '消息', icon: 'fas fa-comments' },
   contacts: { label: '通讯录', icon: 'fas fa-address-book' },
@@ -37,11 +38,21 @@ const tabMeta: Record<NavTab, { label: string; icon: string }> = {
   checkin: { label: '打卡', icon: 'fas fa-clock' },
   apply: { label: '申请', icon: 'fas fa-edit' },
   asset: { label: '资产', icon: 'fas fa-box-open' },
-  job: { label: '职位', icon: 'fas fa-id-badge' }
+  job: { label: '职位', icon: 'fas fa-id-badge' },
+  admin: { label: '管理员', icon: 'fas fa-shield-alt' }
 }
 // 报表需公司上下文：未加入公司时不显示导航按钮
 const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyId > 0)
+// 管理员标签：先验证是否 server_admin，是才显示
+const isAdmin = ref(false)
 const nav = ref<NavTab>('message')
+
+void (async () => {
+  try {
+    const ack = await window.pantry.serverAdminVerify()
+    if (ack.ok && (ack.data as { token?: string })?.token) isAdmin.value = true
+  } catch (e) { console.warn('[admin] verify failed:', e) }
+})()
 
 // 打开任意会话（私聊/群）→ 自动切到「消息」标签显示聊天窗口（通讯录里右键/点击成员不再无反应）
 watch(
@@ -267,7 +278,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="(k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'job') || hasCompany"
+            v-show="(k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'job' && k !== 'admin') || (k === 'admin' ? isAdmin : hasCompany)"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
@@ -336,6 +347,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'apply'"><ApplyHome /></template>
         <template v-else-if="nav === 'asset'"><AssetView /></template>
         <template v-else-if="nav === 'job'"><JobView /></template>
+        <template v-else-if="nav === 'admin'"><AdminPanel @join-room="(roomId: string) => void window.pantry.openMeetingWindow({ mode: 'join', meetingNo: roomId })" /></template>
       </div>
     </div>
 

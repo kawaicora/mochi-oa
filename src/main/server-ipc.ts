@@ -29,19 +29,52 @@ function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: u
 }
 
 /**
+ * 自适应编码：优先 UTF-8，检测到非法 UTF-8 序列时回退 GBK。
+ * Windows cmd 默认 GBK，PowerShell 可能输出 UTF-8，自动识别避免乱码。
+ */
+function decodeAuto(buf: Buffer): string {
+  try {
+    // 尝试严格 UTF-8 解码，失败则抛异常
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    // 回退 GBK
+    try { return iconv.decode(buf, 'gbk') } catch { return buf.toString('utf8') }
+  }
+}
+
+/**
  * 在被控端（本机）执行远程命令。Windows：按 shell 选 cmd.exe / powershell.exe；
  * Linux/macOS：直接默认 /bin/sh。结果经 serverClient.devExecResult 回传服务端转发给控制端。
+ * 按 deviceId 跟踪 cwd，使 cd 命令跨调用持久。
  */
+const execCwd = new Map<string, string>()
 function execRemote(deviceId: string, shell: string, cmd: string, timeout = 15000): void {
   const win = process.platform === 'win32'
+  const cwd = execCwd.get(deviceId) ?? (win ? process.cwd() : process.cwd())
+
+  // 处理 cd 命令：更新 cwd 后立即返回
+  const cdMatch = cmd.match(/^cd\s+(.+)$/i)
+  if (cdMatch) {
+    let target = cdMatch[1].replace(/^["']|["']$/g, '')
+    try {
+      const resolved = require('path').resolve(cwd, target)
+      require('fs').accessSync(resolved)
+      execCwd.set(deviceId, resolved)
+      void serverClient.devExecResult(deviceId, { ok: true, exitCode: 0, stdout: '', stderr: '' })
+    } catch {
+      void serverClient.devExecResult(deviceId, { ok: false, exitCode: 1, stdout: '', stderr: `系统找不到指定的路径: ${target}` })
+    }
+    return
+  }
+
   const isCmd = win && shell === 'cmd'
   const exe = win ? (isCmd ? 'cmd.exe' : 'powershell.exe') : '/bin/sh'
   const args = win
     ? (isCmd ? ['/d', '/s', '/c', cmd] : ['-NoProfile', '-NonInteractive', '-Command', cmd])
     : ['-c', cmd]
-  console.log(`[dev-exec] deviceId=${deviceId} shell=${shell} cmd=${cmd}（平台=${process.platform} exe=${exe}）`)
-  const child = spawn(exe, args, { windowsHide: true })
-  const dec = win ? (b: Buffer) => iconv.decode(b, 'gbk') : (b: Buffer) => b.toString('utf8')
+  console.log(`[dev-exec] deviceId=${deviceId} shell=${shell} cmd=${cmd} cwd=${cwd}（平台=${process.platform} exe=${exe}）`)
+  const child = spawn(exe, args, { windowsHide: true, cwd })
+  const dec = decodeAuto
   let stdout = ''
   let stderr = ''
   const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 超时终止 */ } }, timeout)
@@ -60,8 +93,8 @@ function execRemote(deviceId: string, shell: string, cmd: string, timeout = 1500
 
 /** 持久交互终端会话：deviceId → 常驻 shell 子进程（保持 cwd/环境/变量，stdin 写入 / stdout,stderr 实时回传） */
 const termSessions = new Map<string, ReturnType<typeof spawn>>()
-function termDecode(win: boolean): (b: Buffer) => string {
-  return win ? (b) => iconv.decode(b, 'gbk') : (b) => b.toString('utf8')
+function termDecode(_win: boolean): (b: Buffer) => string {
+  return decodeAuto
 }
 function termOpen(deviceId: string, shell: string): void {
   if (termSessions.has(deviceId)) return
@@ -239,6 +272,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('devEnumerate', (d) => broadcastToAllWindows(IpcEvents.devEnumerate, d ?? {}))
   serverClient.on('devStart', (d) => broadcastToAllWindows(IpcEvents.devStart, d ?? {}))
   serverClient.on('devStop', (d) => broadcastToAllWindows(IpcEvents.devStop, d ?? {}))
+  serverClient.on('devExecResult', (d) => broadcastToAllWindows(IpcEvents.devExecResult, d ?? {}))
   // 控制端请求在被控端执行命令：主进程用所选 shell 执行（Windows: cmd/powershell；Linux: 默认 sh），结果回传
   serverClient.on('devExec', (d) => {
     const p = (d ?? {}) as { deviceId?: unknown; shell?: unknown; cmd?: unknown }
@@ -465,6 +499,61 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverFriendRespond, (_e, requestId, accept) => serverClient.respondFriendRequest(Number(requestId) || 0, Boolean(accept)))
   ipcMain.handle(IpcChannels.serverGroupRequestJoin, (_e, groupId) => serverClient.requestJoinGroup(Number(groupId) || 0))
   ipcMain.handle(IpcChannels.serverCompanyRequestJoin, (_e, companyId) => serverClient.requestJoinCompany(Number(companyId) || 0))
+
+  // 管理后台
+  ipcMain.handle(IpcChannels.serverAdminVerify, () => serverClient.adminVerify())
+  ipcMain.handle(IpcChannels.serverAdminListRooms, () => serverClient.adminListRooms())
+  ipcMain.handle(IpcChannels.serverAdminListDevices, () => serverClient.adminListDevices())
+  ipcMain.handle(IpcChannels.serverAdminListUsers, () => serverClient.adminListUsers())
+  ipcMain.handle(IpcChannels.serverAdminSysInfo, () => serverClient.adminSysInfo())
+  ipcMain.handle(IpcChannels.serverAdminSysPerf, () => serverClient.adminSysPerf())
+  ipcMain.handle(IpcChannels.serverAdminSysProcesses, () => serverClient.adminSysProcesses())
+  ipcMain.handle(IpcChannels.serverAdminSysExec, (_e, cmd) => serverClient.adminSysExec(String(cmd)))
+  ipcMain.handle(IpcChannels.serverAdminRtcJoin, (_e, roomId) => serverClient.adminRtcJoin(String(roomId)))
+  ipcMain.handle(IpcChannels.serverAdminDevView, (_e, deviceId) => serverClient.adminDevView(String(deviceId)))
+  ipcMain.handle(IpcChannels.serverAdminDevExec, (_e, deviceId, cmd) => serverClient.adminDevExec(String(deviceId), String(cmd)))
+  ipcMain.handle(IpcChannels.serverAdminDevStart, (_e, deviceId, kind, device) => serverClient.adminDevStart(String(deviceId), String(kind), device))
+  ipcMain.handle(IpcChannels.serverAdminDevStop, (_e, deviceId) => serverClient.adminDevStop(String(deviceId)))
+
+  // 打开独立远程预览窗口
+  ipcMain.handle(IpcChannels.openAdminDevPreview, (_e, params) => {
+    const p = (params ?? {}) as { deviceId?: unknown; deviceName?: unknown }
+    const deviceId = String(p.deviceId ?? '')
+    const deviceName = String(p.deviceName ?? '')
+    if (!deviceId) return { ok: false, error: '缺少设备ID' }
+    const win = new BrowserWindow({
+      width: 960, height: 640, minWidth: 640, minHeight: 480,
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#0a0a0a',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    const query = new URLSearchParams({ deviceId, deviceName }).toString()
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/dev-preview.html?${query}`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/dev-preview.html'), { query: { deviceId, deviceName } })
+    }
+    return { ok: true }
+  })
+
+  // 打开独立终端窗口
+  ipcMain.handle(IpcChannels.openAdminDevTerminal, (_e, params) => {
+    const p = (params ?? {}) as { deviceId?: unknown; deviceName?: unknown }
+    const deviceId = String(p.deviceId ?? '')
+    const deviceName = String(p.deviceName ?? '')
+    if (!deviceId) return { ok: false, error: '缺少设备ID' }
+    const win = new BrowserWindow({
+      width: 800, height: 500, minWidth: 500, minHeight: 300,
+      resizable: true, frame: false, autoHideMenuBar: true, backgroundColor: '#0a0a0a',
+      webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false, contextIsolation: true, nodeIntegration: false }
+    })
+    const query = new URLSearchParams({ deviceId, deviceName }).toString()
+    if (process.env['ELECTRON_RENDERER_URL']) {
+      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/dev-terminal.html?${query}`)
+    } else {
+      void win.loadFile(join(__dirname, '../renderer/dev-terminal.html'), { query: { deviceId, deviceName } })
+    }
+    return { ok: true }
+  })
 
   // 任务流程系统
   ipcMain.handle(IpcChannels.serverTaskProjects, (_e, companyId) => serverClient.taskListProjects(Number(companyId) || 0))

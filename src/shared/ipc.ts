@@ -15,6 +15,7 @@ export const IpcChannels = {
   // 开机自启
   setAutoLaunch: 'app:setAutoLaunch',
   getAutoLaunch: 'app:getAutoLaunch',
+  isElevated: 'app:isElevated',
   // 远程设备控制（被控端 → 服务端）
   devRegister: 'dev:register',
   devHeartbeat: 'dev:heartbeat',
@@ -100,6 +101,23 @@ export const IpcChannels = {
   serverFriendRespond: 'server:friend:respond',
   serverGroupRequestJoin: 'server:group:requestJoin',
   serverCompanyRequestJoin: 'server:company:requestJoin',
+
+  // 管理后台（server_admin）
+  serverAdminVerify: 'server:admin:verify',
+  serverAdminListRooms: 'server:admin:listRooms',
+  serverAdminListDevices: 'server:admin:listDevices',
+  serverAdminListUsers: 'server:admin:listUsers',
+  serverAdminSysInfo: 'server:admin:sysInfo',
+  serverAdminSysPerf: 'server:admin:sysPerf',
+  serverAdminSysProcesses: 'server:admin:sysProcesses',
+  serverAdminSysExec: 'server:admin:sysExec',
+  serverAdminRtcJoin: 'server:admin:rtcJoin',
+  serverAdminDevView: 'server:admin:devView',
+  serverAdminDevExec: 'server:admin:devExec',
+  serverAdminDevStart: 'server:admin:devStart',
+  serverAdminDevStop: 'server:admin:devStop',
+  openAdminDevPreview: 'open:admin:devPreview',
+  openAdminDevTerminal: 'open:admin:devTerminal',
 
   // 假期（全局日历：法定/调休/自定义，多端同步）
   serverHolidays: 'server:holidays',
@@ -483,7 +501,8 @@ export const IpcEvents = {
   devView: 'dev:event:view',
   devEnumerate: 'dev:event:enumerate',
   devStart: 'dev:event:start',
-  devStop: 'dev:event:stop'
+  devStop: 'dev:event:stop',
+  devExecResult: 'dev:event:execResult'
 } as const
 
 /** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */

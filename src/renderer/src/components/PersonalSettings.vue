@@ -47,12 +47,15 @@ const autoDownload = ref(true)
 const autoLaunch = ref(false)
 /** 开机自启设置失败的原因（注册表被策略拦、自启动文件没权限等） */
 const autoLaunchError = ref('')
+/** 当前是否以管理员/root 运行 */
+const elevated = ref(false)
 
 
 onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
   autoDownload.value = cfg.autoDownload !== false
   autoLaunch.value = await window.pantry.getAutoLaunch()
+  elevated.value = await window.pantry.isElevated()
   // 回填当前用户头像（登录/重启后从服务端 auth:me 载入，不再回退默认）
   avatar.value = server.state.avatar || ''
   // 回填手机号与紧急联系人（拓展信息 JSON）
@@ -118,16 +121,20 @@ async function onAutoDownloadChange(): Promise<void> {
 }
 
 async function onAutoLaunchChange(): Promise<void> {
-  const want = autoLaunch.value
-  const r = await window.pantry.setAutoLaunch(want)
-  // 写注册表/自启动文件可能被系统策略拦下：以主进程回读的值为准，失败要说清楚
-  autoLaunch.value = r.openAtLogin
-  if (!r.ok || r.openAtLogin !== want) {
-    autoLaunchError.value = r.error
-      ? `设置开机自启失败：${r.error}`
-      : '设置开机自启失败，系统未接受该设置'
-  } else {
-    autoLaunchError.value = ''
+  const want = !autoLaunch.value  // 先切换：点开关就是要反转当前状态
+  try {
+    const r = await window.pantry.setAutoLaunch(want)
+    autoLaunch.value = r.openAtLogin
+    if (!r.ok || r.openAtLogin !== want) {
+      autoLaunchError.value = r.error
+        ? `设置开机自启失败：${r.error}`
+        : '设置开机自启失败，系统未接受该设置（可能需要管理员权限）'
+    } else {
+      autoLaunchError.value = ''
+    }
+    elevated.value = await window.pantry.isElevated()
+  } catch (e) {
+    autoLaunchError.value = `调用失败：${e instanceof Error ? e.message : String(e)}`
   }
 }
 
@@ -295,7 +302,7 @@ async function onSaveMainMail(): Promise<void> {
           <div v-if="pwdError" class="ps-error">{{ pwdError }}</div>
           <div v-if="pwdTip" class="ps-tip">{{ pwdTip }}</div>
         </div>
-
+<!-- 
         <div class="sec-group">
           <div class="sec-title"><i class="fas fa-download"></i>&nbsp;文件下载</div>
           <label class="switch-row">
@@ -305,7 +312,7 @@ async function onSaveMainMail(): Promise<void> {
             </span>
           </label>
           <p class="sec-hint">文件夹等不可预览的仍需手动下载</p>
-        </div>
+        </div> -->
 
         <!-- 通知：消息 / 来电分开控制；闹钟自带铃声不走这里 -->
         <div class="sec-group">
@@ -375,6 +382,12 @@ async function onSaveMainMail(): Promise<void> {
           <p class="sec-hint">
             Windows 写入注册表启动项，Linux 写入 ~/.config/autostart（并注册 systemd 用户服务），
             macOS 写入系统登录项；开机后静默驻留托盘，不弹窗。
+          </p>
+          <p v-if="!elevated" class="sec-hint" style="color:var(--dt-text-3)">
+            <i class="fas fa-shield-alt"></i> 当前非管理员运行，设置开机自启时会请求系统授权
+          </p>
+          <p v-else class="sec-hint" style="color:#52c41a">
+            <i class="fas fa-shield-alt"></i> 已以管理员权限运行
           </p>
           <p v-if="autoLaunchError" class="sec-hint sec-hint-error">{{ autoLaunchError }}</p>
         </div>

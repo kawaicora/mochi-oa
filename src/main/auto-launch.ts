@@ -16,11 +16,15 @@
  * 三平台统一带 --hidden：开机静默启动到托盘，不弹窗打扰。
  */
 import { app } from 'electron'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readBranding } from './branding'
+import { runElevated, isElevated } from './elevate'
+
+const execFileAsync = promisify(execFile)
 
 /** 开机自启时附带的参数：静默启动（只进托盘，不弹窗） */
 export const HIDDEN_ARG = '--hidden'
@@ -51,31 +55,46 @@ function launchCommand(): { exe: string; args: string[] } {
 
 // ─── Windows：注册表 Run 键 ──────────────────────────────
 const WIN_RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+const REG_EXE = process.env.SystemRoot
+  ? join(process.env.SystemRoot, 'System32', 'reg.exe')
+  : 'reg.exe'
 
-function winGet(): boolean {
+async function winGet(): Promise<boolean> {
+  console.log(`[auto-launch] winGet 查询注册表 ${REG_EXE} query ${WIN_RUN_KEY} /v ${ENTRY_NAME}`)
   try {
-    const out = execFileSync('reg', ['query', WIN_RUN_KEY, '/v', ENTRY_NAME], { encoding: 'utf8', windowsHide: true })
-    return new RegExp(ENTRY_NAME, 'i').test(out)
-  } catch {
-    // 值不存在时 reg query 返回非 0 退出码
+    const { stdout } = await execFileAsync(REG_EXE, ['query', WIN_RUN_KEY, '/v', ENTRY_NAME], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    const found = new RegExp(ENTRY_NAME, 'i').test(stdout)
+    console.log(`[auto-launch] winGet 结果 found=${found}, stdout=${JSON.stringify(stdout.trim())}`)
+    return found
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.log(`[auto-launch] winGet 查询失败（值不存在）: ${msg}`)
     return false
   }
 }
 
-function winSet(enabled: boolean): void {
+async function winSet(enabled: boolean): Promise<void> {
+  const { exe, args } = launchCommand()
+  const value = `"${exe}"${args.length ? ' ' + args.join(' ') : ''}`
+  console.log(`[auto-launch] winSet enabled=${enabled}, exe=${exe}, args=${JSON.stringify(args)}, value=${value}`)
   if (enabled) {
-    const { exe, args } = launchCommand()
-    // 值形如："C:\path\app.exe" --hidden（路径带空格必须加引号，否则开机启动会失败）
-    const value = `"${exe}"${args.length ? ' ' + args.join(' ') : ''}`
-    execFileSync('reg', ['add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true })
-    console.log(`[auto-launch] 已写入注册表 Run：${ENTRY_NAME} = ${value}`)
+    try {
+      const { stdout } = await execFileAsync(REG_EXE, ['add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true, timeout: 5000 })
+      console.log(`[auto-launch] winSet 写入成功, stdout=${stdout}`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const stderr = (e as { stderr?: string }).stderr
+      console.warn(`[auto-launch] winSet 写入失败: ${msg}, stderr=${stderr}`)
+      throw new Error(`HKCU 写入失败：${msg}`)
+    }
     return
   }
   try {
-    execFileSync('reg', ['delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'], { windowsHide: true })
-    console.log(`[auto-launch] 已删除注册表 Run：${ENTRY_NAME}`)
-  } catch {
-    // 本来就没有 → 视为已关闭
+    const { stdout } = await execFileAsync(REG_EXE, ['delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'], { windowsHide: true, timeout: 5000 })
+    console.log(`[auto-launch] winSet 删除成功, stdout=${stdout}`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.log(`[auto-launch] winSet 删除失败（值不存在）: ${msg}`)
   }
 }
 
@@ -183,27 +202,61 @@ function macSet(enabled: boolean): void {
 }
 
 // ─── 对外 API ────────────────────────────────────────────
-export function getAutoLaunch(): AutoLaunchState {
+export async function getAutoLaunch(): Promise<AutoLaunchState> {
+  console.log(`[auto-launch] getAutoLaunch 开始, platform=${process.platform}`)
   try {
-    const enabled = process.platform === 'win32' ? winGet() : process.platform === 'darwin' ? macGet() : linuxGet()
+    let enabled: boolean
+    if (process.platform === 'win32') {
+      enabled = await winGet()
+    } else if (process.platform === 'darwin') {
+      enabled = macGet()
+    } else {
+      enabled = linuxGet()
+    }
+    console.log(`[auto-launch] getAutoLaunch 结果 enabled=${enabled}`)
     return { ok: true, enabled, method: autoLaunchMethod() }
   } catch (e) {
-    return { ok: false, enabled: false, method: autoLaunchMethod(), error: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error(`[auto-launch] getAutoLaunch 失败: ${msg}`)
+    return { ok: false, enabled: false, method: autoLaunchMethod(), error: msg }
   }
 }
 
-export function setAutoLaunch(enabled: boolean): AutoLaunchState {
+export async function setAutoLaunch(enabled: boolean): Promise<AutoLaunchState> {
+  console.log(`[auto-launch] setAutoLaunch 开始, enabled=${enabled}, platform=${process.platform}`)
   try {
-    if (process.platform === 'win32') winSet(enabled)
-    else if (process.platform === 'darwin') macSet(enabled)
-    else linuxSet(enabled)
+    if (process.platform === 'win32') {
+      try {
+        await winSet(enabled)
+      } catch (e) {
+        // HKCU 失败 → 提权重试
+        console.warn(`[auto-launch] 直接写入失败，请求管理员权限：${e instanceof Error ? e.message : e}`)
+        const { exe, args } = launchCommand()
+        const value = `"${exe}"${args.length ? ' ' + args.join(' ') : ''}`
+        if (enabled) {
+          const r = await runElevated([REG_EXE, 'add', WIN_RUN_KEY, '/v', ENTRY_NAME, '/t', 'REG_SZ', '/d', value, '/f'])
+          console.log(`[auto-launch] 提权写入结果: ok=${r.ok}, cancelled=${r.cancelled}, error=${r.error}`)
+          if (!r.ok && !r.cancelled) throw new Error(r.error || '提权写入失败')
+        } else {
+          const r = await runElevated([REG_EXE, 'delete', WIN_RUN_KEY, '/v', ENTRY_NAME, '/f'])
+          console.log(`[auto-launch] 提权删除结果: ok=${r.ok}, cancelled=${r.cancelled}, error=${r.error}`)
+          if (!r.ok && !r.cancelled) throw new Error(r.error || '提权删除失败')
+        }
+      }
+    } else if (process.platform === 'darwin') {
+      macSet(enabled)
+    } else {
+      linuxSet(enabled)
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.error(`[auto-launch] 设置失败 enabled=${enabled}：${msg}`)
+    console.error(`[auto-launch] setAutoLaunch 失败 enabled=${enabled}：${msg}`)
     return { ok: false, enabled: false, method: autoLaunchMethod(), error: msg }
   }
-  // 写完后回读，确认真的生效（注册表被策略拦/自启动文件没权限时能立刻发现）
-  return getAutoLaunch()
+  // 写完后回读，确认真的生效
+  const result = await getAutoLaunch()
+  console.log(`[auto-launch] setAutoLaunch 完成, 最终 enabled=${result.enabled}`)
+  return result
 }
 
 /** 当前进程是否由「开机自启」拉起（启动参数带 --hidden） */
