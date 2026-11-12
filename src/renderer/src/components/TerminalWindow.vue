@@ -14,6 +14,11 @@ let unsub: (() => void) | null = null
 
 const isLocal = props.deviceId === 'local'
 
+// 标题栏按钮：必须在 <script> 内调 window.pantry；模板里直接写 window.pantry 会被编译成 _ctx.window（undefined）
+function minWin(): void { void window.pantry.minimizeWindow() }
+function toggleWin(): void { void window.pantry.toggleMaximize() }
+function closeWin(): void { void window.pantry.closeWindow() }
+
 function prompt(): string {
   return isLocal ? 'server:~$' : `${props.deviceName}:~$`
 }
@@ -96,9 +101,9 @@ onUnmounted(() => { unsub?.() })
     <div class="term-titlebar">
       <span class="term-title"><i class="fas fa-terminal"></i> {{ deviceName }} — 终端</span>
       <div class="term-winbtns">
-        <button class="wb" @click="window.pantry.minimizeWindow()"><i class="fas fa-minus"></i></button>
-        <button class="wb" @click="window.pantry.toggleMaximize()"><i class="far fa-square"></i></button>
-        <button class="wb wb-close" @click="window.pantry.closeWindow()"><i class="fas fa-times"></i></button>
+        <button class="wb" @click="minWin"><i class="fas fa-minus"></i></button>
+        <button class="wb" @click="toggleWin"><i class="far fa-square"></i></button>
+        <button class="wb wb-close" @click="closeWin"><i class="fas fa-times"></i></button>
       </div>
     </div>
     <div ref="outputRef" class="term-output" @click="inputRef?.focus()">

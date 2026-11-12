@@ -23,7 +23,6 @@ import { app } from 'electron'
 import * as os from 'node:os'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { any } from 'three/tsl';
 
 // systeminformation 是 CommonJS 包，方法挂在 module.exports 上；ESM 的 import * as / default 在打包后
 // 都可能取不到方法（此前 import * as 与 import default 均导致 si.motherboard is not a function）。

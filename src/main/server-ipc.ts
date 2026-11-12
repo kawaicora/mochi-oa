@@ -9,6 +9,8 @@ import { tmpdir, networkInterfaces } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
 import { existsSync} from 'node:fs'
 import { spawn } from 'node:child_process'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import * as iconv from 'iconv-lite'
 import { setSystemProxy, clearSystemProxy } from './system-proxy'
 import { startTunProxy, stopTunProxy } from './tun-proxy'
@@ -894,8 +896,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const body = Buffer.concat([header, buf, footer])
 
       const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
-      const mod = url.protocol === 'https:' ? await import('node:https') : await import('node:http')
-      const req = mod.request(url, {
+      const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest
+      const req = doRequest(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${cfg.token}`,

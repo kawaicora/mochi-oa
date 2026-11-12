@@ -78,9 +78,12 @@ async function switchKind(kind: 'screen' | 'camera' | 'mic') {
   }
 }
 
+function minWin(): void { void window.pantry.minimizeWindow() }
+function toggleWin(): void { void window.pantry.toggleMaximize() }
+
 function close() {
   if (room) { try { room.disconnect() } catch (e) { console.warn('[remote-preview] disconnect:', e) } }
-  window.close()
+  void window.pantry.closeWindow()
 }
 
 onMounted(() => { void start() })
@@ -92,9 +95,9 @@ onUnmounted(() => { if (room) { try { room.disconnect() } catch (e) { console.wa
     <div class="rp-titlebar">
       <span class="rp-title"><i class="fas fa-desktop"></i> 远程预览 — {{ deviceName }}</span>
       <div class="rp-winbtns">
-        <button class="rp-wb" @click="window.pantry.minimizeWindow()"><i class="fas fa-minus"></i></button>
-        <button class="rp-wb" @click="window.pantry.toggleMaximize()"><i class="far fa-square"></i></button>
-        <button class="rp-wb rp-wb-close" @click="close()"><i class="fas fa-times"></i></button>
+        <button class="rp-wb" @click="minWin"><i class="fas fa-minus"></i></button>
+        <button class="rp-wb" @click="toggleWin"><i class="far fa-square"></i></button>
+        <button class="rp-wb rp-wb-close" @click="close"><i class="fas fa-times"></i></button>
       </div>
     </div>
     <div class="rp-controls">
