@@ -39,7 +39,7 @@ async function exec(): Promise<void> {
     if (isLocal) {
       const ack = await window.pantry.serverAdminSysExec(cmd)
       if (ack.ok) {
-        const d = ack.data
+        const d :any = ack.data
         const out = (d.stdout || '').replace(/\r\n/g, '\n').trim()
         const err = (d.stderr || '').replace(/\r\n/g, '\n').trim()
         if (out) output.value.push(out)
