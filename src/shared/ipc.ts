@@ -472,6 +472,12 @@ export const IpcEvents = {
   groupRemoved: 'server:event:group:removed',
   friendsUpdated: 'server:event:friends:updated',
   friendRequest: 'server:event:friend:request',
+  /** 收到公司入司邀请（被邀请人） */
+  companyInviteReceived: 'server:event:company:inviteReceived',
+  /** 收到加入公司申请（公司 owner/管理员） */
+  companyJoinRequest: 'server:event:company:joinRequest',
+  /** 收到加入群申请（群主/管理员） */
+  groupJoinRequest: 'server:event:group:joinRequest',
   holidaysUpdated: 'server:event:holidays:updated',
   tasksUpdated: 'server:event:tasks:updated',
   projectsUpdated: 'server:event:projects:updated',

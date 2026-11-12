@@ -548,6 +548,12 @@ const api = {
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onFriendRequest: (l: (d: unknown) => void) => subscribe<unknown>(IpcEvents.friendRequest, l),
+  onCompanyInviteReceived: (l: (d: { invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string } }) => void) =>
+    subscribe<{ invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string } }>(IpcEvents.companyInviteReceived, l),
+  onCompanyJoinRequest: (l: (d: { companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }) => void) =>
+    subscribe<{ companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }>(IpcEvents.companyJoinRequest, l),
+  onGroupJoinRequest: (l: (d: { groupId?: number; groupName?: string; fromId?: number; fromName?: string; fromNick?: string }) => void) =>
+    subscribe<{ groupId?: number; groupName?: string; fromId?: number; fromName?: string; fromNick?: string }>(IpcEvents.groupJoinRequest, l),
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
   onTasksUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.tasksUpdated, l),
   onProjectsUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.projectsUpdated, l),

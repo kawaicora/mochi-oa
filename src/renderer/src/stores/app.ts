@@ -49,6 +49,28 @@ export interface SelectedChat {
   readReceipts?: ReadReceipt[]
 }
 
+/** 待处理好友申请 */
+export interface FriendRequestItem {
+  id: number
+  fromId: number
+  fromName: string
+  fromNick: string
+  fromAvatar: string
+  status: string
+  createdAt: string
+}
+
+/** 申请/邀请提醒类型 */
+export type RequestAlertKind = 'friend' | 'company' | 'group' | 'companyInvite' | 'groupInvite'
+
+/** 应用内提醒卡片 */
+export interface RequestAlert {
+  id: number
+  kind: RequestAlertKind
+  title: string
+  body: string
+}
+
 export const useAppStore = defineStore('app', () => {
   const server = useServerStore()
 
@@ -195,6 +217,7 @@ export const useAppStore = defineStore('app', () => {
   })
 
   window.pantry.onGroupInvite((ev) => {
+    notifyRequest('groupInvite', '群邀请', `${ev.from.nick} 邀请你加入群「${ev.groupName}」`)
     if (window.confirm(`${ev.from.nick} 邀请你加入群「${ev.groupName}」，是否接受？`)) {
       void window.pantry.serverGroupAcceptInvite(ev.groupId).then(() => {
         void refreshConversations()
@@ -318,8 +341,36 @@ export const useAppStore = defineStore('app', () => {
   window.pantry.onFriendsUpdated(() => {
     void refreshFriends()
   })
-  window.pantry.onFriendRequest(() => {
+  window.pantry.onFriendRequest((raw) => {
+    const p = (raw ?? {}) as { fromId?: number; fromNick?: string; fromName?: string }
     void refreshFriendRequests()
+    const who = p.fromNick || p.fromName
+    // { refresh: true } 这类仅刷新列表的回包不带发起人，不弹通知
+    if (p.fromId == null && !who) return
+    notifyRequest('friend', '好友申请', `${who || '对方'} 请求添加你为好友`)
+  })
+  // 收到公司入司邀请（被邀请人）
+  window.pantry.onCompanyInviteReceived((d) => {
+    const inv = d?.invitation ?? {}
+    const who = inv.inviterNick || inv.username || '对方'
+    const company = inv.companyName || '公司'
+    notifyRequest('companyInvite', '企业邀请', `${who} 邀请你加入「${company}」`)
+    void refreshCompanies()
+  })
+  // 收到加入公司申请（公司 owner/管理员）
+  window.pantry.onCompanyJoinRequest((d) => {
+    const who = d.fromNick || d.fromName || '对方'
+    const company = d.companyName || '公司'
+    notifyRequest('company', '公司加入申请', `${who} 申请加入「${company}」`)
+    void refreshCompanies()
+    if (d.companyId != null && activeCompanyId.value === d.companyId) void refreshMembers()
+  })
+  // 收到加入群申请（群主/管理员）
+  window.pantry.onGroupJoinRequest((d) => {
+    const who = d.fromNick || d.fromName || '对方'
+    const group = d.groupName || '群聊'
+    notifyRequest('group', '加群申请', `${who} 申请加入群「${group}」`)
+    void refreshGroups()
   })
   window.pantry.onUserProfileUpdated(() => {
     void refreshFriends()
@@ -902,19 +953,24 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // 好友申请
-  interface FriendRequestItem {
-    id: number
-    fromId: number
-    fromName: string
-    fromNick: string
-    fromAvatar: string
-    status: string
-    createdAt: string
-  }
   const friendRequests = ref<FriendRequestItem[]>([])
   async function refreshFriendRequests(): Promise<void> {
     const ack = await window.pantry.serverFriendRequests()
     friendRequests.value = d<{ requests: FriendRequestItem[] }>(ack)?.requests ?? []
+  }
+
+  // ─── 申请/邀请提醒（系统通知 + 应用内卡片） ───
+  const requestAlerts = ref<RequestAlert[]>([])
+  let alertSeq = 1
+  function dismissRequestAlert(id: number): void {
+    requestAlerts.value = requestAlerts.value.filter((a) => a.id !== id)
+  }
+  /** 申请/邀请到达：先弹 Windows 系统通知，再在应用内挂一张提示卡片（8 秒自动消失） */
+  function notifyRequest(kind: RequestAlertKind, title: string, body: string): void {
+    const id = alertSeq++
+    requestAlerts.value.push({ id, kind, title, body })
+    setTimeout(() => dismissRequestAlert(id), 8000)
+    void notifyEvent({ kind: 'system', title, body, force: true, target: { kind: 'main' } })
   }
   async function respondFriendRequest(requestId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverFriendRespond(requestId, accept)
@@ -1416,6 +1472,8 @@ export const useAppStore = defineStore('app', () => {
     friendRequests,
     refreshFriendRequests,
     respondFriendRequest,
+    requestAlerts,
+    dismissRequestAlert,
     openGroup,
     openDm,
     openConversation,

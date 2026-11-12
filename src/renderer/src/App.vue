@@ -38,6 +38,10 @@ function toast(text: string, kind: 'info' | 'warn' = 'info'): void {
   }, 5000)
 }
 provide('toast', toast)
+function openRequestAlert(id: number): void {
+  app.dismissRequestAlert(id)
+  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: 'contacts' }))
+}
 function fmtAt(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -108,6 +112,17 @@ onMounted(async () => {
       <span>{{ t.text }}</span>
     </div>
   </transition-group>
+
+  <!-- 申请/邀请提醒卡片：点击进入联系人处理 -->
+  <transition-group name="toast" tag="div" class="toast-wrap alert-wrap">
+    <div v-for="a in app.requestAlerts" :key="a.id" class="toast alert-card" @click="openRequestAlert(a.id)">
+      <i class="fas fa-user-plus alert-icon"></i>
+      <div class="alert-text">
+        <div class="alert-title">{{ a.title }}</div>
+        <div class="alert-body">{{ a.body }}</div>
+      </div>
+    </div>
+  </transition-group>
 </template>
 
 <style scoped>
@@ -147,6 +162,18 @@ onMounted(async () => {
   color: #b36d00;
   background: #fffdf5;
 }
+.alert-wrap { top: 130px; }
+.alert-card {
+  max-width: 340px;
+  cursor: pointer;
+  align-items: flex-start;
+  gap: 10px;
+}
+.alert-card:hover { border-color: var(--dt-primary); }
+.alert-icon { margin-top: 2px; color: var(--dt-primary); width: 18px; text-align: center; }
+.alert-text { display: flex; flex-direction: column; gap: 2px; }
+.alert-title { font-size: 13px; font-weight: 600; color: var(--dt-text); }
+.alert-body { font-size: 12px; color: var(--dt-text-2); line-height: 1.4; }
 .toast-enter-active,
 .toast-leave-active {
   transition: opacity 0.25s, transform 0.25s;
