@@ -278,7 +278,7 @@ function openJoin(): void {
         <div class="rail-tabs">
           <button
             v-for="(m, k) in tabMeta"
-            v-show="(k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'job' && k !== 'admin') || (k === 'admin' ? isAdmin : hasCompany)"
+            v-show="k !== 'job' && ((k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'admin') || (k === 'admin' ? isAdmin : hasCompany))"
             :key="k"
             class="rail-item"
             :class="{ active: nav === k }"
