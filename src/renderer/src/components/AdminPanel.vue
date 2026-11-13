@@ -30,6 +30,8 @@ const devices = ref<Device[]>([])
 // dev:view 返回的完整 sys 数据（info + perf）
 const devInfo = ref<Record<string, any> | null>(null)
 const devPerf = ref<Record<string, any> | null>(null)
+// 设备命令执行回显
+const execOutput = ref('')
 
 // 更新发布
 const updateFile = ref<File | null>(null)
@@ -103,7 +105,8 @@ async function doVerify(): Promise<void> {
   authError.value = ''
   try {
     const ack = await window.pantry.serverAdminVerify()
-    if (ack.ok && ack.data?.token) {
+    const data = ack.data as { token?: string } | undefined
+    if (ack.ok && data?.token) {
       verified.value = true
       void loadRooms()
       void loadDevices()
@@ -121,14 +124,16 @@ async function doVerify(): Promise<void> {
 async function loadRooms(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListRooms()
-    if (ack.ok && ack.data?.rooms) rooms.value = ack.data.rooms
+    const data = ack.data as { rooms?: Room[] } | undefined
+    if (ack.ok && data?.rooms) rooms.value = data.rooms
   } catch (e) { console.warn('[admin] listRooms failed:', e) }
 }
 
 async function loadDevices(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListDevices()
-    if (ack.ok && ack.data?.devices) devices.value = ack.data.devices
+    const data = ack.data as { devices?: Device[] } | undefined
+    if (ack.ok && data?.devices) devices.value = data.devices
   } catch (e) { console.warn('[admin] listDevices failed:', e) }
 }
 
@@ -156,23 +161,29 @@ async function loadDeviceSys(d: Device): Promise<void> {
         window.pantry.serverAdminSysInfo(),
         window.pantry.serverAdminSysPerf()
       ])
-      if (infoAck.ok) devInfo.value = infoAck.data
-      if (perfAck.ok) devPerf.value = perfAck.data
+      if (infoAck.ok) devInfo.value = infoAck.data as Record<string, any> | null
+      if (perfAck.ok) devPerf.value = perfAck.data as Record<string, any> | null
     } catch (e) { console.warn('[admin] devView failed:', e) }
   } else {
     try {
       const ack = await window.pantry.serverAdminDevView(d.id)
       console.log('[admin] dev:view response:', ack)
-      if (ack.ok && ack.data?.sys) {
-        const s = ack.data.sys
+      const data = ack.data as {
+        sys?: { info?: Record<string, any>; perf?: Record<string, any> }
+        name?: string
+        os?: string
+        ip?: string
+      } | undefined
+      if (ack.ok && data?.sys) {
+        const s = data.sys
         if (s.info) devInfo.value = s.info
         if (s.perf) devPerf.value = s.perf
       } else if (ack.ok) {
         // sys 为空：用 ack 里的基础信息填充，避免永远"加载中"
         devInfo.value = {
-          hostname: ack.data?.name || d.name,
-          type: ack.data?.os || d.os,
-          ips: [{ address: ack.data?.ip || d.ip }],
+          hostname: data?.name || d.name,
+          type: data?.os || d.os,
+          ips: [{ address: data?.ip || d.ip }],
         }
       }
     } catch (e) {

@@ -186,7 +186,7 @@ async function savePendingImage(): Promise<void> {
   if (idx === undefined || !pendingFiles.value[idx]) return
   const f = pendingFiles.value[idx]
   if (!f.isImage || !f.dataUrl) { flashToast('仅图片可保存预览'); return }
-  const r = await window.pantry.appSaveRecording({ name: `截图_${Date.now()}.png`, base64: f.dataUrl.split(',')[1] || '' })
+  const r = await window.pantry.appSaveRecording(`截图_${Date.now()}.png`, f.dataUrl.split(',')[1] || '')
   if (r.ok) flashToast('已保存')
   else flashToast('保存失败')
 }
@@ -908,7 +908,7 @@ async function ensureLocalPath(m: { content: string; id: string }): Promise<stri
   const r = await window.pantry.serverDownloadFile(url)
   endDownload()
   if (r.ok && r.path) {
-    app.localCache[m.id] = { path: r.path }
+    app.localCache[m.id] = { fileUrl: r.fileUrl ?? url, path: r.path }
     return r.path
   }
   return null

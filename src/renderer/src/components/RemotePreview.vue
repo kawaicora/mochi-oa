@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { RoomEvent, type Room } from 'livekit-client'
 import { connectSfu } from '../rtc/livekitClient'
+import type { RtcSfuInfo } from '@shared/server-types'
 
 const props = defineProps<{ deviceId: string; deviceName: string }>()
 
@@ -24,8 +25,9 @@ async function start() {
       return
     }
     // 服务端 dev:view 把 SFU 信息嵌套在 sfu 字段下
-    const s = ack.data?.sfu
-    if (!s?.url || !s?.token || !s?.roomName) {
+    const data = ack.data as { sfu?: RtcSfuInfo } | undefined
+    const s = data?.sfu
+    if (!s || !s.url || !s.token || !s.roomName) {
       error.value = '服务端未配置 LiveKit SFU'
       connecting.value = false
       return
