@@ -30,29 +30,27 @@ interface UpdatePlatformEntry {
 interface UpdateInfo {
     version: string
     /** 以「平台_架构」为键（win_x64 / win_arm64 / linux_x64 / linux_arm64 / mac_x64 / mac_arm64） */
-    platforms?: Record<string, UpdatePlatformEntry>
-    /** 旧版扁平结构兜底 */
-    downloadUrl?: string
+    platforms: Record<string, UpdatePlatformEntry>
 }
 
 const UPDATE_DIR = "mochi-update"
 const SUCCESS_FLAG = "update-success.flag"
 
-/** 自身平台键：win / linux / mac × x64 / arm64 */
+/** 自身平台键：标准平台名 windows/linux/darwin × 标准架构名 x86_64/arm64 */
 function ownPlatformKey(): string {
     const plat =
-        process.platform === "win32" ? "win"
-        : process.platform === "darwin" ? "mac"
+        process.platform === "win32" ? "windows"
+        : process.platform === "darwin" ? "darwin"
         : process.platform === "linux" ? "linux"
         : process.platform
     const arch =
         process.arch === "arm64" ? "arm64"
-        : process.arch === "x64" ? "x64"
+        : process.arch === "x64" ? "x86_64"
         : process.arch
     return `${plat}_${arch}`
 }
 
-/** 按自身平台+架构匹配更新包：精确键 → 同族任意架构 → 旧扁平 downloadUrl。 */
+/** 按自身平台+架构匹配更新包：精确键 → 同族任意架构。 */
 function resolveDownloadUrl(update: UpdateInfo): string | null {
     const plats = update.platforms ?? {}
     const own = ownPlatformKey()
@@ -62,7 +60,7 @@ function resolveDownloadUrl(update: UpdateInfo): string | null {
     for (const [k, v] of Object.entries(plats)) {
         if (k.startsWith(plat + "_") && v.downloadUrl) return v.downloadUrl
     }
-    return update.downloadUrl ?? null
+    return null
 }
 
 /** 从下载地址取安装包扩展名，缺省 exe。 */

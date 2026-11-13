@@ -929,7 +929,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           const text = Buffer.concat(chunks).toString('utf8')
           try {
             const data = JSON.parse(text)
-            send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, platform: data.platform, arch: data.arch, key: data.key, error: data.error })
+            send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error })
           } catch {
             send('server:uploadUpdate:progress', { done: true, ok: false, error: `响应解析失败: ${text.slice(0, 200)}` })
           }
@@ -965,12 +965,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       }, 200)
       writeChunk()
       // 等待结果（通过 promise 等待 done 事件）
-      return await new Promise<{ ok: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }>((resolve) => {
-        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }) => {
+      return await new Promise<{ ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }>((resolve) => {
+        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }) => {
           if (data.done) {
             clearInterval(timer)
             offChannel('server:uploadUpdate:progress', handler)
-            resolve({ ok: data.ok, version: data.version, platform: data.platform, arch: data.arch, key: data.key, error: data.error })
+            resolve({ ok: data.ok, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error })
           }
         }
         onChannel('server:uploadUpdate:progress', handler)

@@ -172,9 +172,9 @@ const api = {
     safeInvoke(IpcChannels.serverSetMainMail, cfg),
   serverDownloadFile: (url: string): Promise<{ ok: boolean; path?: string; fileUrl?: string; error?: string }> =>
     safeInvoke(IpcChannels.serverDownloadFile, url),
-  serverUploadUpdate: (payload: { filePath: string; name?: string; platform?: string; arch?: string; version?: string }): Promise<{ ok: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }> =>
+  serverUploadUpdate: (payload: { filePath: string; name?: string; platform?: string; arch?: string; version?: string }): Promise<{ ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }> =>
     safeInvoke(IpcChannels.serverUploadUpdate, payload),
-  onUploadUpdateProgress: (cb: (data: { done: boolean; percent?: number; written?: number; total?: number; ok?: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }) => void) => {
+  onUploadUpdateProgress: (cb: (data: { done: boolean; percent?: number; written?: number; total?: number; ok?: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }) => void) => {
     return subscribe('server:uploadUpdate:progress', cb)
   },
   serverReadFileBytes: (filePath: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> =>
