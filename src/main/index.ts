@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, appendFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
+import { registerPermissionHandlers } from './permissions'
 import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputShutdown } from './remote-input'
 import { clearSystemProxy } from './system-proxy'
 import { IpcChannels, type NotifTarget } from '../shared/ipc'
@@ -186,6 +187,10 @@ function switchToMainMode(): void {
 }
 
 app.whenReady().then(() => {
+  // 媒体/通知权限：macOS / Linux 明确放行摄像头、麦克风、通知等，其余拒绝并记日志；Windows 保持默认行为不动。
+  // 不注册处理器时，非 Windows 端 getUserMedia 可能被 Electron 默认拦截，到不了系统授权弹窗。
+  registerPermissionHandlers()
+
   // WebRTC 屏幕共享：让渲染层 navigator.mediaDevices.getDisplayMedia 走系统桌面源采集
   // （Electron 渲染进程默认不接 desktopCapturer，直接调用会抛错）
   session.defaultSession.setDisplayMediaRequestHandler(

@@ -14,6 +14,27 @@ export class CameraUnavailableError extends Error {
   }
 }
 
+/** 摄像头 / 麦克风被系统拒绝授权（NotAllowedError / PermissionDeniedError），与「无设备」区分开 */
+export class MediaPermissionError extends Error {
+  constructor(kind: 'camera' | 'microphone') {
+    const label = kind === 'camera' ? '摄像头' : '麦克风'
+    super(`未获得${label}权限：请在系统设置中允许本应用使用${label}后重试`)
+    this.name = 'MediaPermissionError'
+  }
+}
+
+/** 判断 getUserMedia 拒绝是否属于「权限被系统拒绝」而非设备不存在/被占用 */
+function isPermissionDenied(e: unknown): boolean {
+  const err = e as { name?: string; message?: string } | null
+  const name = err?.name ?? ''
+  const msg = err?.message ?? ''
+  return (
+    name === 'NotAllowedError' ||
+    name === 'PermissionDeniedError' ||
+    /not allowed|permission denied|denied by system|permission state/i.test(msg)
+  )
+}
+
 class VideoStream {
   /** 当前本地流（绑定到 RTCPeerConnection 和本地预览 video 元素） */
   public stream: MediaStream = new MediaStream()
@@ -101,10 +122,12 @@ class VideoStream {
    */
   async GetCameraStream(deviceId?: string): Promise<MediaStream> {
     const wantExact = !!deviceId && deviceId !== 'default'
+    let denied = false
     const pick = async (video: MediaTrackConstraints | boolean): Promise<MediaStream | null> => {
       try {
         return await navigator.mediaDevices.getUserMedia({ video, audio: false })
-      } catch {
+      } catch (e) {
+        if (isPermissionDenied(e)) denied = true
         return null
       }
     }
@@ -121,6 +144,7 @@ class VideoStream {
       const s = await pick({ deviceId: { exact: cam.deviceId } })
       if (s) return s
     }
+    if (denied) throw new MediaPermissionError('camera')
     throw new CameraUnavailableError()
   }
 
@@ -129,30 +153,28 @@ class VideoStream {
     const sr = opts?.sampleRate ?? 48000
     const ch = opts?.channelCount ?? 2
     const wantExact = !!deviceId && deviceId !== 'default'
+    const baseAudio = {
+      sampleRate: sr,
+      channelCount: ch,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
     try {
       return await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: wantExact ? { exact: deviceId } : undefined,
-          sampleRate: sr,
-          channelCount: ch,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
+        audio: wantExact ? { ...baseAudio, deviceId: { exact: deviceId as string } } : baseAudio
       })
     } catch (e) {
       if (wantExact) {
         // 指定麦克风不可用 → 回退系统默认
-        return navigator.mediaDevices.getUserMedia({
-          audio: {
-            sampleRate: sr,
-            channelCount: ch,
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
-          }
-        })
+        try {
+          return await navigator.mediaDevices.getUserMedia({ audio: baseAudio })
+        } catch (e2) {
+          if (isPermissionDenied(e2) || isPermissionDenied(e)) throw new MediaPermissionError('microphone')
+          throw e2
+        }
       }
+      if (isPermissionDenied(e)) throw new MediaPermissionError('microphone')
       throw e
     }
   }
