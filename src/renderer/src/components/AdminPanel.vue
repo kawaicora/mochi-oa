@@ -275,7 +275,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <div v-else-if="activeTab === 'update' && !selectedDevice" class="ap-update">
         <div class="ap-update-card">
           <h3><i class="fas fa-upload"></i> 发布更新包</h3>
-          <p class="ap-update-desc">上传 exe / AppImage / dmg / zip，自动识别平台、架构与版本号，按「平台_架构」发布到 /files/version</p>
+          <p class="ap-update-desc">上传 exe / AppImage / dmg / zip，自动识别平台、与版本号，按「平台」发布到 /files/version</p>
           <div class="ap-update-row">
             <input type="file" accept=".exe,.appimage,.AppImage,.dmg,.zip" ref="updateFileInput" @change="onUpdateFile" />
           </div>
