@@ -20,6 +20,7 @@ import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
+import { detectFromBufferAsync } from './update-detect'
 
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
@@ -892,6 +893,11 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       if (!filePath) return { ok: false, error: '缺少更新包文件' }
       const buf = await readFile(filePath)
       const origName = String(p.name ?? basename(filePath))
+      // 客户端本地识别平台/架构/版本；渲染层显式传入的字段优先覆盖。
+      const detected = await detectFromBufferAsync(buf, origName)
+      const formPlatform = p.platform || detected.platform
+      const formArch = p.arch || detected.archs.join(',')
+      const formVersion = p.version || detected.version
       const boundary = '----mochiUpdate' + Date.now().toString(16)
 
       // multipart 各部分：可选平台/架构/版本表单字段 + 文件字段（保留原始文件名，供服务端识别格式与架构）
@@ -900,9 +906,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
         if (!val) return
         parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`))
       }
-      field('platform', p.platform ?? '')
-      field('arch', p.arch ?? '')
-      field('version', p.version ?? '')
+      field('platform', formPlatform)
+      field('arch', formArch)
+      field('version', formVersion)
       parts.push(Buffer.from(
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${origName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
       ))

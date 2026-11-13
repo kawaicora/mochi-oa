@@ -29,7 +29,9 @@ interface UpdatePlatformEntry {
 
 interface UpdateInfo {
     version: string
-    /** 以「平台_架构」为键（win_x64 / win_arm64 / linux_x64 / linux_arm64 / mac_x64 / mac_arm64） */
+    /** 老写法扁平兼容项（旧 Windows 客户端读取）；新客户端仅在无平台条目时给 Windows 回退 */
+    downloadUrl?: string
+    /** 以「平台_架构」为键（windows_x86_64 / windows_arm64 / linux_x86_64 / linux_arm64 / darwin_x86_64 / darwin_arm64） */
     platforms: Record<string, UpdatePlatformEntry>
 }
 
@@ -50,7 +52,7 @@ function ownPlatformKey(): string {
     return `${plat}_${arch}`
 }
 
-/** 按自身平台+架构匹配更新包：精确键 → 同族任意架构。 */
+/** 按自身平台+架构匹配更新包：精确键 → 同族任意架构 → 老写法扁平 downloadUrl（仅 Windows）。 */
 function resolveDownloadUrl(update: UpdateInfo): string | null {
     const plats = update.platforms ?? {}
     const own = ownPlatformKey()
@@ -60,6 +62,8 @@ function resolveDownloadUrl(update: UpdateInfo): string | null {
     for (const [k, v] of Object.entries(plats)) {
         if (k.startsWith(plat + "_") && v.downloadUrl) return v.downloadUrl
     }
+    // 兼容老写法：没有平台条目时，仅 Windows 回退到根节点扁平 downloadUrl
+    if (plat === "windows" && update.downloadUrl) return update.downloadUrl
     return null
 }
 
