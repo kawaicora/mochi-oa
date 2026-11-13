@@ -61,6 +61,17 @@ async function saveApprovalSettings(): Promise<void> {
   } catch (e) { console.error('[审批设置] 保存失败', e); promptMsg.value = '保存失败' }
 }
 
+// 职位模块开关（owner/admin）：按公司维度启用/关闭职位功能
+async function toggleJobEnabled(): Promise<void> {
+  const c = app.activeCompany
+  if (!c) return
+  companyMenu.value = false
+  const next = !app.jobEnabled
+  const { ok, error } = await app.setCompanyJobEnabled(c.id, next)
+  if (!ok) { promptMsg.value = error || '操作失败'; return }
+  promptMsg.value = next ? '职位模块已开启' : '职位模块已关闭'
+}
+
 // 企业齿轮/右键菜单
 const companyMenu = ref(false)
 function openCompanyMenu(e?: MouseEvent): void {
@@ -338,6 +349,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
             <div v-if="companyMenu" class="company-menu" @click.stop>
               <button class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
               <button class="cm-item" @click="openApprovalSettings"><i class="fas fa-users"></i> 审批设置</button>
+              <button class="cm-item" @click="toggleJobEnabled"><i class="fas fa-id-badge"></i> 职位模块：{{ app.jobEnabled ? '已开启' : '已关闭' }}</button>
               <button class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
               <template v-if="app.isOwner">
                 <div class="cm-sep"></div>

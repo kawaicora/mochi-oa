@@ -248,6 +248,11 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) void refreshCompanies()
     return { ok: ack.ok, error: ack.error }
   }
+  async function setCompanyJobEnabled(companyId: number, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    const ack = await window.pantry.serverCompanyJobEnabledSet({ companyId, enabled })
+    if (ack.ok) void refreshCompanies()
+    return { ok: ack.ok, error: ack.error }
+  }
   async function dissolveCompany(companyId: number): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverCompanyDissolve(companyId)
     if (ack.ok) {
@@ -438,6 +443,7 @@ export const useAppStore = defineStore('app', () => {
   })
   const isAdmin = computed(() => activeRole.value === 'owner' || activeRole.value === 'admin')
   const isOwner = computed(() => activeCompany.value?.ownerId === server.state.userId)
+  const jobEnabled = computed(() => activeCompany.value?.jobEnabled === true)
   function roleLabel(role: string): string {
     if (role === 'owner' || role === 'admin') return '管理员'
     return '员工'
@@ -1376,6 +1382,7 @@ export const useAppStore = defineStore('app', () => {
     activeRole,
     isAdmin,
     isOwner,
+    jobEnabled,
     roleLabel,
     departments,
     members,
@@ -1508,6 +1515,7 @@ export const useAppStore = defineStore('app', () => {
     dissolveGroup,
     transferCompanyOwner,
     dissolveCompany,
+    setCompanyJobEnabled,
     onServerMessage,
     onServerMessageDeleted,
     onServerPresence

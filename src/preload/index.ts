@@ -245,6 +245,7 @@ const api = {
   serverCompanyTransfer: (companyId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyTransfer, companyId, userId),
   serverCompanyDissolve: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyDissolve, companyId),
   serverUpdateCompanyLogo: (companyId: number, logo: string): Promise<Ack> => safeInvoke(IpcChannels.serverUpdateCompanyLogo, companyId, logo),
+  serverCompanyJobEnabledSet: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyJobEnabledSet, payload),
 
   // 会话 / 聊天
   serverConversations: (type?: 'group' | 'dm'): Promise<Ack> =>

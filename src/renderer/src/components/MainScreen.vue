@@ -47,6 +47,19 @@ const hasCompany = computed(() => app.companies.length > 0 && app.activeCompanyI
 const isAdmin = ref(false)
 const nav = ref<NavTab>('message')
 
+// 左侧导航可见标签：职位模块受公司开关控制；公司上下文标签需已加入公司，管理员标签需校验通过
+const companyTabs: NavTab[] = ['report', 'todo', 'checkin', 'apply', 'asset']
+const railTabs = computed(() =>
+  (Object.keys(tabMeta) as NavTab[])
+    .filter((k) => {
+      if (k === 'job') return app.jobEnabled
+      if (k === 'admin') return isAdmin.value
+      if (companyTabs.includes(k)) return hasCompany.value
+      return true
+    })
+    .map((k) => ({ key: k, label: tabMeta[k].label, icon: tabMeta[k].icon }))
+)
+
 void (async () => {
   try {
     const ack = await window.pantry.serverAdminVerify()
@@ -59,6 +72,10 @@ watch(
   () => app.selected,
   (s) => { if (s) nav.value = 'message' },
   { deep: false }
+)
+watch(
+  () => app.jobEnabled,
+  (on) => { if (!on && nav.value === 'job') nav.value = 'message' }
 )
 
 // 2.1.2 最近使用
@@ -87,7 +104,9 @@ onMounted(async () => {
 })
 function onNavEvent(e: Event): void {
   const t = (e as CustomEvent).detail
-  if (typeof t === 'string') nav.value = t as typeof nav.value
+  if (typeof t !== 'string') return
+  if (t === 'job' && !app.jobEnabled) return
+  nav.value = t as typeof nav.value
 }
 onBeforeUnmount(() => window.removeEventListener('mochi:nav', onNavEvent))
 onBeforeUnmount(() => {
@@ -281,16 +300,15 @@ function joinRoom(roomId: string): void {
       <nav class="rail">
         <div class="rail-tabs">
           <button
-            v-for="(m, k) in tabMeta"
-            v-show="k !== 'job' && ((k !== 'report' && k !== 'todo' && k !== 'checkin' && k !== 'apply' && k !== 'asset' && k !== 'admin') || (k === 'admin' ? isAdmin : hasCompany))"
-            :key="k"
+            v-for="t in railTabs"
+            :key="t.key"
             class="rail-item"
-            :class="{ active: nav === k }"
-            :title="m.label"
-            @click="nav = k; pushRecent(k)"
+            :class="{ active: nav === t.key }"
+            :title="t.label"
+            @click="nav = t.key; pushRecent(t.key)"
           >
-            <i :class="m.icon"></i>
-            <span v-if="k === 'message' && app.unreadTotal > 0" class="rail-badge">{{ app.unreadTotal > 99 ? '99+' : app.unreadTotal }}</span>
+            <i :class="t.icon"></i>
+            <span v-if="t.key === 'message' && app.unreadTotal > 0" class="rail-badge">{{ app.unreadTotal > 99 ? '99+' : app.unreadTotal }}</span>
           </button>
         </div>
         <!-- 2.1.2 最近使用 -->

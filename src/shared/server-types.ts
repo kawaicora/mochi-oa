@@ -130,6 +130,7 @@ export interface Company {
   code?: string
   ownerId: number
   avatar?: string
+  jobEnabled?: boolean
   createdAt?: string
 }
 

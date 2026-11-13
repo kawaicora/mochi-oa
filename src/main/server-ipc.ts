@@ -390,6 +390,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverUpdateCompanyLogo, (_e, companyId, logo) =>
     serverClient.updateCompanyLogo(Number(companyId) || 0, typeof logo === 'string' ? logo : '')
   )
+  ipcMain.handle(IpcChannels.serverCompanyJobEnabledSet, (_e, payload) =>
+    serverClient.companyJobEnabledSet((payload as Record<string, unknown>) ?? {})
+  )
   ipcMain.handle(IpcChannels.serverUserSearch, (_e, keyword) =>
     serverClient.searchUsers(typeof keyword === 'string' ? keyword : '')
   )

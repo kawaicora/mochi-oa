@@ -1051,6 +1051,11 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'company:updateLogo', { companyId, logo })
   }
 
+  async companyJobEnabledSet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'company:jobEnabledSet', payload)
+  }
+
   // ─── 消息 ───────────────────────────────────────────────
 
   async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
