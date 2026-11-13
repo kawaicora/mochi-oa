@@ -23,7 +23,17 @@ import type {
   MessageKind
 } from '../../../shared/server-types'
 import type { NotifTarget } from '../../../shared/ipc'
-import { convKey, invalidateSoundCache, notifyEvent, setNotifyPolicy, type NotifyPolicy } from '../utils/notify-manager'
+import {
+  convKey,
+  notifyEvent,
+  notifyCfg,
+  loadNotifyCfg,
+  saveNotifyCfg,
+  isConvMuted,
+  setConvMuted,
+  setConvRing,
+  convRingOf
+} from '../utils/notify-manager'
 import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
 import { toPlain } from '../utils/plain'
 import { mergeReadPosition } from '../utils/read-receipt'
@@ -1320,93 +1330,9 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) messages.value = messages.value.filter((m) => m.id !== messageId)
     return { ok: ack.ok, error: ack.error }
   }
-  // ─── 通知设置（本地存储 userData/server-config.json）───
-  // 通知的「弹不弹 / 响不响 / 响哪个音」全部由 utils/notify-manager.ts 统一决策，
-  // 这里只负责持有设置并提供读写，供设置面板与会话右键使用。
-  const notifyCfg = ref<{
-    notifySound: boolean
-    callSound: boolean
-    messageSoundFile: string
-    callSoundFile: string
-    dnd: boolean
-    dndConvs: string[]
-    convRings: Record<string, string>
-  }>({ notifySound: true, callSound: true, messageSoundFile: '', callSoundFile: '', dnd: false, dndConvs: [], convRings: {} })
-
-  async function loadNotifyCfg(): Promise<void> {
-    try {
-      const cfg = await window.pantry.serverGetSettings()
-      notifyCfg.value = {
-        notifySound: cfg.notifySound !== false,
-        callSound: cfg.callSound !== false,
-        messageSoundFile: cfg.messageSoundFile ?? '',
-        callSoundFile: cfg.callSoundFile ?? '',
-        dnd: cfg.dnd === true,
-        dndConvs: Array.isArray(cfg.dndConvs) ? cfg.dndConvs : [],
-        convRings: cfg.convRings && typeof cfg.convRings === 'object' ? cfg.convRings : {}
-      }
-    } catch (e) {
-      console.warn('[app] 读取通知设置失败', e)
-    }
-    setNotifyPolicy(notifyPolicy())
-  }
-
-  async function saveNotifyCfg(patch: Partial<typeof notifyCfg.value>): Promise<void> {
-    notifyCfg.value = { ...notifyCfg.value, ...patch }
-    try {
-      // 必须传「纯数据」：notifyCfg 是 Vue 响应式对象，dndConvs/convRings 是 Proxy，
-      // IPC 结构化克隆碰到 Proxy 会直接抛 "An object could not be cloned"（免打扰开关点了没保存就是这个原因）。
-      await window.pantry.serverSaveSettings({
-        notifySound: notifyCfg.value.notifySound,
-        callSound: notifyCfg.value.callSound,
-        messageSoundFile: notifyCfg.value.messageSoundFile,
-        callSoundFile: notifyCfg.value.callSoundFile,
-        dnd: notifyCfg.value.dnd,
-        dndConvs: [...notifyCfg.value.dndConvs],
-        convRings: { ...notifyCfg.value.convRings }
-      })
-    } catch (e) {
-      console.warn('[app] 保存通知设置失败', e)
-    }
-    setNotifyPolicy(notifyPolicy())
-    // 换了音频文件必须让缓存失效，否则还是播旧的
-    if ('messageSoundFile' in patch || 'callSoundFile' in patch || 'convRings' in patch) invalidateSoundCache()
-  }
-
-  /** 打包成通知管理器需要的策略对象（同样避免把响应式 Proxy 传出去） */
-  function notifyPolicy(): NotifyPolicy {
-    const c = notifyCfg.value
-    return {
-      sound: c.notifySound,
-      callSound: c.callSound,
-      dnd: c.dnd,
-      dndConvs: [...c.dndConvs],
-      messageSoundFile: c.messageSoundFile,
-      callSoundFile: c.callSoundFile,
-      convRings: { ...c.convRings }
-    }
-  }
-
-  /** 会话是否免打扰 */
-  function isConvMuted(key: string): boolean {
-    return notifyCfg.value.dndConvs.includes(key)
-  }
-  /** 切换会话免打扰 */
-  async function setConvMuted(key: string, muted: boolean): Promise<void> {
-    const list = notifyCfg.value.dndConvs.filter((k) => k !== key)
-    if (muted) list.push(key)
-    await saveNotifyCfg({ dndConvs: list })
-  }
-  /** 设置会话自定义铃声（空串=清除，回到全局来电铃声） */
-  async function setConvRing(key: string, file: string): Promise<void> {
-    const next = { ...notifyCfg.value.convRings }
-    if (file) next[key] = file
-    else delete next[key]
-    await saveNotifyCfg({ convRings: next })
-  }
-  function convRingOf(key: string): string {
-    return notifyCfg.value.convRings[key] ?? ''
-  }
+  // ─── 通知设置 ───
+  // 通知的「弹不弹 / 响不响 / 响哪个音」、静音/免打扰、铃声选择与持久化
+  // 全部由 utils/notify-manager.ts 统一管理；这里仅把管理器导出的状态/方法转发给组件。
 
   function onServerMessage(msg: ServerChatMessage): void {
     const idx = messages.value.findIndex((m) => m.id === msg.id)
