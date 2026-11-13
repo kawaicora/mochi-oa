@@ -31,39 +31,29 @@ interface UpdateInfo {
     version: string
     /** 老写法扁平兼容项（旧 Windows 客户端读取）；新客户端仅在无平台条目时给 Windows 回退 */
     downloadUrl?: string
-    /** 以「平台_架构」为键（windows_x86_64 / windows_arm64 / linux_x86_64 / linux_arm64 / darwin_x86_64 / darwin_arm64） */
+    /** 以平台名为键（windows / linux / darwin）；一个安装包覆盖全部架构 */
     platforms: Record<string, UpdatePlatformEntry>
 }
 
 const UPDATE_DIR = "mochi-update"
 const SUCCESS_FLAG = "update-success.flag"
 
-/** 自身平台键：标准平台名 windows/linux/darwin × 标准架构名 x86_64/arm64 */
-function ownPlatformKey(): string {
-    const plat =
-        process.platform === "win32" ? "windows"
+/** 自身平台键：标准平台名 windows/linux/darwin（不再区分架构）。 */
+function ownPlatform(): string {
+    return process.platform === "win32" ? "windows"
         : process.platform === "darwin" ? "darwin"
         : process.platform === "linux" ? "linux"
         : process.platform
-    const arch =
-        process.arch === "arm64" ? "arm64"
-        : process.arch === "x64" ? "x86_64"
-        : process.arch
-    return `${plat}_${arch}`
 }
 
-/** 按自身平台+架构匹配更新包：精确键 → 同族任意架构 → 老写法扁平 downloadUrl（仅 Windows）。 */
+/** 按自身平台匹配更新包：精确平台条目 → 老写法扁平 downloadUrl（仅 Windows）。 */
 function resolveDownloadUrl(update: UpdateInfo): string | null {
     const plats = update.platforms ?? {}
-    const own = ownPlatformKey()
+    const own = ownPlatform()
     const exact = plats[own]?.downloadUrl
     if (exact) return exact
-    const plat = own.split("_")[0]
-    for (const [k, v] of Object.entries(plats)) {
-        if (k.startsWith(plat + "_") && v.downloadUrl) return v.downloadUrl
-    }
     // 兼容老写法：没有平台条目时，仅 Windows 回退到根节点扁平 downloadUrl
-    if (plat === "windows" && update.downloadUrl) return update.downloadUrl
+    if (own === "windows" && update.downloadUrl) return update.downloadUrl
     return null
 }
 
@@ -160,7 +150,7 @@ async function checkUpdate(): Promise<void> {
 
         const relativeUrl = resolveDownloadUrl(update);
         if (!relativeUrl) {
-            console.log(`自动更新：当前平台 ${ownPlatformKey()} 暂无对应更新包`);
+            console.log(`自动更新：当前平台 ${ownPlatform()} 暂无对应更新包`);
             return;
         }
 
@@ -183,7 +173,7 @@ async function checkUpdate(): Promise<void> {
         }
 
         console.log(
-            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}（${ownPlatformKey()}）`
+            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}（${ownPlatform()}）`
         );
         console.debug(`自动更新：下载地址 ${relativeUrl}`);
         // 解析服务器下载地址
@@ -249,7 +239,7 @@ async function downloadInstaller(
     await mkdir(dir, { recursive: true });
 
     const tempPath = join(dir, "update.tmp");
-    const installerPath = join(dir, `update_${ownPlatformKey()}.${installerExt(url)}`);
+    const installerPath = join(dir, `update_${ownPlatform()}.${installerExt(url)}`);
 
     await rm(tempPath, { force: true });
 

@@ -70,7 +70,7 @@ async function uploadUpdate(): Promise<void> {
     const resp = await window.pantry.serverUploadUpdate({ filePath: r.path, name: updateFile.value.name })
     if (resp.ok) {
       updateProgress.value = 100
-      const detail = (resp.keys && resp.keys.length > 0) ? resp.keys.join(', ') : (resp.archs ?? []).join(', ')
+      const detail = (resp.keys && resp.keys.length > 0) ? resp.keys.join(', ') : (resp.platform ?? '')
       updateResult.value = { ok: true, version: resp.version, detail }
     } else {
       updateResult.value = { ok: false, error: resp.error || '上传失败' }

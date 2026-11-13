@@ -888,26 +888,24 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     try {
       const cfg = loadServerConfig()
       if (!cfg.serverUrl) return { ok: false, error: '未配置服务器地址' }
-      const p = (payload ?? {}) as { filePath?: string; name?: string; platform?: string; arch?: string; version?: string }
+      const p = (payload ?? {}) as { filePath?: string; name?: string; platform?: string; version?: string }
       const filePath = String(p.filePath ?? '')
       if (!filePath) return { ok: false, error: '缺少更新包文件' }
       const buf = await readFile(filePath)
       const origName = String(p.name ?? basename(filePath))
-      // 客户端本地识别平台/架构/版本；渲染层显式传入的字段优先覆盖。
+      // 客户端本地识别平台/版本；渲染层显式传入的字段优先覆盖。
       const detected = await detectFromBufferAsync(buf, origName)
       const formPlatform = p.platform || detected.platform
-      const formArch = p.arch || detected.archs.join(',')
       const formVersion = p.version || detected.version
       const boundary = '----mochiUpdate' + Date.now().toString(16)
 
-      // multipart 各部分：可选平台/架构/版本表单字段 + 文件字段（保留原始文件名，供服务端识别格式与架构）
+      // multipart 各部分：可选平台/版本表单字段 + 文件字段（保留原始文件名，供服务端识别格式）
       const parts: Buffer[] = []
       const field = (key: string, val: string): void => {
         if (!val) return
         parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`))
       }
       field('platform', formPlatform)
-      field('arch', formArch)
       field('version', formVersion)
       parts.push(Buffer.from(
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${origName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
@@ -919,9 +917,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
       const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest
 
-      return await new Promise<{ ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }>((resolve) => {
+      return await new Promise<{ ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }>((resolve) => {
         let settled = false
-        const finish = (result: { ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }): void => {
+        const finish = (result: { ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }): void => {
           if (settled) return
           settled = true
           clearInterval(timer)
@@ -940,10 +938,10 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           res.on('data', (c: Buffer) => chunks.push(c))
           res.on('end', () => {
             const text = Buffer.concat(chunks).toString('utf8')
-            let result: { ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }
+            let result: { ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }
             try {
               const data = JSON.parse(text)
-              result = { ok: data.ok === true, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error }
+              result = { ok: data.ok === true, version: data.version, platform: data.platform, keys: data.keys, error: data.error }
             } catch {
               result = { ok: false, error: `响应解析失败: ${text.slice(0, 200)}` }
             }
