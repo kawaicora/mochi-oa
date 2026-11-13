@@ -73,6 +73,23 @@ export interface RequestAlert {
   body: string
 }
 
+/** 通用请求面板按钮 */
+export interface RequestPanelButton {
+  label: string
+  role?: 'primary' | 'danger' | 'default'
+  /** 点击后执行；面板在回调触发后关闭 */
+  run?: () => Promise<unknown> | unknown
+}
+
+/** 通用请求面板条目：标题 + 内容 + 按钮列表 */
+export interface RequestPanelItem {
+  id: number
+  kind: RequestAlertKind
+  title: string
+  body: string
+  buttons: RequestPanelButton[]
+}
+
 export const useAppStore = defineStore('app', () => {
   const server = useServerStore()
 
@@ -222,14 +239,16 @@ export const useAppStore = defineStore('app', () => {
     notifyRequest('groupInvite', '群邀请', `${ev.from.nick} 邀请你加入群「${ev.groupName}」`)
     void refreshGroupInvites()
     const invId = ev.invitationId ?? 0
-    if (window.confirm(`${ev.from.nick} 邀请你加入群「${ev.groupName}」，是否接受？`)) {
-      void window.pantry.serverGroupAcceptInvite(invId).then(() => {
-        void refreshGroups()
-        void refreshConversations()
-      })
-    } else if (invId) {
-      void window.pantry.serverGroupDeclineInvite(invId).then(() => void refreshGroupInvites())
-    }
+    if (!invId) return
+    pushRequestPanel({
+      kind: 'groupInvite',
+      title: '群邀请',
+      body: `${ev.from.nick} 邀请你加入群「${ev.groupName}」`,
+      buttons: [
+        { label: '拒绝', role: 'default', run: () => respondGroupInvite(invId, false) },
+        { label: '同意', role: 'primary', run: () => respondGroupInvite(invId, true) }
+      ]
+    })
   })
 
   async function transferGroupOwner(userId: number): Promise<{ ok: boolean; error?: string }> {
@@ -352,12 +371,24 @@ export const useAppStore = defineStore('app', () => {
     void refreshFriends()
   })
   window.pantry.onFriendRequest((raw) => {
-    const p = (raw ?? {}) as { fromId?: number; fromNick?: string; fromName?: string }
+    const p = (raw ?? {}) as { requestId?: number; fromId?: number; fromNick?: string; fromName?: string; refresh?: boolean }
     void refreshFriendRequests()
     const who = p.fromNick || p.fromName
     // { refresh: true } 这类仅刷新列表的回包不带发起人，不弹通知
     if (p.fromId == null && !who) return
     notifyRequest('friend', '好友申请', `${who || '对方'} 请求添加你为好友`)
+    if (p.requestId != null) {
+      const reqId = p.requestId
+      pushRequestPanel({
+        kind: 'friend',
+        title: '好友申请',
+        body: `${who || '对方'} 请求添加你为好友`,
+        buttons: [
+          { label: '拒绝', role: 'default', run: () => respondFriendRequest(reqId, false) },
+          { label: '同意', role: 'primary', run: () => respondFriendRequest(reqId, true) }
+        ]
+      })
+    }
   })
   // 收到公司入司邀请（被邀请人）
   window.pantry.onCompanyInviteReceived((d) => {
@@ -368,11 +399,15 @@ export const useAppStore = defineStore('app', () => {
     void refreshCompanyInvites()
     const invId = Number(inv.id) || 0
     if (!invId) return
-    if (window.confirm(`${who} 邀请你加入「${company}」，是否接受？`)) {
-      void window.pantry.serverCompanyAcceptInvite(invId).then(() => void refreshCompanies())
-    } else {
-      void window.pantry.serverCompanyDeclineInvite(invId).then(() => void refreshCompanyInvites())
-    }
+    pushRequestPanel({
+      kind: 'companyInvite',
+      title: '企业邀请',
+      body: `${who} 邀请你加入「${company}」`,
+      buttons: [
+        { label: '拒绝', role: 'default', run: () => respondCompanyInvite(invId, false) },
+        { label: '同意', role: 'primary', run: () => respondCompanyInvite(invId, true) }
+      ]
+    })
   })
   // 收到加入公司申请（公司 owner/管理员）
   window.pantry.onCompanyJoinRequest((d) => {
@@ -1014,6 +1049,20 @@ export const useAppStore = defineStore('app', () => {
     setTimeout(() => dismissRequestAlert(id), 8000)
     void notifyEvent({ kind: 'system', title, body, force: true, target: { kind: 'main' } })
   }
+
+  // ─── 通用请求面板（标题 + 内容 + 按钮列表，队列逐条弹出） ───
+  const requestPanelQueue = ref<RequestPanelItem[]>([])
+  let panelSeq = 1
+  const currentPanel = computed(() => requestPanelQueue.value[0] ?? null)
+  function pushRequestPanel(item: Omit<RequestPanelItem, 'id'>): void {
+    requestPanelQueue.value.push({ id: panelSeq++, ...item })
+  }
+  function resolveRequestPanel(id: number, buttonIndex: number): void {
+    const item = requestPanelQueue.value.find((i) => i.id === id)
+    const btn = item?.buttons[buttonIndex]
+    requestPanelQueue.value = requestPanelQueue.value.filter((i) => i.id !== id)
+    if (btn?.run) void Promise.resolve().then(() => btn.run?.())
+  }
   async function respondFriendRequest(requestId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverFriendRespond(requestId, accept)
     if (ack.ok) {
@@ -1537,6 +1586,9 @@ export const useAppStore = defineStore('app', () => {
     respondCompanyInvite,
     requestAlerts,
     dismissRequestAlert,
+    currentPanel,
+    pushRequestPanel,
+    resolveRequestPanel,
     openGroup,
     openDm,
     openConversation,

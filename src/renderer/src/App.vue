@@ -7,6 +7,7 @@ import LoginScreen from './components/LoginScreen.vue'
 import MainScreen from './components/MainScreen.vue'
 import IncomingCallModal from './components/IncomingCallModal.vue'
 import UpdateProgressOverlay from './components/UpdateProgressOverlay.vue'
+import RequestPanel from './components/RequestPanel.vue'
 import RemoteViewer from './remote/RemoteViewer.vue'
 import { remoteSlaveState } from './remote/RemoteUi'
 import type { NewDeviceLoginEvent, SessionRevokedEvent } from '@shared/server-types'
@@ -48,6 +49,9 @@ function openRequestAlert(id: number): void {
         ? 'friends'
         : undefined
   window.dispatchEvent(new CustomEvent('mochi:nav', { detail: scope ? { tab: 'contacts', scope } : 'contacts' }))
+}
+function onPanelSelect(index: number): void {
+  if (app.currentPanel) app.resolveRequestPanel(app.currentPanel.id, index)
 }
 function fmtAt(iso: string): string {
   const d = new Date(iso)
@@ -130,6 +134,9 @@ onMounted(async () => {
       </div>
     </div>
   </transition-group>
+
+  <!-- 通用请求面板：标题 + 内容 + 按钮列表，队列逐条弹出 -->
+  <RequestPanel v-if="app.currentPanel" :item="app.currentPanel" @select="onPanelSelect" />
 </template>
 
 <style scoped>
