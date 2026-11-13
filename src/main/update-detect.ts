@@ -29,7 +29,14 @@ const PLATFORM_BY_EXT: Record<string, string> = {
   dmg: 'darwin'
 }
 
-const SEMVER_RE = /(\d+)\.(\d+)\.(\d+)/
+// 三段 semver：x.y.z；边界左侧不能紧贴数字/点，右侧多出的第 4 段及以后整体丢弃。
+// 例如 1.2.3.4 -> 1.2.3；紧凑日期 20261113 不带点，不会被误匹配。
+const SEMVER_RE = /(?<![\d.])(\d+)\.(\d+)\.(\d+)(?:\.\d+)*/
+
+/** 把正则命中的三段拼成 x.y.z，丢弃第 4 段及以后。 */
+function semverOf(m: RegExpMatchArray): string {
+  return `${m[1]}.${m[2]}.${m[3]}`
+}
 
 function extOf(name: string): string {
   const i = name.lastIndexOf('.')
@@ -110,10 +117,10 @@ function peVersion(b: Buffer): string {
   return ''
 }
 
-/** filenameVersion 从文件名提取 semver。 */
+/** filenameVersion 从文件名提取三段 semver，丢弃第 4 段及以后。 */
 function filenameVersion(name: string): string {
   const m = name.match(SEMVER_RE)
-  return m ? m[0] : ''
+  return m ? semverOf(m) : ''
 }
 
 /** zipPlistVersion 解 macOS zip 包，从 Contents/Info.plist 读取 CFBundleShortVersionString。 */
@@ -125,7 +132,7 @@ async function zipPlistVersion(zip: JSZip): Promise<string> {
       const m = text.match(/CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)
       if (m) {
         const v = m[1].trim().match(SEMVER_RE)
-        if (v) return v[0]
+        if (v) return semverOf(v)
       }
     } catch {
       // 跳过损坏/不可读条目
