@@ -290,6 +290,8 @@ async function doJoinCompany(): Promise<void> {
 
 onMounted(() => {
   void app.refreshFriendRequests()
+  void app.refreshCompanyInvites()
+  void app.refreshGroupInvites()
 })
 
 // 右键
@@ -443,7 +445,45 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
     <!-- 企业/团队邀请 -->
     <template v-else-if="scope === 'invites'">
       <div class="content-head"><i class="far fa-envelope"></i><span class="content-title">企业/团队邀请</span></div>
-      <div class="content-scroll"><div class="hint pad">邀请功能建设中，请在企业管理端处理入职邀请。</div></div>
+      <div class="content-scroll">
+        <!-- 待处理公司邀请 -->
+        <template v-if="app.companyInvites.length">
+          <div class="block-title">企业邀请（{{ app.companyInvites.length }}）</div>
+          <div class="member-list" style="margin-bottom:16px">
+            <div v-for="inv in app.companyInvites" :key="inv.id" class="member-row">
+              <div class="member-av group">{{ (inv.companyName || '企').slice(0, 1) }}</div>
+              <div class="member-info">
+                <div class="member-name">{{ inv.companyName || '企业' }}</div>
+                <div class="member-sub">{{ inv.inviterNick || inv.username || '对方' }} 邀请你加入</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="dt-btn dt-btn-primary" @click="app.respondCompanyInvite(inv.id, true)"><i class="fas fa-check"></i> 同意</button>
+                <button class="dt-btn" @click="app.respondCompanyInvite(inv.id, false)"><i class="fas fa-times"></i> 拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 待处理群邀请 -->
+        <template v-if="app.groupInvites.length">
+          <div class="block-title">群邀请（{{ app.groupInvites.length }}）</div>
+          <div class="member-list" style="margin-bottom:16px">
+            <div v-for="inv in app.groupInvites" :key="inv.id" class="member-row">
+              <div class="member-av group">{{ (inv.groupName || '群').slice(0, 1) }}</div>
+              <div class="member-info">
+                <div class="member-name">{{ inv.groupName || '群聊' }}</div>
+                <div class="member-sub">{{ inv.inviterNick || inv.username || '对方' }} 邀请你加入群</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="dt-btn dt-btn-primary" @click="app.respondGroupInvite(inv.id, true)"><i class="fas fa-check"></i> 同意</button>
+                <button class="dt-btn" @click="app.respondGroupInvite(inv.id, false)"><i class="fas fa-times"></i> 拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="!app.companyInvites.length && !app.groupInvites.length" class="hint pad">暂无待处理的企业或群邀请</div>
+      </div>
     </template>
 
     <!-- 创建或加入企业/团队 -->

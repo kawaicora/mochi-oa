@@ -39,8 +39,15 @@ function toast(text: string, kind: 'info' | 'warn' = 'info'): void {
 }
 provide('toast', toast)
 function openRequestAlert(id: number): void {
+  const alert = app.requestAlerts.find((a) => a.id === id)
   app.dismissRequestAlert(id)
-  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: 'contacts' }))
+  const scope =
+    alert?.kind === 'companyInvite' || alert?.kind === 'groupInvite'
+      ? 'invites'
+      : alert?.kind === 'friend'
+        ? 'friends'
+        : undefined
+  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: scope ? { tab: 'contacts', scope } : 'contacts' }))
 }
 function fmtAt(iso: string): string {
   const d = new Date(iso)

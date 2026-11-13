@@ -103,10 +103,16 @@ onMounted(async () => {
   window.addEventListener('mochi:nav', onNavEvent)
 })
 function onNavEvent(e: Event): void {
-  const t = (e as CustomEvent).detail
+  const d = (e as CustomEvent).detail
+  const t = typeof d === 'string' ? d : (d?.tab as unknown)
+  const scope = typeof d === 'object' && d && d.scope != null ? String(d.scope) : undefined
   if (typeof t !== 'string') return
   if (t === 'job' && !app.jobEnabled) return
   nav.value = t as typeof nav.value
+  if (t === 'contacts' && scope) {
+    cScope.value = scope as ContactsScope
+    cDept.value = null
+  }
 }
 onBeforeUnmount(() => window.removeEventListener('mochi:nav', onNavEvent))
 onBeforeUnmount(() => {
