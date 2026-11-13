@@ -884,8 +884,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   // 上传更新包到 /api/admin/update（主进程发起 HTTP，无 CORS 限制，带进度）
   ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, payload) => {
     const send = (channel: string, data: unknown) => (event.sender.send as (ch: string, d: unknown) => void)(channel, data)
-    const onChannel = (ch: string, fn: any) => (event.sender.on as (c: string, f: any) => void)(ch, fn)
-    const offChannel = (ch: string, fn: any) => (event.sender.removeListener as (c: string, f: any) => void)(ch, fn)
     try {
       const cfg = loadServerConfig()
       if (!cfg.serverUrl) return { ok: false, error: '未配置服务器地址' }
@@ -893,7 +891,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const filePath = String(p.filePath ?? '')
       if (!filePath) return { ok: false, error: '缺少更新包文件' }
       const buf = await readFile(filePath)
-      const total = buf.length
       const origName = String(p.name ?? basename(filePath))
       const boundary = '----mochiUpdate' + Date.now().toString(16)
 
@@ -915,65 +912,75 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
 
       const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
       const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest
-      const req = doRequest(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length
-        }
-      }, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8')
-          try {
-            const data = JSON.parse(text)
-            send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error })
-          } catch {
-            send('server:uploadUpdate:progress', { done: true, ok: false, error: `响应解析失败: ${text.slice(0, 200)}` })
-          }
-        })
-      })
-      req.on('error', (err: Error) => {
-        send('server:uploadUpdate:progress', { done: true, ok: false, error: err.message })
-      })
-      // 按 64KB 分块写入，跟踪进度
-      const CHUNK = 64 * 1024
-      let offset = 0
-      let uploadFinished = false
-      const writeChunk = () => {
-        while (offset < body.length) {
-          const end = Math.min(offset + CHUNK, body.length)
-          const ok = req.write(body.subarray(offset, end))
-          offset = end
-          if (!ok) {
-            req.once('drain', writeChunk)
-            return
-          }
-        }
-        uploadFinished = true
-        send('server:uploadUpdate:progress', { done: false, percent: 100, written: body.length, total: body.length })
-        req.end()
-      }
-      // 定期上报进度
-      const timer = setInterval(() => {
-        if (uploadFinished) return
-        const written = (req as any).socket?.bytesWritten ?? 0
-        const pct = Math.min(99, Math.round((written / body.length) * 100))
-        send('server:uploadUpdate:progress', { done: false, percent: pct, written, total: body.length })
-      }, 200)
-      writeChunk()
-      // 等待结果（通过 promise 等待 done 事件）
+
       return await new Promise<{ ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }>((resolve) => {
-        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }) => {
-          if (data.done) {
-            clearInterval(timer)
-            offChannel('server:uploadUpdate:progress', handler)
-            resolve({ ok: data.ok, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error })
-          }
+        let settled = false
+        const finish = (result: { ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }): void => {
+          if (settled) return
+          settled = true
+          clearInterval(timer)
+          resolve(result)
         }
-        onChannel('server:uploadUpdate:progress', handler)
+
+        const req = doRequest(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${cfg.token}`,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length
+          }
+        }, (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8')
+            let result: { ok: boolean; version?: string; platform?: string; archs?: string[]; keys?: string[]; error?: string }
+            try {
+              const data = JSON.parse(text)
+              result = { ok: data.ok === true, version: data.version, platform: data.platform, archs: data.archs, keys: data.keys, error: data.error }
+            } catch {
+              result = { ok: false, error: `响应解析失败: ${text.slice(0, 200)}` }
+            }
+            send('server:uploadUpdate:progress', { done: true, ...result })
+            finish(result)
+          })
+        })
+        req.on('error', (err: Error) => {
+          const result = { ok: false, error: err.message }
+          send('server:uploadUpdate:progress', { done: true, ...result })
+          finish(result)
+        })
+        // 120s 未响应直接失败，避免永久卡住
+        req.setTimeout(120000, () => {
+          req.destroy(new Error('上传超时（120s 无响应）'))
+        })
+
+        // 按 64KB 分块写入，跟踪进度
+        const CHUNK = 64 * 1024
+        let offset = 0
+        let uploadFinished = false
+        const writeChunk = () => {
+          while (offset < body.length) {
+            const end = Math.min(offset + CHUNK, body.length)
+            const ok = req.write(body.subarray(offset, end))
+            offset = end
+            if (!ok) {
+              req.once('drain', writeChunk)
+              return
+            }
+          }
+          uploadFinished = true
+          send('server:uploadUpdate:progress', { done: false, percent: 100, written: body.length, total: body.length })
+          req.end()
+        }
+        // 定期上报进度
+        const timer = setInterval(() => {
+          if (uploadFinished) return
+          const written = (req as any).socket?.bytesWritten ?? 0
+          const pct = Math.min(99, Math.round((written / body.length) * 100))
+          send('server:uploadUpdate:progress', { done: false, percent: pct, written, total: body.length })
+        }, 200)
+        writeChunk()
       })
     } catch (err) {
       console.error('[update] 上传失败', err)
