@@ -52,6 +52,10 @@ export const IpcChannels = {
   serverCompanySetRole: 'server:company:setRole',
   serverCompanyKick: 'server:company:kick',
   serverCompanyAddMember: 'server:company:addMember',
+  serverCompanyInvite: 'server:company:invite',
+  serverCompanyMyInvites: 'server:company:myInvites',
+  serverCompanyAcceptInvite: 'server:company:acceptInvite',
+  serverCompanyDeclineInvite: 'server:company:declineInvite',
   serverCompanyTransfer: 'server:company:transfer',
   serverCompanyDissolve: 'server:company:dissolve',
   serverUpdateCompanyLogo: 'server:company:updateLogo',
@@ -80,6 +84,7 @@ export const IpcChannels = {
   serverGroupInvite: 'server:group:invite',
   serverGroupAcceptInvite: 'server:group:acceptInvite',
   serverGroupDeclineInvite: 'server:group:declineInvite',
+  serverGroupMyInvites: 'server:group:myInvites',
   serverGroupTransfer: 'server:group:transfer',
   serverGroupDissolve: 'server:group:dissolve',
 

@@ -382,6 +382,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverCompanyAddMember, (_e, companyId, target, departmentId) =>
     serverClient.addCompanyMember(Number(companyId) || 0, typeof target === 'number' ? target : String(target), typeof departmentId === 'number' ? departmentId : undefined)
   )
+  ipcMain.handle(IpcChannels.serverCompanyInvite, (_e, companyId, opts) =>
+    serverClient.invite(Number(companyId) || 0, opts)
+  )
+  ipcMain.handle(IpcChannels.serverCompanyMyInvites, () => serverClient.myInvites())
+  ipcMain.handle(IpcChannels.serverCompanyAcceptInvite, (_e, invitationId) =>
+    serverClient.acceptInvite(Number(invitationId) || 0)
+  )
+  ipcMain.handle(IpcChannels.serverCompanyDeclineInvite, (_e, invitationId) =>
+    serverClient.declineInvite(Number(invitationId) || 0)
+  )
   ipcMain.handle(IpcChannels.serverCompanyTransfer, (_e, companyId, userId) =>
     serverClient.companyTransfer(Number(companyId) || 0, Number(userId) || 0)
   )
@@ -452,11 +462,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverGroupInvite, (_e, groupId, userId) =>
     serverClient.groupInvite(Number(groupId) || 0, Number(userId) || 0)
   )
-  ipcMain.handle(IpcChannels.serverGroupAcceptInvite, (_e, groupId) =>
-    serverClient.groupAcceptInvite(Number(groupId) || 0)
+  ipcMain.handle(IpcChannels.serverGroupAcceptInvite, (_e, invitationId) =>
+    serverClient.groupAcceptInvite(Number(invitationId) || 0)
   )
-  ipcMain.handle(IpcChannels.serverGroupDeclineInvite, (_e, groupId) =>
-    serverClient.groupDeclineInvite(Number(groupId) || 0)
+  ipcMain.handle(IpcChannels.serverGroupDeclineInvite, (_e, invitationId) =>
+    serverClient.groupDeclineInvite(Number(invitationId) || 0)
+  )
+  ipcMain.handle(IpcChannels.serverGroupMyInvites, () =>
+    serverClient.groupMyInvites()
   )
   ipcMain.handle(IpcChannels.serverGroupTransfer, (_e, groupId, userId) =>
     serverClient.groupTransfer(Number(groupId) || 0, Number(userId) || 0)

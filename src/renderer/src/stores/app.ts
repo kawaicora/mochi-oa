@@ -9,9 +9,11 @@ import { ref, computed } from 'vue'
 import { useServerStore } from './server'
 import type {
   Ack,
+  CompanyInvitation,
   CompanyMembership,
   Department,
   Group,
+  GroupInvitation,
   ServerGroupMember,
   ConversationItem,
   ReadReceipt,
@@ -218,12 +220,15 @@ export const useAppStore = defineStore('app', () => {
 
   window.pantry.onGroupInvite((ev) => {
     notifyRequest('groupInvite', '群邀请', `${ev.from.nick} 邀请你加入群「${ev.groupName}」`)
+    void refreshGroupInvites()
+    const invId = ev.invitationId ?? 0
     if (window.confirm(`${ev.from.nick} 邀请你加入群「${ev.groupName}」，是否接受？`)) {
-      void window.pantry.serverGroupAcceptInvite(ev.groupId).then(() => {
+      void window.pantry.serverGroupAcceptInvite(invId).then(() => {
+        void refreshGroups()
         void refreshConversations()
       })
-    } else {
-      void window.pantry.serverGroupDeclineInvite(ev.groupId)
+    } else if (invId) {
+      void window.pantry.serverGroupDeclineInvite(invId).then(() => void refreshGroupInvites())
     }
   })
 
@@ -360,7 +365,14 @@ export const useAppStore = defineStore('app', () => {
     const who = inv.inviterNick || inv.username || '对方'
     const company = inv.companyName || '公司'
     notifyRequest('companyInvite', '企业邀请', `${who} 邀请你加入「${company}」`)
-    void refreshCompanies()
+    void refreshCompanyInvites()
+    const invId = Number(inv.id) || 0
+    if (!invId) return
+    if (window.confirm(`${who} 邀请你加入「${company}」，是否接受？`)) {
+      void window.pantry.serverCompanyAcceptInvite(invId).then(() => void refreshCompanies())
+    } else {
+      void window.pantry.serverCompanyDeclineInvite(invId).then(() => void refreshCompanyInvites())
+    }
   })
   // 收到加入公司申请（公司 owner/管理员）
   window.pantry.onCompanyJoinRequest((d) => {
@@ -496,14 +508,14 @@ export const useAppStore = defineStore('app', () => {
       await loadNotifyCfg() // 通知/免打扰设置随启动一起载入，消息到达前就绪
       await refreshCompanies()
       if (companies.value.length === 0) {
-        await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
+        await Promise.all([refreshGroups(), refreshFriends(), refreshConversations(), refreshGroupInvites(), refreshCompanyInvites()])
         ready.value = true
         return
       }
       const saved = server.state.activeCompanyId
       const first = companies.value.some((c) => c.company.id === saved) ? saved : companies.value[0].company.id
       await switchCompany(first)
-      await Promise.all([refreshGroups(), refreshFriends(), refreshConversations()])
+      await Promise.all([refreshGroups(), refreshFriends(), refreshConversations(), refreshGroupInvites(), refreshCompanyInvites()])
       ready.value = true
       // 启动代理生命周期检查：只做日志断言，不自动改系统代理（避免误配置导致用户离线）
       try {
@@ -965,6 +977,30 @@ export const useAppStore = defineStore('app', () => {
     friendRequests.value = d<{ requests: FriendRequestItem[] }>(ack)?.requests ?? []
   }
 
+  // 待处理群邀请
+  const groupInvites = ref<GroupInvitation[]>([])
+  async function refreshGroupInvites(): Promise<void> {
+    const ack = await window.pantry.serverGroupMyInvites()
+    groupInvites.value = d<{ invites: GroupInvitation[] }>(ack)?.invites ?? []
+  }
+
+  // 待处理公司邀请
+  const companyInvites = ref<CompanyInvitation[]>([])
+  async function refreshCompanyInvites(): Promise<void> {
+    const ack = await window.pantry.serverCompanyMyInvites()
+    companyInvites.value = d<{ invitations: CompanyInvitation[] }>(ack)?.invitations ?? []
+  }
+  async function respondCompanyInvite(invitationId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
+    const ack = accept
+      ? await window.pantry.serverCompanyAcceptInvite(invitationId)
+      : await window.pantry.serverCompanyDeclineInvite(invitationId)
+    if (ack.ok) {
+      await refreshCompanyInvites()
+      if (accept) await refreshCompanies()
+    }
+    return { ok: ack.ok, error: ack.error }
+  }
+
   // ─── 申请/邀请提醒（系统通知 + 应用内卡片） ───
   const requestAlerts = ref<RequestAlert[]>([])
   let alertSeq = 1
@@ -983,6 +1019,20 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) {
       await refreshFriendRequests()
       if (accept) await refreshFriends()
+    }
+    return { ok: ack.ok, error: ack.error }
+  }
+
+  async function respondGroupInvite(invitationId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
+    const ack = accept
+      ? await window.pantry.serverGroupAcceptInvite(invitationId)
+      : await window.pantry.serverGroupDeclineInvite(invitationId)
+    if (ack.ok) {
+      await refreshGroupInvites()
+      if (accept) {
+        await refreshGroups()
+        await refreshConversations()
+      }
     }
     return { ok: ack.ok, error: ack.error }
   }
@@ -1479,6 +1529,12 @@ export const useAppStore = defineStore('app', () => {
     friendRequests,
     refreshFriendRequests,
     respondFriendRequest,
+    groupInvites,
+    refreshGroupInvites,
+    respondGroupInvite,
+    companyInvites,
+    refreshCompanyInvites,
+    respondCompanyInvite,
     requestAlerts,
     dismissRequestAlert,
     openGroup,

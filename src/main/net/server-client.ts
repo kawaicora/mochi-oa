@@ -25,6 +25,7 @@ import type {
   Department,
   Group,
   GroupInviteEvent,
+  GroupInvitation,
   InvitationStatus,
   MemberProfile,
   OrgImportResult,
@@ -941,9 +942,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ invitations: CompanyInvitation[] }>(this.socket, 'company:listInvitations', { companyId })
   }
 
-  async acceptInvite(code: string): Promise<Ack & { data?: { company: Company } }> {
+  async acceptInvite(invitationId: number): Promise<Ack & { data?: { company: Company } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck<{ company: Company }>(this.socket, 'company:acceptInvite', { code })
+    return emitWithAck<{ company: Company }>(this.socket, 'company:acceptInvite', { invitationId })
   }
 
   async declineInvite(invitationId: number): Promise<Ack> {
@@ -1022,13 +1023,17 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'group:invite', { groupId, userId })
   }
-  async groupAcceptInvite(groupId: number): Promise<Ack> {
+  async groupAcceptInvite(invitationId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'group:acceptInvite', { groupId })
+    return emitWithAck(this.socket, 'group:acceptInvite', { invitationId })
   }
-  async groupDeclineInvite(groupId: number): Promise<Ack> {
+  async groupDeclineInvite(invitationId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'group:declineInvite', { groupId })
+    return emitWithAck(this.socket, 'group:declineInvite', { invitationId })
+  }
+  async groupMyInvites(): Promise<Ack & { data?: { invites: GroupInvitation[] } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ invites: GroupInvitation[] }>(this.socket, 'group:myInvites', {})
   }
   async groupTransfer(groupId: number, userId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }

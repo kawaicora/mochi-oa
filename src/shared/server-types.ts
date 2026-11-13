@@ -187,10 +187,27 @@ export interface ServerGroupMember {
 
 /** 群邀请推送（普通成员邀请他人入群） */
 export interface GroupInviteEvent {
+  invitationId?: number
   groupId: number
   groupName: string
   from: { userId: number; nick: string }
   ts: number
+}
+
+/** 待处理群邀请 */
+export interface GroupInvitation {
+  id: number
+  groupId: number
+  groupName?: string
+  userId: number
+  username?: string
+  userNick?: string
+  invitedBy: number
+  inviterNick?: string
+  code: string
+  expiresAt?: string | null
+  status: InvitationStatus
+  createdAt?: string
 }
 
 /** 会话类型 */
@@ -278,8 +295,14 @@ export interface CompanyInvitation {
   id: number
   companyId: number
   companyName?: string
+  companyCode?: string
+  userId?: number
+  username?: string
+  userNick?: string
+  departmentId?: number | null
+  invitedBy?: number
+  inviterNick?: string
   code: string
-  createdBy: number
   status: InvitationStatus
   expiresAt?: string | null
   createdAt?: string

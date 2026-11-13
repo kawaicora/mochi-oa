@@ -3,11 +3,13 @@ import { IpcChannels, IpcEvents, type NotifKind, type NotifTarget } from '../sha
 import type {
   Ack,
   AuthAck,
+  CompanyInvitation,
   NewDeviceLoginEvent,
   OpenMeetingWindowParams,
   RtcChatMessageEvent,
   RtcDmIncomingEvent,
   GroupInviteEvent,
+  GroupInvitation,
   ServerGroupMember,
   RtcDmRejectedEvent,
   RtcEndedEvent,
@@ -215,6 +217,14 @@ const api = {
   serverMembers: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverMembers, companyId),
   serverAddCompanyMember: (companyId: number, target: number | string, departmentId?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverCompanyAddMember, companyId, target, departmentId ?? null),
+  serverCompanyInvite: (companyId: number, opts?: { expiresAt?: string }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyInvite, companyId, opts ?? null),
+  serverCompanyMyInvites: (): Promise<Ack & { data?: { invitations: CompanyInvitation[] } }> =>
+    safeInvoke(IpcChannels.serverCompanyMyInvites),
+  serverCompanyAcceptInvite: (invitationId: number): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyAcceptInvite, invitationId),
+  serverCompanyDeclineInvite: (invitationId: number): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyDeclineInvite, invitationId),
   serverSearchUsers: (keyword: string): Promise<Ack> => safeInvoke(IpcChannels.serverUserSearch, keyword),
   serverDeleteDepartment: (companyId: number, departmentId: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDepartmentDelete, companyId, departmentId),
@@ -238,8 +248,9 @@ const api = {
   serverGroupMute: (groupId: number, userId: number, seconds: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupMute, groupId, userId, seconds),
   serverGroupAdd: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAdd, groupId, userId),
   serverGroupInvite: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupInvite, groupId, userId),
-  serverGroupAcceptInvite: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAcceptInvite, groupId),
-  serverGroupDeclineInvite: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDeclineInvite, groupId),
+  serverGroupAcceptInvite: (invitationId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAcceptInvite, invitationId),
+  serverGroupDeclineInvite: (invitationId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDeclineInvite, invitationId),
+  serverGroupMyInvites: (): Promise<Ack & { data?: { invites: GroupInvitation[] } }> => safeInvoke(IpcChannels.serverGroupMyInvites),
   serverGroupTransfer: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupTransfer, groupId, userId),
   serverGroupDissolve: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDissolve, groupId),
   serverCompanyTransfer: (companyId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyTransfer, companyId, userId),
