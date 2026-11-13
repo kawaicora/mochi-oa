@@ -237,6 +237,10 @@ function openJoin(): void {
   if (!no) return
   void window.pantry.openMeetingWindow({ mode: 'join', meetingNo: no })
 }
+// 管理员面板点进房间 → 加入独立会议窗口（模板里不能直接写 window.pantry，需脚本包装）
+function joinRoom(roomId: string): void {
+  void window.pantry.openMeetingWindow({ mode: 'join', meetingNo: roomId })
+}
 </script>
 
 <template>
@@ -347,7 +351,7 @@ function openJoin(): void {
         <template v-else-if="nav === 'apply'"><ApplyHome /></template>
         <template v-else-if="nav === 'asset'"><AssetView /></template>
         <template v-else-if="nav === 'job'"><JobView /></template>
-        <template v-else-if="nav === 'admin'"><AdminPanel @join-room="(roomId: string) => void window.pantry.openMeetingWindow({ mode: 'join', meetingNo: roomId })" /></template>
+        <template v-else-if="nav === 'admin'"><AdminPanel @join-room="joinRoom" /></template>
       </div>
     </div>
 
