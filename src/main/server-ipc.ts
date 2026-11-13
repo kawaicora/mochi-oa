@@ -882,21 +882,36 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   })
 
   // 上传更新包到 /api/admin/update（主进程发起 HTTP，无 CORS 限制，带进度）
-  ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, filePath: string) => {
+  ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, payload) => {
     const send = (channel: string, data: unknown) => (event.sender.send as (ch: string, d: unknown) => void)(channel, data)
     const onChannel = (ch: string, fn: any) => (event.sender.on as (c: string, f: any) => void)(ch, fn)
     const offChannel = (ch: string, fn: any) => (event.sender.removeListener as (c: string, f: any) => void)(ch, fn)
     try {
       const cfg = loadServerConfig()
       if (!cfg.serverUrl) return { ok: false, error: '未配置服务器地址' }
+      const p = (payload ?? {}) as { filePath?: string; name?: string; platform?: string; arch?: string; version?: string }
+      const filePath = String(p.filePath ?? '')
+      if (!filePath) return { ok: false, error: '缺少更新包文件' }
       const buf = await readFile(filePath)
       const total = buf.length
+      const origName = String(p.name ?? basename(filePath))
       const boundary = '----mochiUpdate' + Date.now().toString(16)
-      const header = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="update.exe"\r\nContent-Type: application/octet-stream\r\n\r\n`
-      )
-      const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
-      const body = Buffer.concat([header, buf, footer])
+
+      // multipart 各部分：可选平台/架构/版本表单字段 + 文件字段（保留原始文件名，供服务端识别格式与架构）
+      const parts: Buffer[] = []
+      const field = (key: string, val: string): void => {
+        if (!val) return
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`))
+      }
+      field('platform', p.platform ?? '')
+      field('arch', p.arch ?? '')
+      field('version', p.version ?? '')
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${origName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+      ))
+      parts.push(buf)
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`))
+      const body = Buffer.concat(parts)
 
       const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
       const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest
@@ -914,7 +929,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
           const text = Buffer.concat(chunks).toString('utf8')
           try {
             const data = JSON.parse(text)
-            send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, error: data.error })
+            send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, platform: data.platform, arch: data.arch, key: data.key, error: data.error })
           } catch {
             send('server:uploadUpdate:progress', { done: true, ok: false, error: `响应解析失败: ${text.slice(0, 200)}` })
           }
@@ -950,12 +965,12 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       }, 200)
       writeChunk()
       // 等待结果（通过 promise 等待 done 事件）
-      return await new Promise<{ ok: boolean; version?: string; error?: string }>((resolve) => {
-        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; error?: string }) => {
+      return await new Promise<{ ok: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }>((resolve) => {
+        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; platform?: string; arch?: string; key?: string; error?: string }) => {
           if (data.done) {
             clearInterval(timer)
             offChannel('server:uploadUpdate:progress', handler)
-            resolve({ ok: data.ok, version: data.version, error: data.error })
+            resolve({ ok: data.ok, version: data.version, platform: data.platform, arch: data.arch, key: data.key, error: data.error })
           }
         }
         onChannel('server:uploadUpdate:progress', handler)

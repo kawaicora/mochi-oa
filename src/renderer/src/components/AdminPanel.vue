@@ -35,7 +35,7 @@ const devPerf = ref<Record<string, any> | null>(null)
 const updateFile = ref<File | null>(null)
 const uploadingUpdate = ref(false)
 const updateProgress = ref(0)
-const updateResult = ref<{ ok: boolean; version?: string; error?: string } | null>(null)
+const updateResult = ref<{ ok: boolean; version?: string; detail?: string; error?: string } | null>(null)
 
 // 监听上传进度
 if (typeof window !== 'undefined' && window.pantry.onUploadUpdateProgress) {
@@ -65,10 +65,10 @@ async function uploadUpdate(): Promise<void> {
       updateResult.value = { ok: false, error: '临时文件写入失败' }
       return
     }
-    const resp = await window.pantry.serverUploadUpdate(r.path)
+    const resp = await window.pantry.serverUploadUpdate({ filePath: r.path, name: updateFile.value.name })
     if (resp.ok) {
       updateProgress.value = 100
-      updateResult.value = { ok: true, version: resp.version }
+      updateResult.value = { ok: true, version: resp.version, detail: resp.key || `${resp.platform ?? ''}_${resp.arch ?? ''}` }
     } else {
       updateResult.value = { ok: false, error: resp.error || '上传失败' }
     }
@@ -263,9 +263,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <div v-else-if="activeTab === 'update' && !selectedDevice" class="ap-update">
         <div class="ap-update-card">
           <h3><i class="fas fa-upload"></i> 发布更新包</h3>
-          <p class="ap-update-desc">上传 exe 安装包，自动解析版本号并写入 /files/update.exe 和 /files/version</p>
+          <p class="ap-update-desc">上传 exe / AppImage / dmg / zip，自动识别平台、架构与版本号，按「平台_架构」发布到 /files/version</p>
           <div class="ap-update-row">
-            <input type="file" accept=".exe" ref="updateFileInput" @change="onUpdateFile" />
+            <input type="file" accept=".exe,.appimage,.AppImage,.dmg,.zip" ref="updateFileInput" @change="onUpdateFile" />
           </div>
           <div v-if="updateFile" class="ap-update-info">
             <i class="fas fa-file-excel"></i> {{ updateFile.name }} ({{ fmtBytes(updateFile.size) }})
@@ -275,7 +275,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
             <span class="ap-update-progress-text">{{ updateProgress }}%</span>
           </div>
           <div v-if="updateResult" class="ap-update-result" :class="{ ok: updateResult.ok, err: !updateResult.ok }">
-            {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}` : updateResult.error }}
+            {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}${updateResult.detail ? ' · ' + updateResult.detail : ''}` : updateResult.error }}
           </div>
           <button class="ap-update-btn" :disabled="!updateFile || uploadingUpdate" @click="uploadUpdate">
             {{ uploadingUpdate ? '上传中…' : '发布更新' }}
