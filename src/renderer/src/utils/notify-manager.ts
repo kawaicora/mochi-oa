@@ -4,15 +4,15 @@
  *
  * 之前这块逻辑散在各处（app.ts 的 notifyIfUnfocused、rtc.ts 的 maybeNotify、
  * TaskView/RtcCallRoom 各写一份），而且**没有区分通知类型**——来电和普通消息待遇一样。
- * 现在统一收拢到这里，按 NotifKind 分类型处理：
+ * 分流规则（唯一口径，调用方不参与选音）：
  *
- *   │ 类型      │ 免打扰是否静音 │ 提示音                     │ 何时打扰                    │
- *   │ message   │ 是（全局/会话）│ message.wav（可自定义）      │ 非「正在看这个会话」时      │
- *   │ task      │ 是（全局）      │ message.wav                │ 同上                        │
- *   │ call      │ 否（来电优先）  │ calling.mp3（可自定义）      │ 非「正在看这个会话」时      │
- *   │ meeting   │ 否（来电优先）  │ calling.mp3（可自定义）      │ 同上                        │
- *   │ alarm     │ —              │ 闹钟自带播放，不走这里        │ —                           │
+ *   │ 分组                │ 类型                          │ 提示音                     │ 免打扰           │
+ *   │ 通话类              │ call / meeting                │ calling.mp3 循环铃声        │ 否（来电优先）   │
+ *   │ 非通话类（其余全部）│ message / task / company / system │ message.wav 单次提示音  │ 是（全局/会话）  │
+ *   │ 不走这里            │ alarm                         │ 闹钟自带播放                │ —                │
  *
+ * 即：只要进管理器的非通话事件，统一播消息提示音；只有通话类播铃声。
+
  * 音频文件丢失自动回退默认：由主进程 resolveNotifySound 判定（自定义不存在 →
  * resources/message.wav 或 calling.mp3），渲染层不用猜路径。
  * 播放失败（文件损坏/被删/格式不支持）会清缓存重解析一次，再失败就静默放弃——
@@ -284,23 +284,22 @@ async function windowFocused(): Promise<boolean> {
 }
 
 /**
- * 通知管理器统一入口。消息、来电、会议、任务提醒都走这里。
+ * 通知管理器统一入口。消息、来电、会议、任务提醒、系统提示都走这里。
+ * 分流规则（逻辑唯一口径）：
+ *   - call / meeting：通话类，播循环来电铃声（calling.mp3，可自定义）；
+ *   - 其余一切（message / task / company / system）：非通话类，统一播一次消息提示音
+ *     （message.wav，可自定义）；
+ *   - alarm：闹钟自带播放，不走这里。
  * 注意：调用方不要再自己去判聚焦/免打扰，全部交给这里，避免各处规则不一致。
  */
 export async function notifyEvent(ctx: NotifyContext): Promise<void> {
   const kind = ctx.kind
-  if (kind === 'alarm' || kind === 'system') {
-    // 闹钟自己响；系统提示只弹通知不响音
-    if (kind === 'system') {
-      await window.pantry.notify({ kind, title: ctx.title, body: ctx.body, target: ctx.target }).catch(() => {})
-    }
-    return
-  }
+  if (kind === 'alarm') return
 
   const isCallKind = kind === 'call' || kind === 'meeting'
   const conv = ctx.convKey ?? ''
   const muted = !!conv && policy.dndConvs.includes(conv)
-  // 免打扰只静音消息/任务；来电优先（静音了来电会漏接）
+  // 免打扰只静音消息类；来电优先（静音了来电会漏接）
   const silenced = !isCallKind && (policy.dnd || muted)
 
   const focused = await windowFocused()
@@ -311,7 +310,8 @@ export async function notifyEvent(ctx: NotifyContext): Promise<void> {
     if (isCallKind) {
       if (policy.callSound) await startRing(policy.convRings[conv] || policy.callSoundFile)
     } else if (policy.sound) {
-      await playOnce(kind, policy.messageSoundFile)
+      // 非通话类统一用消息提示音；kind 只影响系统通知的级别/文案，不影响选音
+      await playOnce('message', policy.messageSoundFile)
     }
   }
 

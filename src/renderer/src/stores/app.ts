@@ -1047,7 +1047,9 @@ export const useAppStore = defineStore('app', () => {
     const id = alertSeq++
     requestAlerts.value.push({ id, kind, title, body })
     setTimeout(() => dismissRequestAlert(id), 8000)
-    void notifyEvent({ kind: 'system', title, body, force: true, target: { kind: 'main' } })
+    // 按消息类通知处理：播 message.wav（受提示音开关/免打扰约束）；不能用 system，
+    // system 在通知管理器里只弹通知不响铃。
+    void notifyEvent({ kind: 'message', title, body, force: true, target: { kind: 'main' } })
   }
 
   // ─── 通用请求面板（标题 + 内容 + 按钮列表，队列逐条弹出） ───
