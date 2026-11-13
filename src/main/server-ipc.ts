@@ -25,6 +25,16 @@ import { detectFromBufferAsync } from './update-detect'
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
 
+/** 允许透传到服务端的消息种类；卡片类 kind 必须放行，否则会被兜底成 text 导致 JSON 原文上屏 */
+type SendKind = 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'
+const SEND_KINDS = new Set<SendKind>([
+  'text', 'image', 'file', 'video', 'audio', 'folder',
+  'proxy_card', 'expense_card', 'advance_card', 'attendance_card'
+])
+function normalizeSendKind(kind: unknown): SendKind {
+  return typeof kind === 'string' && (SEND_KINDS as Set<string>).has(kind) ? (kind as SendKind) : 'text'
+}
+
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
@@ -492,13 +502,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     serverClient.groupHistory(Number(groupId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
   ipcMain.handle(IpcChannels.serverChatSend, (_e, groupId, content, kind) =>
-    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), kind === 'image' || kind === 'file' || kind === 'video' || kind === 'folder' ? kind : 'text')
+    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverDmHistory, (_e, withUserId, beforeTs, limit) =>
     serverClient.dmHistory(Number(withUserId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
   ipcMain.handle(IpcChannels.serverDmSend, (_e, toUserId, content, kind) =>
-    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), kind === 'image' || kind === 'file' || kind === 'video' || kind === 'folder' ? kind : 'text')
+    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverMessageDelete, (_e, conversationId, messageId, content) =>
     serverClient.deleteMessage(Number(conversationId) || 0, String(messageId), String(content ?? ''))
