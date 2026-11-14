@@ -778,15 +778,10 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
   e.preventDefault()
   for (const f of files) {
     const isImage = f.type.startsWith('image/')
-    const mimeExt = (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')
     const origName = (f.name || '').trim()
-    // 保留剪贴板原始文件名与扩展名；原名缺扩展名时才按 MIME 补一个，原名缺失才用生成名。
-    let tempName: string
-    if (origName) {
-      tempName = /\.[a-z0-9]+$/i.test(origName) ? origName : `${origName}.${mimeExt}`
-    } else {
-      tempName = `粘贴文件_${Date.now()}.${mimeExt}`
-    }
+    // 有原名就原样保留，不按 MIME 猜/补扩展名（无后缀文件保持无后缀）；仅原名缺失才用生成名兜底。
+    const mimeExt = (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')
+    const tempName = origName || `粘贴文件_${Date.now()}.${mimeExt}`
     const r = await window.pantry.writeTempFile({ name: tempName, data: await f.arrayBuffer() })
     if (!r.ok || !r.path) {
       flashToast(`粘贴文件失败：${r.error || '未知错误'}`)
