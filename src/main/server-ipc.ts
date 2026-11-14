@@ -25,6 +25,9 @@ import { detectFromBufferAsync } from './update-detect'
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
 
+/** IPC 与 emitter 监听是否已绑定；重复调用只绑定一次，避免推送事件被叠加注册 */
+let serverIpcBound = false
+
 /** 允许透传到服务端的消息种类；卡片类 kind 必须放行，否则会被兜底成 text 导致 JSON 原文上屏 */
 type SendKind = 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'
 const SEND_KINDS = new Set<SendKind>([
@@ -150,6 +153,8 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 }
 
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  if (serverIpcBound) return
+  serverIpcBound = true
   /**
    * 退回登录页时关掉所有附加窗口（会议、任务详情、预览、远程、工具栏…）。
    * 只保留主窗口（登录页与主界面都在主窗口里）。先 close 让各窗口走正常收尾
@@ -228,7 +233,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('chatReadReceipt', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverChatReadReceipt, d))
   serverClient.on('sessionNewDevice', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionNewDevice, d))
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
-  serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
   serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
   // 断线重试失败 → 渲染层提示并回登录页（token 保留，不用清）
   serverClient.on('reconnectGaveUp', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverReconnectGaveUp, d))

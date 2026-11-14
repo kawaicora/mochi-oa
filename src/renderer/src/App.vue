@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch, provide } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch, provide } from 'vue'
 import { useServerStore } from './stores/server'
 import { useAppStore } from './stores/app'
 import { useRtcStore } from './stores/rtc'
@@ -39,17 +39,6 @@ function toast(text: string, kind: 'info' | 'warn' = 'info'): void {
   }, 5000)
 }
 provide('toast', toast)
-function openRequestAlert(id: number): void {
-  const alert = app.requestAlerts.find((a) => a.id === id)
-  app.dismissRequestAlert(id)
-  const scope =
-    alert?.kind === 'companyInvite' || alert?.kind === 'groupInvite'
-      ? 'invites'
-      : alert?.kind === 'friend'
-        ? 'friends'
-        : undefined
-  window.dispatchEvent(new CustomEvent('mochi:nav', { detail: scope ? { tab: 'contacts', scope } : 'contacts' }))
-}
 function onPanelSelect(index: number): void {
   if (app.currentPanel) app.resolveRequestPanel(app.currentPanel.id, index)
 }
@@ -58,42 +47,40 @@ function fmtAt(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+// 所有推送监听的退订函数：卸载（含热更重挂载）时统一解绑，避免旧监听残留导致一条消息被重复触发
+const offs: Array<() => void> = []
+
 onMounted(async () => {
   await server.init()
-  const off = server.wire()
+  offs.push(server.wire())
   await server.connect()
 
   // 实时推送 → 主界面 store
-  const offMsg = window.pantry.onServerMessage(app.onServerMessage)
-  const offDeleted = window.pantry.onServerMessageDeleted(app.onServerMessageDeleted)
-  const offPresence = window.pantry.onServerPresence(app.onServerPresence)
+  offs.push(window.pantry.onServerMessage(app.onServerMessage))
+  offs.push(window.pantry.onServerMessageDeleted(app.onServerMessageDeleted))
+  offs.push(window.pantry.onServerPresence(app.onServerPresence))
 
   // 多会话：新设备登录弹窗提醒；本端会话被踢/过期 → 清 token 回登录页
-  const offNewDevice = window.pantry.onServerSessionNewDevice((d: NewDeviceLoginEvent) => {
+  offs.push(window.pantry.onServerSessionNewDevice((d: NewDeviceLoginEvent) => {
     toast(`你的账号于 ${fmtAt(d.at)} 在「${d.device}」(${d.ip}) 登录`, 'warn')
-  })
-  const offRevoked = window.pantry.onServerSessionRevoked((d: SessionRevokedEvent) => {
+  }))
+  offs.push(window.pantry.onServerSessionRevoked((d: SessionRevokedEvent) => {
     toast(d.reason === 'ended' ? '你的账号已在其他设备退出登录，本端已下线' : '登录会话已过期，请重新登录', 'warn')
     void server.clearSession()
-  })
+  }))
   // 断线后连续重试仍连不上：回登录页但【保留登录状态】，重新点登录即可（不用重新输账号密码）
-  const offGaveUp = window.pantry.onServerReconnectGaveUp(() => {
+  offs.push(window.pantry.onServerReconnectGaveUp(() => {
     toast('连接服务器失败，已退回登录界面（登录状态已保留，可直接重新登录）', 'warn')
-  })
+  }))
 
   booted.value = true
   // 启动时按当前登录态应用一次窗口模式（自动登录成功时 authenticated 可能已为 true）
   void (authenticated.value ? window.pantry.setMainMode() : window.pantry.setLoginMode())
-  // 清理在应用卸载时由环境隐式完成；保留引用
-  const offRtc = rtc.wire()
-  void off
-  void offMsg
-  void offDeleted
-  void offPresence
-  void offNewDevice
-  void offRevoked
-  void offGaveUp
-  void offRtc
+  offs.push(rtc.wire())
+})
+
+onBeforeUnmount(() => {
+  while (offs.length) offs.pop()?.()
 })
 </script>
 
@@ -121,17 +108,6 @@ onMounted(async () => {
       <i class="fas fa-info-circle" v-if="t.kind === 'info'"></i>
       <i class="fas fa-exclamation-triangle" v-else></i>
       <span>{{ t.text }}</span>
-    </div>
-  </transition-group>
-
-  <!-- 申请/邀请提醒卡片：点击进入联系人处理 -->
-  <transition-group name="toast" tag="div" class="toast-wrap alert-wrap">
-    <div v-for="a in app.requestAlerts" :key="a.id" class="toast alert-card" @click="openRequestAlert(a.id)">
-      <i class="fas fa-user-plus alert-icon"></i>
-      <div class="alert-text">
-        <div class="alert-title">{{ a.title }}</div>
-        <div class="alert-body">{{ a.body }}</div>
-      </div>
     </div>
   </transition-group>
 
@@ -176,18 +152,6 @@ onMounted(async () => {
   color: #b36d00;
   background: #fffdf5;
 }
-.alert-wrap { top: 130px; }
-.alert-card {
-  max-width: 340px;
-  cursor: pointer;
-  align-items: flex-start;
-  gap: 10px;
-}
-.alert-card:hover { border-color: var(--dt-primary); }
-.alert-icon { margin-top: 2px; color: var(--dt-primary); width: 18px; text-align: center; }
-.alert-text { display: flex; flex-direction: column; gap: 2px; }
-.alert-title { font-size: 13px; font-weight: 600; color: var(--dt-text); }
-.alert-body { font-size: 12px; color: var(--dt-text-2); line-height: 1.4; }
 .toast-enter-active,
 .toast-leave-active {
   transition: opacity 0.25s, transform 0.25s;

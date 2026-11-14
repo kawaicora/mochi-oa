@@ -61,6 +61,27 @@ async function saveApprovalSettings(): Promise<void> {
   } catch (e) { console.error('[审批设置] 保存失败', e); promptMsg.value = '保存失败' }
 }
 
+// 公司审批提示音：按公司范围覆盖，缺省回退全局消息音
+const companyScope = computed(() => app.activeCompany ? { kind: 'company' as const, id: app.activeCompany.id } : undefined)
+function companySoundPath(): string {
+  return companyScope.value ? app.scopeSoundOf(companyScope.value, 'message') : ''
+}
+function shortSoundName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+async function pickCompanySound(): Promise<void> {
+  const scope = companyScope.value
+  if (!scope) return
+  const p = await window.pantry.pickFile()
+  if (!p) return
+  await app.setScopeSound(scope, 'message', p)
+}
+async function clearCompanySound(): Promise<void> {
+  const scope = companyScope.value
+  if (!scope) return
+  await app.setScopeSound(scope, 'message', '')
+}
+
 // 职位模块开关（owner/admin）：按公司维度启用/关闭职位功能
 async function toggleJobEnabled(): Promise<void> {
   const c = app.activeCompany
@@ -71,7 +92,6 @@ async function toggleJobEnabled(): Promise<void> {
   if (!ok) { promptMsg.value = error || '操作失败'; return }
   promptMsg.value = next ? '职位模块已开启' : '职位模块已关闭'
 }
-
 // 企业齿轮/右键菜单
 const companyMenu = ref(false)
 function openCompanyMenu(e?: MouseEvent): void {
@@ -572,6 +592,16 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
           <div style="margin-top: 12px">
             <div style="font-size: 13px; color: var(--dt-text-2); margin-bottom: 6px">默认抄送人</div>
             <CompanyContactPicker v-model="approvalCc" title="选择默认抄送人" placeholder="选择默认抄送人" />
+          </div>
+          <div style="margin-top: 14px">
+            <div style="font-size: 13px; color: var(--dt-text-2); margin-bottom: 6px">审批提示音（本公司；留空用全局消息音）</div>
+            <div style="display:flex; align-items:center; gap:10px">
+              <span style="font-size:12px; color:var(--dt-text-2); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" :title="companySoundPath()">
+                {{ companySoundPath() ? shortSoundName(companySoundPath()) : '默认（全局消息提示音）' }}
+              </span>
+              <button class="dt-btn" @click="pickCompanySound">选择</button>
+              <button v-if="companySoundPath()" class="dt-btn" @click="clearCompanySound">恢复默认</button>
+            </div>
           </div>
         </div>
         <div class="modal-foot">

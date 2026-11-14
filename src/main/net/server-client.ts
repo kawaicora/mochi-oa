@@ -87,6 +87,22 @@ function safeUrl(url: string): string {
   }
 }
 
+/** ws/wss → http(s) 取服务访问根地址（去掉尾部斜杠） */
+function httpBase(url: string): string {
+  return (url || '')
+    .replace(/^wss:/i, 'https:')
+    .replace(/^ws:/i, 'http:')
+    .replace(/\/+$/, '')
+}
+
+/** 相对文件路径按服务端根地址补全；已是 http(s) 绝对 URL 原样返回 */
+function joinAbsolute(base: string, rel: string): string {
+  if (!rel) return rel
+  if (/^https?:\/\//i.test(rel)) return rel
+  if (!base) return rel
+  return base + (rel.startsWith('/') ? rel : '/' + rel)
+}
+
 /** 带超时的 emit + ack 包装。
  *  服务端 ack 结构为 `{ ok:true, fieldA, fieldB }`（字段在顶层），
  *  客户端统一规整为 `{ ok, error, data:{ fieldA, fieldB } }`，供 applyAuthAck / 各 store 用 ack.data 读取。 */
@@ -1328,7 +1344,7 @@ export class ServerClient extends EventEmitter {
 
   async downloadFolder(relPath: string, destDir: string): Promise<{ ok: boolean; error?: string; destDir?: string; count?: number }> {
     if (!this.token) { this.logNoToken('downloadFolder'); return { ok: false, error: '未登录（无会话 token）' } }
-    const base = this._state.serverUrl.replace(/\/$/, '')
+    const base = httpBase(this._state.serverUrl)
     if (!base) return { ok: false, error: '未配置服务器地址' }
     try {
       const listUrl = `${base}/api/folder/files?path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(this.token)}`
@@ -1342,6 +1358,9 @@ export class ServerClient extends EventEmitter {
       let count = 0
       for (const f of files) {
         if (!f.url || !f.relPath) continue
+        // 服务端在相对 URL 模式下返回 /files/... 相对路径，主进程必须按 base 补全成绝对地址，
+        // 否则 httpGet 的 new URL('/files/...') 抛 Invalid URL。
+        const fileUrl = joinAbsolute(base, f.url)
         // 服务端返回的相对路径可能是百分号编码的，落盘前逐段还原中文
         const localRel = decodeUrlPath(stripCompany(f.relPath))
         if (!localRel) continue
@@ -1349,7 +1368,7 @@ export class ServerClient extends EventEmitter {
         const baseNorm = normalize(destDir)
         if (target !== baseNorm && !target.startsWith(baseNorm + sep)) continue // 防穿越
         await mkdir(join(target, '..'), { recursive: true })
-        const fr = await httpGet(f.url)
+        const fr = await httpGet(fileUrl)
         if (fr.status >= 200 && fr.status < 300) {
           await writeFile(target, fr.buf)
           count += 1

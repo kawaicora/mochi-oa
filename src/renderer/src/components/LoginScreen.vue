@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useServerStore } from '../stores/server'
 import UserAvatar from './UserAvatar.vue'
 
@@ -319,6 +319,13 @@ onMounted(async () => {
   if (cfg.savedAccount) account.value = cfg.savedAccount
   if (cfg.savedPassword) password.value = cfg.savedPassword
   void appInfo
+})
+
+// 卸载（登录成功切主界面）时清掉所有倒计时定时器，避免残留回调操作已销毁的状态
+onBeforeUnmount(() => {
+  if (codeTimer) { clearInterval(codeTimer); codeTimer = null }
+  if (regCodeTimer) { clearInterval(regCodeTimer); regCodeTimer = null }
+  if (forgotTimer) { clearInterval(forgotTimer); forgotTimer = null }
 })
 
 // 窗口控制

@@ -10,12 +10,16 @@ import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
-import { convKey } from '../utils/notify-manager'
+import { convKey, type NotifyScope } from '../utils/notify-manager'
 import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
 import { setProxyDeepLink } from '../utils/proxy-deeplink'
 import { setExpenseDeepLink } from '../utils/expense-deeplink'
 import { setAdvanceDeepLink } from '../utils/advance-deeplink'
 import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
+import {
+  APPROVAL_CARD_TITLE, detectApprovalCard, parseApprovalCard, isApprovalCardKind,
+  type ApprovalCardKind, type ParsedApprovalCard
+} from '../utils/approval-card'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -274,65 +278,47 @@ function fmtTime(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-/** 代理申请卡片：解析 content JSON 摘要 */
-function proxyCardSummary(content: string): string {
-  try {
-    const c = JSON.parse(content)
-    return `${c.nick || c.applicant || ''}：${c.reason || ''}（${c.status || 'pending'}）`
-  } catch { return content }
-}
-/** 点击卡片：深链到 ProxyView 并定位申请单 */
-function openProxyCard(content: string): void {
-  try {
-    const c = JSON.parse(content)
-    if (c.requestId) setProxyDeepLink(Number(c.requestId))
-  } catch (e) { console.error('[proxy_card] 解析失败', e) }
+interface ResolvedCard { kind: ApprovalCardKind; data: ParsedApprovalCard }
+
+/**
+ * 解析一条消息对应的审批卡片：优先用消息 kind；kind 缺失/被降级时按 content 内容兜底识别。
+ * 不是审批卡片返回 null，气泡再走普通文本/文件分支。
+ */
+function resolveCard(m: ServerChatMessage): ResolvedCard | null {
+  if (isApprovalCardKind(m.kind)) {
+    return { kind: m.kind, data: parseApprovalCard(m.content) }
+  }
+  return detectApprovalCard(m.content)
 }
 
-/** 报销申请卡片：解析 {"requestId","title","body","byNick"} 摘要 */
-function expenseCardSummary(content: string): string {
-  try {
-    const c = JSON.parse(content)
-    return `${c.byNick || ''}：${c.body || ''}（${c.title || '报销申请'}）`
-  } catch (e) { console.error('[expense_card] 解析失败', e); return content }
-}
-/** 点击卡片：深链到 ApplyHome 的报销 tab 并定位申请单 */
-function openExpenseCard(content: string): void {
-  try {
-    const c = JSON.parse(content)
-    if (c.requestId) setExpenseDeepLink(Number(c.requestId))
-  } catch (e) { console.error('[expense_card] 解析失败', e) }
+/** 消息是否为某类审批卡片（含内容兜底） */
+function cardOf(m: ServerChatMessage): ApprovalCardKind | null {
+  return resolveCard(m)?.kind ?? null
 }
 
-/** 备用金申请卡片：解析 {"requestId","title","body","byNick"} 摘要 */
-function advanceCardSummary(content: string): string {
-  try {
-    const c = JSON.parse(content)
-    return `${c.byNick || ''}：${c.body || ''}（${c.title || '备用金申请'}）`
-  } catch (e) { console.error('[advance_card] 解析失败', e); return content }
-}
-/** 点击卡片：深链到 ApplyHome 的备用金 tab 并定位申请单 */
-function openAdvanceCard(content: string): void {
-  try {
-    const c = JSON.parse(content)
-    if (c.requestId) setAdvanceDeepLink(Number(c.requestId))
-  } catch (e) { console.error('[advance_card] 解析失败', e) }
+/** 卡片摘要：申请人：正文（标题 · 状态）；解析失败回退原文 */
+function cardSummary(m: ServerChatMessage): string {
+  const r = resolveCard(m)
+  if (!r) return m.content
+  const { data, kind } = r
+  const st = data.status === 'approved' ? '已通过' : data.status === 'rejected' ? '已驳回' : ''
+  const suffix = kind === 'attendance_card'
+    ? `（${data.title || APPROVAL_CARD_TITLE[kind]}${st ? ' · ' + st : ''}）`
+    : `（${data.title || APPROVAL_CARD_TITLE[kind]}）`
+  return `${data.byNick || ''}：${data.body || ''}${suffix}`
 }
 
-/** 考勤申请卡片：解析 {"requestId","title","body","byNick","status"} 摘要 */
-function attendanceCardSummary(content: string): string {
-  try {
-    const c = JSON.parse(content)
-    const st = c.status === 'approved' ? '已通过' : c.status === 'rejected' ? '已驳回' : '待审批'
-    return `${c.byNick || ''}：${c.body || ''}（${c.title || '考勤申请'} · ${st}）`
-  } catch (e) { console.error('[attendance_card] 解析失败', e); return content }
-}
-/** 点击卡片：深链到 ApplyHome 的考勤申请 tab 并定位申请单 */
-function openAttendanceCard(content: string): void {
-  try {
-    const c = JSON.parse(content)
-    if (c.requestId) setAttendanceDeepLink(Number(c.requestId))
-  } catch (e) { console.error('[attendance_card] 解析失败', e) }
+/** 点击卡片：按解析出的类型深链到对应审批 View 并定位申请单 */
+function openCard(m: ServerChatMessage): void {
+  const r = resolveCard(m)
+  if (!r || r.data.requestId == null) return
+  const rid = Number(r.data.requestId)
+  switch (r.kind) {
+    case 'proxy_card': setProxyDeepLink(rid); break
+    case 'expense_card': setExpenseDeepLink(rid); break
+    case 'advance_card': setAdvanceDeepLink(rid); break
+    case 'attendance_card': setAttendanceDeepLink(rid); break
+  }
 }
 
 /** 消息已读回执标记：仅自己发出的消息；私聊=对方是否已读，群聊=已读人数 */
@@ -815,21 +801,31 @@ function shortName(p: string): string {
   return p.split(/[\\/]/).pop() || p
 }
 
-/** 当前会话的本地设置 key（group:<id> / dm:<id>），免打扰与自定义铃声都用它 */
+/** 当前会话的本地设置 key（group:<id> / dm:<id>），免打扰用它 */
 const currentConvKey = computed(() => convKey(selected.value?.kind ?? 'group', selected.value?.conversationId ?? 0))
 
-/** 为本会话挑选专属来电铃声（选空文件不生效；想清除用设置里的「恢复默认」或再次点选取消） */
+/** 当前会话的音效归属范围（个人/群）；公司审批类在公司设置里配 */
+const currentScope = computed<NotifyScope | undefined>(() => {
+  const s = selected.value
+  if (!s) return undefined
+  if (s.kind === 'group' && s.groupId) return { kind: 'group', id: s.groupId }
+  if (s.kind === 'dm' && s.dmUserId) return { kind: 'dm', id: s.dmUserId }
+  return undefined
+})
+
+/** 为本会话挑选专属来电铃声（选空文件不生效；想清除用再次点选取消） */
 async function pickConvRing(): Promise<void> {
-  const key = currentConvKey.value
-  const cur = app.convRingOf(key)
+  const scope = currentScope.value
+  if (!scope) return
+  const cur = app.scopeSoundOf(scope, 'ring')
   const p = await window.pantry.pickFile()
   if (!p) return
   if (p === cur) {
-    await app.setConvRing(key, '') // 再选一次同一个文件 = 取消专属铃声
+    await app.setScopeSound(scope, 'ring', '') // 再选一次同一个文件 = 取消专属铃声
     flashToast('已取消本会话专属铃声')
     return
   }
-  await app.setConvRing(key, p)
+  await app.setScopeSound(scope, 'ring', p)
   flashToast(`本会话铃声：${shortName(p)}`)
 }
 
@@ -1004,8 +1000,8 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
           <button
             v-if="selected.conversationId > 0"
             class="chat-act"
-            :class="{ on: !!app.convRingOf(currentConvKey) }"
-            :title="app.convRingOf(currentConvKey) ? '本会话铃声：' + shortName(app.convRingOf(currentConvKey)) : '为本会话设置专属铃声'"
+            :class="{ on: !!currentScope && !!app.scopeSoundOf(currentScope, 'ring') }"
+            :title="currentScope && app.scopeSoundOf(currentScope, 'ring') ? '本会话铃声：' + shortName(app.scopeSoundOf(currentScope, 'ring')) : '为本会话设置专属铃声'"
             @click="pickConvRing"
           >
             <i class="fas fa-music"></i>
@@ -1051,27 +1047,27 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
             <div class="msg-bubble" @contextmenu.prevent="openMsgMenu($event, m.id)">
               <span v-if="m.kind === 'text'">{{ m.content }}</span>
               <!-- 代理申请卡片 -->
-              <div v-else-if="m.kind === 'proxy_card'" class="msg-card" @click="openProxyCard(m.content)">
+              <div v-else-if="cardOf(m) === 'proxy_card'" class="msg-card" @click="openCard(m)">
                 <div class="msg-card-t">上网申请</div>
-                <div class="msg-card-b">{{ proxyCardSummary(m.content) }}</div>
+                <div class="msg-card-b">{{ cardSummary(m) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 报销申请卡片 -->
-              <div v-else-if="m.kind === 'expense_card'" class="msg-card" @click="openExpenseCard(m.content)">
+              <div v-else-if="cardOf(m) === 'expense_card'" class="msg-card" @click="openCard(m)">
                 <div class="msg-card-t">报销申请</div>
-                <div class="msg-card-b">{{ expenseCardSummary(m.content) }}</div>
+                <div class="msg-card-b">{{ cardSummary(m) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 备用金申请卡片 -->
-              <div v-else-if="m.kind === 'advance_card'" class="msg-card" @click="openAdvanceCard(m.content)">
+              <div v-else-if="cardOf(m) === 'advance_card'" class="msg-card" @click="openCard(m)">
                 <div class="msg-card-t">备用金申请</div>
-                <div class="msg-card-b">{{ advanceCardSummary(m.content) }}</div>
+                <div class="msg-card-b">{{ cardSummary(m) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 考勤申请卡片 -->
-              <div v-else-if="m.kind === 'attendance_card'" class="msg-card" @click="openAttendanceCard(m.content)">
+              <div v-else-if="cardOf(m) === 'attendance_card'" class="msg-card" @click="openCard(m)">
                 <div class="msg-card-t">考勤申请</div>
-                <div class="msg-card-b">{{ attendanceCardSummary(m.content) }}</div>
+                <div class="msg-card-b">{{ cardSummary(m) }}</div>
                 <div class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 视频：FLV 走 flv.js；rm/avi/mkv/3gp/rmvb 走服务端 ffmpeg 转码；其余原生 Blob 播放 -->

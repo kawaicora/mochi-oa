@@ -83,6 +83,7 @@ function defaultConfig(): ServerSettings {
     dnd: false,
     dndConvs: [],
     convRings: {},
+    soundOverrides: {},
     rememberPassword: false,
     savedAccount: '',
     savedPassword: '',
@@ -124,6 +125,21 @@ function normalizeMode(value: unknown): FileTransferMode {
   return value === 'server' ? 'server' : 'local'
 }
 
+/** 规整分范围音效覆盖：仅保留 message/ring 两个字符串路径，丢弃非法条目 */
+function normalizeSoundOverrides(value: unknown): Record<string, { message?: string; ring?: string }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, { message?: string; ring?: string }> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+    const o = v as Record<string, unknown>
+    const entry: { message?: string; ring?: string } = {}
+    if (typeof o.message === 'string') entry.message = o.message
+    if (typeof o.ring === 'string') entry.ring = o.ring
+    if (entry.message || entry.ring) out[k] = entry
+  }
+  return out
+}
+
 /** 读取持久化配置；文件缺失/损坏回退默认值（不抛错）。 */
 export function loadServerConfig(): ServerSettings {
   const fallback = defaultConfig()
@@ -159,6 +175,7 @@ export function loadServerConfig(): ServerSettings {
               )
             )
           : {},
+      soundOverrides: normalizeSoundOverrides(parsed.soundOverrides),
       rememberPassword: parsed.rememberPassword === true,
       savedAccount: typeof parsed.savedAccount === 'string' ? parsed.savedAccount : '',
       savedPassword: decryptPassword(
@@ -225,6 +242,7 @@ export function saveServerConfig(patch: Partial<ServerSettings>): ServerSettings
             )
           )
         : current.convRings,
+    soundOverrides: normalizeSoundOverrides(patch.soundOverrides),
     rememberPassword:
       typeof patch.rememberPassword === 'boolean' ? patch.rememberPassword : current.rememberPassword,
     // 渲染层传的是明文（读配置时已解密），落盘前重新加密；

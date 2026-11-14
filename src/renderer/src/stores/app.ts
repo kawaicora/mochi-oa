@@ -32,7 +32,14 @@ import {
   isConvMuted,
   setConvMuted,
   setConvRing,
-  convRingOf
+  convRingOf,
+  setScopeSound,
+  scopeSoundOf,
+  currentNotify,
+  pushNotify,
+  resolveNotify,
+  type NotifyButton,
+  type NotifyScope
 } from '../utils/notify-manager'
 import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
 import { toPlain } from '../utils/plain'
@@ -42,7 +49,7 @@ import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
 import { setExpenseDeepLink } from '../utils/expense-deeplink'
 import { setAdvanceDeepLink } from '../utils/advance-deeplink'
 import { setProxyDeepLink } from '../utils/proxy-deeplink'
-import { isApprovalCardKind, parseApprovalCard, APPROVAL_CARD_TITLE, type ApprovalCardKind } from '../utils/approval-card'
+import { isApprovalCardKind, parseApprovalCard, detectApprovalCard, APPROVAL_CARD_TITLE, type ApprovalCardKind } from '../utils/approval-card'
 
 /** 从 ack 提取 data 载荷 */
 function d<T>(ack: unknown): T | undefined {
@@ -75,14 +82,6 @@ export interface FriendRequestItem {
 /** 申请/邀请提醒类型 */
 export type RequestAlertKind = 'friend' | 'company' | 'group' | 'companyInvite' | 'groupInvite'
 
-/** 应用内提醒卡片 */
-export interface RequestAlert {
-  id: number
-  kind: RequestAlertKind
-  title: string
-  body: string
-}
-
 /** 通用请求面板按钮 */
 export interface RequestPanelButton {
   label: string
@@ -97,6 +96,10 @@ export interface RequestPanelItem {
   kind: RequestAlertKind
   title: string
   body: string
+  /** 触发方用户 id */
+  fromId?: number
+  /** 音效归属范围（个人/群/公司） */
+  scope?: NotifyScope
   buttons: RequestPanelButton[]
 }
 
@@ -254,6 +257,8 @@ export const useAppStore = defineStore('app', () => {
       kind: 'groupInvite',
       title: '群邀请',
       body: `${ev.from.nick} 邀请你加入群「${ev.groupName}」`,
+      fromId: ev.from.userId,
+      scope: { kind: 'group', id: ev.groupId },
       buttons: [
         { label: '拒绝', role: 'default', run: () => respondGroupInvite(invId, false) },
         { label: '同意', role: 'primary', run: () => respondGroupInvite(invId, true) }
@@ -393,6 +398,8 @@ export const useAppStore = defineStore('app', () => {
         kind: 'friend',
         title: '好友申请',
         body: `${who || '对方'} 请求添加你为好友`,
+        fromId: p.fromId,
+        scope: p.fromId != null ? { kind: 'dm', id: p.fromId } : undefined,
         buttons: [
           { label: '拒绝', role: 'default', run: () => respondFriendRequest(reqId, false) },
           { label: '同意', role: 'primary', run: () => respondFriendRequest(reqId, true) }
@@ -413,6 +420,8 @@ export const useAppStore = defineStore('app', () => {
       kind: 'companyInvite',
       title: '企业邀请',
       body: `${who} 邀请你加入「${company}」`,
+      fromId: inv.invitedBy ?? inv.userId,
+      scope: { kind: 'company', id: inv.companyId },
       buttons: [
         { label: '拒绝', role: 'default', run: () => respondCompanyInvite(invId, false) },
         { label: '同意', role: 'primary', run: () => respondCompanyInvite(invId, true) }
@@ -423,7 +432,13 @@ export const useAppStore = defineStore('app', () => {
   window.pantry.onCompanyJoinRequest((d) => {
     const who = d.fromNick || d.fromName || '对方'
     const company = d.companyName || '公司'
-    notifyRequest('company', '公司加入申请', `${who} 申请加入「${company}」`)
+    notifyRequest(
+      'company',
+      '公司加入申请',
+      `${who} 申请加入「${company}」`,
+      d.companyId != null ? { kind: 'company', id: d.companyId } : undefined,
+      d.fromId
+    )
     void refreshCompanies()
     if (d.companyId != null && activeCompanyId.value === d.companyId) void refreshMembers()
   })
@@ -431,7 +446,13 @@ export const useAppStore = defineStore('app', () => {
   window.pantry.onGroupJoinRequest((d) => {
     const who = d.fromNick || d.fromName || '对方'
     const group = d.groupName || '群聊'
-    notifyRequest('group', '加群申请', `${who} 申请加入群「${group}」`)
+    notifyRequest(
+      'group',
+      '加群申请',
+      `${who} 申请加入群「${group}」`,
+      d.groupId != null ? { kind: 'group', id: d.groupId } : undefined,
+      d.fromId
+    )
     void refreshGroups()
   })
   window.pantry.onUserProfileUpdated(() => {
@@ -442,12 +463,15 @@ export const useAppStore = defineStore('app', () => {
   // 业务通知（proxy/attendance 审批推送）→ 弹窗 + 消息铃声
   window.pantry.onCompanyNotified((d) => {
     try {
-      const p = (d ?? {}) as { title?: string; body?: string; requestId?: number; type?: string }
+      const p = (d ?? {}) as { title?: string; body?: string; requestId?: number; type?: string; companyId?: number }
+      const cid = p.companyId ?? activeCompanyId.value
       void notifyEvent({
         kind: 'company',
         title: p.title || '业务通知',
         body: p.body || '您有新的审批待处理',
-        force: true
+        force: true,
+        fromId: cid,
+        scope: cid != null ? { kind: 'company', id: cid } : undefined
       })
     } catch (e) { console.error('[app] 业务通知处理失败', e) }
   })
@@ -598,7 +622,14 @@ export const useAppStore = defineStore('app', () => {
           // 对仍在 pendingIds 且仍 pending 的项重新弹通知
           for (const key of pendingIds.value) {
             if (stillPending.has(key)) {
-              await notifyEvent({ kind: 'company', title: '业务提醒', body: '您有审批待处理已超过 1 小时，请尽快处理', force: true })
+              await notifyEvent({
+                kind: 'company',
+                title: '业务提醒',
+                body: '您有审批待处理已超过 1 小时，请尽快处理',
+                force: true,
+                fromId: activeCompanyId.value ?? undefined,
+                scope: activeCompanyId.value != null ? { kind: 'company', id: activeCompanyId.value } : undefined
+              })
               break // 一轮只弹一次，避免刷屏
             }
           }
@@ -1047,33 +1078,27 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // ─── 申请/邀请提醒（系统通知 + 应用内卡片） ───
-  const requestAlerts = ref<RequestAlert[]>([])
-  let alertSeq = 1
-  function dismissRequestAlert(id: number): void {
-    requestAlerts.value = requestAlerts.value.filter((a) => a.id !== id)
-  }
-  /** 申请/邀请到达：先弹 Windows 系统通知，再在应用内挂一张提示卡片（8 秒自动消失） */
-  function notifyRequest(kind: RequestAlertKind, title: string, body: string): void {
-    const id = alertSeq++
-    requestAlerts.value.push({ id, kind, title, body })
-    setTimeout(() => dismissRequestAlert(id), 8000)
-    // 按消息类通知处理：播 message.wav（受提示音开关/免打扰约束）；不能用 system，
-    // system 在通知管理器里只弹通知不响铃。
-    void notifyEvent({ kind: 'message', title, body, force: true, target: { kind: 'main' } })
+  /** 申请/邀请到达：系统通知 + 消息提示音；应用内卡片由后续带按钮的面板条目承接 */
+  function notifyRequest(kind: RequestAlertKind, title: string, body: string, scope?: NotifyScope, fromId?: number): void {
+    void notifyEvent({ kind: 'message', title, body, force: true, panel: false, scope, fromId, target: { kind: 'main' } })
   }
 
-  // ─── 通用请求面板（标题 + 内容 + 按钮列表，队列逐条弹出） ───
-  const requestPanelQueue = ref<RequestPanelItem[]>([])
-  let panelSeq = 1
-  const currentPanel = computed(() => requestPanelQueue.value[0] ?? null)
+  // ─── 通用请求面板（委托管理器统一队列） ───
+  const currentPanel = computed(() => currentNotify.value)
   function pushRequestPanel(item: Omit<RequestPanelItem, 'id'>): void {
-    requestPanelQueue.value.push({ id: panelSeq++, ...item })
+    pushNotify({
+      kind: 'message',
+      title: item.title,
+      body: item.body,
+      fromId: item.fromId,
+      scope: item.scope,
+      force: true,
+      target: { kind: 'main' },
+      buttons: item.buttons.map((b): NotifyButton => ({ text: b.label, role: b.role, onClick: b.run }))
+    })
   }
   function resolveRequestPanel(id: number, buttonIndex: number): void {
-    const item = requestPanelQueue.value.find((i) => i.id === id)
-    const btn = item?.buttons[buttonIndex]
-    requestPanelQueue.value = requestPanelQueue.value.filter((i) => i.id !== id)
-    if (btn?.run) void Promise.resolve().then(() => btn.run?.())
+    resolveNotify(id, buttonIndex)
   }
   async function respondFriendRequest(requestId: number, accept: boolean): Promise<{ ok: boolean; error?: string }> {
     const ack = await window.pantry.serverFriendRespond(requestId, accept)
@@ -1288,7 +1313,8 @@ export const useAppStore = defineStore('app', () => {
   }
   async function downloadFolder(content: string): Promise<{ ok: boolean; error?: string; destDir?: string; count?: number }> {
     const ack = await window.pantry.serverDownloadFolder(content)
-    return { ok: ack.ok, error: ack.error, destDir: ack.data?.destDir, count: ack.data?.count }
+    // 主进程 IPC 直接返回顶层 { ok, destDir, count, error }，不经 ack.data 包装
+    return { ok: ack.ok, error: ack.error, destDir: ack.destDir, count: ack.count }
   }
   async function togglePin(conversationId: number, pinned: boolean): Promise<void> {
     const ack = await window.pantry.serverConversationPin(conversationId, pinned)
@@ -1351,8 +1377,11 @@ export const useAppStore = defineStore('app', () => {
     }
     const conv = conversations.value.find((c) => c.conversationId === msg.conversationId)
     // 需求 7.3：审批卡片消息 → 会话预览与通知正文都用卡片内容（标题/申请人/摘要），不再是笼统的 [文件]
-    const cardK: ApprovalCardKind | null = isApprovalCardKind(msg.kind) ? (msg.kind as ApprovalCardKind) : null
-    const cardC = cardK ? parseApprovalCard(msg.content) : null
+    const detected = isApprovalCardKind(msg.kind)
+      ? { kind: msg.kind as ApprovalCardKind, data: parseApprovalCard(msg.content) }
+      : detectApprovalCard(msg.content)
+    const cardK: ApprovalCardKind | null = detected?.kind ?? null
+    const cardC = detected?.data ?? null
     const preview = cardK
       ? `[${APPROVAL_CARD_TITLE[cardK]}] ${cardC?.byNick || ''}：${cardC?.body || ''}`
       : msg.kind === 'text' ? msg.content : msg.kind === 'image' ? '[图片]' : msg.kind === 'video' ? '[视频]' : msg.kind === 'folder' ? '[文件夹]' : '[文件]'
@@ -1368,6 +1397,10 @@ export const useAppStore = defineStore('app', () => {
         kind: 'message',
         title: cardK ? (cardC?.title || APPROVAL_CARD_TITLE[cardK]) : conv?.name ? `新消息：${conv.name}` : '新消息',
         body: cardK ? (cardC?.byNick ? `${cardC.byNick}：${cardC.body}` : (cardC?.body || '')) : preview,
+        fromId: msg.fromId,
+        scope: msg.type === 'dm'
+          ? { kind: 'dm', id: conv?.dmUserId ?? msg.fromId }
+          : { kind: 'group', id: conv?.groupId ?? msg.conversationId },
         convKey: convKey(msg.type, msg.conversationId),
         inCurrentConv: inConv,
         target: notifTarget
@@ -1401,6 +1434,8 @@ export const useAppStore = defineStore('app', () => {
     setConvMuted,
     setConvRing,
     convRingOf,
+    setScopeSound,
+    scopeSoundOf,
     ready,
     loading,
     companies,
@@ -1512,8 +1547,6 @@ export const useAppStore = defineStore('app', () => {
     companyInvites,
     refreshCompanyInvites,
     respondCompanyInvite,
-    requestAlerts,
-    dismissRequestAlert,
     currentPanel,
     pushRequestPanel,
     resolveRequestPanel,

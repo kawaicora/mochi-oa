@@ -465,7 +465,7 @@ const api = {
   },
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     safeInvoke(IpcChannels.serverListFolderFiles, folderPath),
-  serverDownloadFolder: (relPath: string): Promise<Ack & { data?: { destDir?: string; count?: number } }> =>
+  serverDownloadFolder: (relPath: string): Promise<Ack & { destDir?: string; count?: number }> =>
     safeInvoke(IpcChannels.serverDownloadFolder, relPath),
   captureScreen: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
     safeInvoke(IpcChannels.fileCaptureScreen),

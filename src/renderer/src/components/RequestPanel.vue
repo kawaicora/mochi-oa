@@ -1,24 +1,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RequestPanelItem, RequestPanelButton } from '../stores/app'
+import type { NotifyItem, NotifyButton } from '../utils/notify-manager'
 
-const props = defineProps<{ item: RequestPanelItem }>()
+const props = defineProps<{ item: NotifyItem }>()
 const emit = defineEmits<{ (e: 'select', index: number): void }>()
 
 const icon = computed(() => {
   switch (props.item.kind) {
-    case 'friend':
-      return 'fas fa-user-plus'
-    case 'groupInvite':
-      return 'fas fa-users'
-    case 'companyInvite':
+    case 'call':
+    case 'meeting':
+      return 'fas fa-phone'
+    case 'company':
       return 'fas fa-building'
+    case 'task':
+      return 'fas fa-check-square'
+    case 'system':
+      return 'fa fa-user-shield'
     default:
       return 'far fa-envelope'
   }
 })
 
-function btnClass(btn: RequestPanelButton): string {
+function btnClass(btn: NotifyButton): string {
   const base = 'rp-btn'
   if (btn.role === 'primary') return `${base} rp-primary`
   if (btn.role === 'danger') return `${base} rp-danger`
@@ -38,16 +41,17 @@ function select(index: number): void {
         <span class="rp-title">{{ item.title }}</span>
       </div>
       <div class="rp-body">
-        <p class="rp-text">{{ item.body }}</p>
+        <div v-if="item.html" class="rp-html" v-html="item.content"></div>
+        <p v-else class="rp-text">{{ item.content }}</p>
       </div>
-      <div class="rp-foot">
+      <div v-if="item.buttons.length" class="rp-foot">
         <button
           v-for="(btn, i) in item.buttons"
           :key="i"
           :class="btnClass(btn)"
           @click="select(i)"
         >
-          {{ btn.label }}
+          {{ btn.text }}
         </button>
       </div>
     </div>
@@ -85,6 +89,8 @@ function select(index: number): void {
 .rp-head i { color: var(--dt-primary); width: 18px; text-align: center; }
 .rp-body { padding: 18px 20px; }
 .rp-text { margin: 0; font-size: 13px; color: var(--dt-text-2); line-height: 1.5; }
+.rp-html { font-size: 13px; color: var(--dt-text-2); line-height: 1.5; word-break: break-word; }
+.rp-html :deep(a) { color: var(--dt-primary); }
 .rp-foot {
   display: flex;
   justify-content: flex-end;

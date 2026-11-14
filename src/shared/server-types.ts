@@ -44,6 +44,8 @@ export interface ServerSettings {
   dndConvs?: string[]
   /** 每个会话的自定义铃声：key=会话 key，value=绝对路径（缺省用全局来电铃声） */
   convRings?: Record<string, string>
+  /** 按范围覆盖音效：key=dm:<userId> / group:<groupId> / company:<companyId>，value={message?, ring?} */
+  soundOverrides?: Record<string, { message?: string; ring?: string }>
   /** 记住密码：勾选后下次打开登录页自动填好账号与密码（本地保存） */
   rememberPassword?: boolean
   /** 记住的账号（配合 rememberPassword；未勾选时为空） */

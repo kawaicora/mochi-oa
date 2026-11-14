@@ -253,6 +253,13 @@ export const useRtcStore = defineStore('rtc', () => {
     incomingDm.value = null
   }
 
+  /** 忽略群来电/会议邀请：立刻停铃并清空待接状态 */
+  function rejectGroup(): void {
+    if (!incomingGroup.value) return
+    stopRing()
+    incomingGroup.value = null
+  }
+
   async function startGroupCall(groupId: number, kind: RtcKind): Promise<void> {
     error.value = ''
     try {
@@ -601,6 +608,7 @@ export const useRtcStore = defineStore('rtc', () => {
     startDmCall,
     answerDm,
     rejectDm,
+    rejectGroup,
     startGroupCall,
     joinGroupCall,
     createMeeting,

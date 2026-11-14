@@ -40,8 +40,9 @@ const updateProgress = ref(0)
 const updateResult = ref<{ ok: boolean; version?: string; detail?: string; error?: string } | null>(null)
 
 // 监听上传进度
+let offUploadProgress: (() => void) | null = null
 if (typeof window !== 'undefined' && window.pantry.onUploadUpdateProgress) {
-  window.pantry.onUploadUpdateProgress((data) => {
+  offUploadProgress = window.pantry.onUploadUpdateProgress((data) => {
     if (!data.done && data.percent != null) {
       updateProgress.value = data.percent
     }
@@ -138,6 +139,7 @@ async function loadDevices(): Promise<void> {
 }
 
 function startRefresh(): void {
+  if (refreshTimer) clearInterval(refreshTimer)
   refreshTimer = setInterval(() => {
     void loadRooms()
     void loadDevices()
@@ -222,7 +224,7 @@ function fmtBytes(b: number): string {
 const roomTypeLabel = (t: string) => ({ conf: '会议', dm: '私聊', group: '群聊' } as Record<string, string>)[t] || t
 
 onMounted(() => { void doVerify() })
-onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer); offUploadProgress?.(); offUploadProgress = null })
 </script>
 
 <template>
