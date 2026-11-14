@@ -150,14 +150,17 @@ class RemoteSession {
     this.say(`已连接 SFU room=${opts.sfu.roomName}`)
 
     // 2. 采集屏幕 + 系统声音（48kHz / 2ch / 高音质）
+    //    cursor:'always' 把被控端光标持续烘焙进画面帧，控制端看到的光标来自远程画面本身。
     let screen: MediaStream
     try {
+      // cursor:'always' 是 Chromium 屏幕采集约束，TS DOM 类型未声明，整体断言为 MediaStreamConstraints。
+      const constraints = {
+        video: { cursor: 'always' },
+        audio: { channelCount: 2, sampleRate: 48000, echoCancellation: false, noiseSuppression: false }
+      } as unknown as MediaStreamConstraints
       screen = await (navigator.mediaDevices as unknown as {
         getDisplayMedia: (c: MediaStreamConstraints) => Promise<MediaStream>
-      }).getDisplayMedia({
-        video: true,
-        audio: { channelCount: 2, sampleRate: 48000, echoCancellation: false, noiseSuppression: false }
-      })
+      }).getDisplayMedia(constraints)
     } catch (e) {
       this.onError(`采集屏幕失败：${(e as Error)?.message ?? e}`)
       this.stop('capture-failed')
