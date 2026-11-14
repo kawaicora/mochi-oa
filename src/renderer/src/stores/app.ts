@@ -44,6 +44,7 @@ import {
 import { startReminder, pendingIds, REMINDER_HOUR } from '../utils/reminder'
 import { toPlain } from '../utils/plain'
 import { mergeReadPosition } from '../utils/read-receipt'
+import { baseNameOf, fileKindOf, resolveFileName } from '../utils/file-transfer'
 // 需求 7.3：审批卡片深链（系统通知点击 → 打开对应审批 View 并定位申请单）
 import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
 import { setExpenseDeepLink } from '../utils/expense-deeplink'
@@ -1220,21 +1221,12 @@ export const useAppStore = defineStore('app', () => {
     if (ack.ok) appendLocal('text', text.trim(), (ack.data as { id?: string } | undefined)?.id)
     return ack.ok
   }
-  function fileKindOf(p: string): MessageKind {
-    if (/\.(mp4|webm|mov|mkv|avi|m4v|flv)$/i.test(p)) return 'video'
-    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)) return 'image'
-    if (/\.(mp3|wav|flac|aac|ogg|oga|opus|weba|m4a|m4b|wma|ac3|aiff|aif|au|amr|alac|mka|mid|midi|cda|cue)$/i.test(p)) return 'audio'
-    return 'file'
-  }
-  function baseNameOf(p: string): string {
-    return p.split(/[\\/]/).pop() ?? p
-  }
   async function sendFile(filePath: string, relativePath = '', originalName = ''): Promise<boolean> {
     const s = selected.value
     if (!s) return false
     const kind = fileKindOf(filePath)
     const clientId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const fileName = originalName.trim() || baseNameOf(filePath)
+    const fileName = resolveFileName(originalName, filePath)
     pendingUploads.value.push({ clientId, fileName, kind, percent: 0 })
     let up: { ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }
     try {

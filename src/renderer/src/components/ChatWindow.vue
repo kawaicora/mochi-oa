@@ -12,6 +12,7 @@ import UserAvatar from './UserAvatar.vue'
 import type { ServerChatMessage } from '@shared/server-types'
 import { convKey, type NotifyScope } from '../utils/notify-manager'
 import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
+import { fileNameOf } from '../utils/file-transfer'
 import { setProxyDeepLink } from '../utils/proxy-deeplink'
 import { setExpenseDeepLink } from '../utils/expense-deeplink'
 import { setAdvanceDeepLink } from '../utils/advance-deeplink'
@@ -830,11 +831,6 @@ async function pickConvRing(): Promise<void> {
   }
   await app.setScopeSound(scope, 'ring', p)
   flashToast(`本会话铃声：${shortName(p)}`)
-}
-
-function fileNameOf(url: string): string {
-  const seg = url.split('/').pop() || ''
-  return decodeURIComponent(seg)
 }
 
 function isImageUrl(url: string): boolean {
