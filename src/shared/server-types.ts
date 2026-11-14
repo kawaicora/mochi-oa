@@ -273,6 +273,7 @@ export interface ServerChatMessage {
   avatar?: string
   kind: MessageKind
   content: string
+  fileId?: string
   ts: number
 }
 

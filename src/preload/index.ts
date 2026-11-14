@@ -267,12 +267,12 @@ const api = {
     safeInvoke(IpcChannels.serverConversationRead, conversationId, lastMessageId && lastMessageId > 0 ? lastMessageId : null),
   serverChatHistory: (groupId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverChatHistory, groupId, beforeTs ?? null, limit ?? null),
-  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'): Promise<Ack> =>
-    safeInvoke(IpcChannels.serverChatSend, groupId, content, kind ?? null),
+  serverChatSend: (groupId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card', fileId?: string): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverChatSend, groupId, content, kind ?? null, fileId ?? null),
   serverDmHistory: (withUserId: number, beforeTs?: number, limit?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDmHistory, withUserId, beforeTs ?? null, limit ?? null),
-  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'): Promise<Ack> =>
-    safeInvoke(IpcChannels.serverDmSend, toUserId, content, kind ?? null),
+  serverDmSend: (toUserId: number, content: string, kind?: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card', fileId?: string): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverDmSend, toUserId, content, kind ?? null, fileId ?? null),
   serverMessageDelete: (conversationId: number, messageId: string, content?: string): Promise<Ack> =>
     safeInvoke(IpcChannels.serverMessageDelete, conversationId, messageId, content ?? ''),
   serverMessageHardDelete: (conversationId: number, messageId: string): Promise<Ack> =>
@@ -560,7 +560,7 @@ const api = {
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onFriendRequest: (l: (d: unknown) => void) => subscribe<unknown>(IpcEvents.friendRequest, l),
-  onCompanyInviteReceived: (l: (d: { invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string } }) => void) =>
+  onCompanyInviteReceived: (l: (d: { invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string; invitedBy?: number; userId?: number } }) => void) =>
     subscribe<{ invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string } }>(IpcEvents.companyInviteReceived, l),
   onCompanyJoinRequest: (l: (d: { companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }) => void) =>
     subscribe<{ companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }>(IpcEvents.companyJoinRequest, l),

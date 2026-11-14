@@ -422,7 +422,7 @@ export const useAppStore = defineStore('app', () => {
       title: '企业邀请',
       body: `${who} 邀请你加入「${company}」`,
       fromId: inv.invitedBy ?? inv.userId,
-      scope: { kind: 'company', id: inv.companyId },
+      scope: { kind: 'company', id: inv.companyId ?? 0 },
       buttons: [
         { label: '拒绝', role: 'default', run: () => respondCompanyInvite(invId, false) },
         { label: '同意', role: 'primary', run: () => respondCompanyInvite(invId, true) }
@@ -1172,7 +1172,7 @@ export const useAppStore = defineStore('app', () => {
     messages.value = (d<{ messages: ServerChatMessage[] }>(ack)?.messages ?? []).slice().reverse()
     ensureLocalForAll(messages.value)
   }
-  function appendLocal(kind: MessageKind, content: string, id?: string): void {
+  function appendLocal(kind: MessageKind, content: string, id?: string, fileId?: string): void {
     const s = selected.value
     if (!s) return
     const msgId = id ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -1185,6 +1185,7 @@ export const useAppStore = defineStore('app', () => {
       nick: server.state.username ?? '',
       kind,
       content,
+      fileId,
       ts: Date.now()
     })
   }
@@ -1240,15 +1241,16 @@ export const useAppStore = defineStore('app', () => {
       return false
     }
     const url = up.url
+    const fileId = up.uuid || undefined
     const ack =
       s.kind === 'group' && s.groupId
-        ? await window.pantry.serverChatSend(s.groupId, url, kind)
+        ? await window.pantry.serverChatSend(s.groupId, url, kind, fileId)
         : s.dmUserId
-          ? await window.pantry.serverDmSend(s.dmUserId, url, kind)
+          ? await window.pantry.serverDmSend(s.dmUserId, url, kind, fileId)
           : null
     if (ack && ack.ok) {
       pendingUploads.value = pendingUploads.value.filter((x) => x.clientId !== clientId)
-      appendLocal(kind, url, (ack.data as { id?: string } | undefined)?.id)
+      appendLocal(kind, url, (ack.data as { id?: string } | undefined)?.id, fileId)
       return true
     }
     failUpload(clientId, ack?.error || '发送消息失败')
