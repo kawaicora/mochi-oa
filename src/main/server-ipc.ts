@@ -505,14 +505,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverChatHistory, (_e, groupId, beforeTs, limit) =>
     serverClient.groupHistory(Number(groupId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
-  ipcMain.handle(IpcChannels.serverChatSend, (_e, groupId, content, kind, fileId) =>
-    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), normalizeSendKind(kind), fileId ? String(fileId) : undefined)
+  ipcMain.handle(IpcChannels.serverChatSend, (_e, groupId, content, kind) =>
+    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverDmHistory, (_e, withUserId, beforeTs, limit) =>
     serverClient.dmHistory(Number(withUserId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
-  ipcMain.handle(IpcChannels.serverDmSend, (_e, toUserId, content, kind, fileId) =>
-    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), normalizeSendKind(kind), fileId ? String(fileId) : undefined)
+  ipcMain.handle(IpcChannels.serverDmSend, (_e, toUserId, content, kind) =>
+    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverMessageDelete, (_e, conversationId, messageId, content) =>
     serverClient.deleteMessage(Number(conversationId) || 0, String(messageId), String(content ?? ''))

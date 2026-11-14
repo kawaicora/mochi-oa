@@ -1079,9 +1079,9 @@ export class ServerClient extends EventEmitter {
 
   // ─── 消息 ───────────────────────────────────────────────
 
-  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text', fileId?: string): Promise<Ack & { data?: { id: string } }> {
+  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck<{ id: string }>(this.socket, 'chat:send', { groupId, kind, content, fileId })
+    return emitWithAck<{ id: string }>(this.socket, 'chat:send', { groupId, kind, content })
   }
 
   async groupHistory(groupId: number, beforeTs?: number, limit = 50): Promise<Ack & { data?: { messages: ServerChatMessage[] } }> {
@@ -1089,9 +1089,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ messages: ServerChatMessage[] }>(this.socket, 'chat:history', { groupId, beforeTs, limit })
   }
 
-  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text', fileId?: string): Promise<Ack & { data?: { id: string } }> {
+  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck<{ id: string }>(this.socket, 'dm:send', { toUserId, kind, content, fileId })
+    return emitWithAck<{ id: string }>(this.socket, 'dm:send', { toUserId, kind, content })
   }
 
   async dmHistory(withUserId: number, beforeTs?: number, limit = 50): Promise<Ack & { data?: { messages: ServerChatMessage[] } }> {
