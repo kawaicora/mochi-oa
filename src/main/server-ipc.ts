@@ -750,13 +750,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)
   )
   // 分块上传（带进度）：每块完成后向对应窗口推送 uploadProgress 事件
-  ipcMain.handle(IpcChannels.serverUploadChunked, (e, filePath, clientId, companyId, relativePath) => {
+  ipcMain.handle(IpcChannels.serverUploadChunked, (e, filePath, clientId, companyId, relativePath, originalName) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     return serverClient.uploadFileChunked(String(filePath), (percent) => {
       if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
         win.webContents.send(IpcEvents.uploadProgress, { clientId, percent })
       }
-    }, Number(companyId) || 0, String(relativePath ?? ''))
+    }, Number(companyId) || 0, String(relativePath ?? ''), String(originalName ?? ''))
   })
   // 下载整个文件夹到配置目录（按原结构建目录）
   ipcMain.handle(IpcChannels.serverDownloadFolder, async (_e, relPath) => {
@@ -1293,6 +1293,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const { app } = require('electron') as typeof import('electron')
       const dir = join(app.getPath('temp'), 'mochi-oa-paste')
       await mkdir(dir, { recursive: true })
+      // 临时名内部加时间戳保证唯一；原始文件名由上传链路显式携带，不依赖此磁盘名。
       const dest = join(dir, `${Date.now()}_${safe}`)
       await writeFile(dest, buf)
       console.log(`[paste] 临时文件 ${dest} ${buf.length}B`)

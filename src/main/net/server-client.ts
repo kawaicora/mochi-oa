@@ -1275,7 +1275,8 @@ export class ServerClient extends EventEmitter {
     filePath: string,
     onProgress?: (percent: number) => void,
     companyId = 0,
-    relativePath = ''
+    relativePath = '',
+    originalName = ''
   ): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> {
     if (!this.token) { this.logNoToken('uploadFileChunked'); return { ok: false, error: '未登录（无会话 token，请重新登录）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
@@ -1286,7 +1287,7 @@ export class ServerClient extends EventEmitter {
     try {
       const uploadId = randomUUID()
       const { size } = await stat(filePath)
-      const name = basename(filePath)
+      const name = originalName.trim() || basename(filePath)
       const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
       const mime =
         /^(png|jpe?g|gif|webp|bmp|svg)$/.test(ext) ? `image/${ext === 'jpg' ? 'jpeg' : ext}`

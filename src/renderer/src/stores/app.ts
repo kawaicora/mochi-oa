@@ -1229,16 +1229,16 @@ export const useAppStore = defineStore('app', () => {
   function baseNameOf(p: string): string {
     return p.split(/[\\/]/).pop() ?? p
   }
-  async function sendFile(filePath: string, relativePath = ''): Promise<boolean> {
+  async function sendFile(filePath: string, relativePath = '', originalName = ''): Promise<boolean> {
     const s = selected.value
     if (!s) return false
     const kind = fileKindOf(filePath)
     const clientId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const fileName = baseNameOf(filePath)
+    const fileName = originalName.trim() || baseNameOf(filePath)
     pendingUploads.value.push({ clientId, fileName, kind, percent: 0 })
     let up: { ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }
     try {
-      up = await window.pantry.serverUploadChunked(filePath, clientId, activeCompanyId.value, relativePath)
+      up = await window.pantry.serverUploadChunked(filePath, clientId, activeCompanyId.value, relativePath, originalName.trim() || '')
     } catch (e) {
       failUpload(clientId, e instanceof Error ? e.message : '上传调用异常')
       return false

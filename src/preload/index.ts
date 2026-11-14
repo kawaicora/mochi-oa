@@ -449,8 +449,8 @@ const api = {
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverUpload, filePath, companyId ?? 0),
-  serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
-    safeInvoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? ''),
+  serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string, originalName?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
+    safeInvoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? '', originalName ?? ''),
   pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => safeInvoke(IpcChannels.filePick, filter ?? null),
   pickFiles: (filter?: 'image' | 'video' | 'audio'): Promise<string[]> => safeInvoke(IpcChannels.filePickMulti, filter ?? null),
   pickFolder: (): Promise<string | null> => safeInvoke(IpcChannels.filePickFolder),

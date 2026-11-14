@@ -347,9 +347,9 @@ async function onSend(): Promise<void> {
   try {
     if (text) { draft.value = ''; await app.sendText(text) }
     if (pendingFiles.value.length) {
-      const paths = pendingFiles.value.map((f) => f.path)
+      const items = pendingFiles.value.slice()
       pendingFiles.value = []
-      for (const p of paths) await app.sendFile(p)
+      for (const f of items) await app.sendFile(f.path, '', f.name)
     }
   } finally {
     sending.value = false
@@ -778,8 +778,16 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
   e.preventDefault()
   for (const f of files) {
     const isImage = f.type.startsWith('image/')
-    const ext = (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')
-    const r = await window.pantry.writeTempFile({ name: `粘贴文件_${Date.now()}.${ext}`, data: await f.arrayBuffer() })
+    const mimeExt = (f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')
+    const origName = (f.name || '').trim()
+    // 保留剪贴板原始文件名与扩展名；原名缺扩展名时才按 MIME 补一个，原名缺失才用生成名。
+    let tempName: string
+    if (origName) {
+      tempName = /\.[a-z0-9]+$/i.test(origName) ? origName : `${origName}.${mimeExt}`
+    } else {
+      tempName = `粘贴文件_${Date.now()}.${mimeExt}`
+    }
+    const r = await window.pantry.writeTempFile({ name: tempName, data: await f.arrayBuffer() })
     if (!r.ok || !r.path) {
       flashToast(`粘贴文件失败：${r.error || '未知错误'}`)
       continue
@@ -792,7 +800,7 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
         reader.readAsDataURL(f)
       })
     }
-    pendingFiles.value.push({ path: r.path, dataUrl, name: f.name, isImage })
+    pendingFiles.value.push({ path: r.path, dataUrl, name: origName || tempName, isImage })
   }
 }
 
