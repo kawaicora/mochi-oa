@@ -27,8 +27,12 @@ function onSync2(d: { companyId?: number; projectId?: number | null }): void {
   if (props.projectId && pid && props.projectId !== pid) return
   void load()
 }
-onMounted(() => { void load(); offSync = window.pantry.onRequirementsUpdated(onSync), window.pantry.onBugsUpdated(onSync) })
-onUnmounted(() => { offSync?.() })
+onMounted(() => {
+  void load()
+  offSync = window.pantry.onRequirementsUpdated(onSync)
+  offSync2 = window.pantry.onBugsUpdated(onSync2)
+})
+onUnmounted(() => { offSync?.(); offSync2?.() })
 
 const REQ = { planning: '待规划', in_progress: '进行中', done: '完成', closed: '已关闭' }
 const SEV = { minor: '轻微', normal: '一般', major: '严重', critical: '致命' }

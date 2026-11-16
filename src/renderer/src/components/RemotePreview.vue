@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { RoomEvent, type Room } from 'livekit-client'
 import { connectSfu } from '../rtc/livekitClient'
+import type { RtcSfuInfo } from '@shared/server-types'
 
 const props = defineProps<{ deviceId: string; deviceName: string }>()
 
@@ -24,8 +25,9 @@ async function start() {
       return
     }
     // 服务端 dev:view 把 SFU 信息嵌套在 sfu 字段下
-    const s = ack.data?.sfu
-    if (!s?.url || !s?.token || !s?.roomName) {
+    const data = ack.data as { sfu?: RtcSfuInfo } | undefined
+    const s = data?.sfu
+    if (!s || !s.url || !s.token || !s.roomName) {
       error.value = '服务端未配置 LiveKit SFU'
       connecting.value = false
       return
@@ -78,9 +80,12 @@ async function switchKind(kind: 'screen' | 'camera' | 'mic') {
   }
 }
 
+function minWin(): void { void window.pantry.minimizeWindow() }
+function toggleWin(): void { void window.pantry.toggleMaximize() }
+
 function close() {
   if (room) { try { room.disconnect() } catch (e) { console.warn('[remote-preview] disconnect:', e) } }
-  window.close()
+  void window.pantry.closeWindow()
 }
 
 onMounted(() => { void start() })
@@ -92,9 +97,9 @@ onUnmounted(() => { if (room) { try { room.disconnect() } catch (e) { console.wa
     <div class="rp-titlebar">
       <span class="rp-title"><i class="fas fa-desktop"></i> 远程预览 — {{ deviceName }}</span>
       <div class="rp-winbtns">
-        <button class="rp-wb" @click="window.pantry.minimizeWindow()"><i class="fas fa-minus"></i></button>
-        <button class="rp-wb" @click="window.pantry.toggleMaximize()"><i class="far fa-square"></i></button>
-        <button class="rp-wb rp-wb-close" @click="close()"><i class="fas fa-times"></i></button>
+        <button class="rp-wb" @click="minWin"><i class="fas fa-minus"></i></button>
+        <button class="rp-wb" @click="toggleWin"><i class="far fa-square"></i></button>
+        <button class="rp-wb rp-wb-close" @click="close"><i class="fas fa-times"></i></button>
       </div>
     </div>
     <div class="rp-controls">

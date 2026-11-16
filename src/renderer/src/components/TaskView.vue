@@ -12,6 +12,7 @@ import MemberTrackView from './MemberTrackView.vue'
 import CompanyContactPicker from './CompanyContactPicker.vue'
 import DateTimeInput from './common/DateTimePicker.vue'
 import RichTextEditor from './common/RichTextEditor.vue'
+import { notifyEvent } from '../utils/notify-manager'
 
 const app = useAppStore()
 const server = useServerStore()
@@ -348,7 +349,9 @@ function checkReminders(): void {
     const body = level === 'overdue'
       ? `「${t.title}」已超时！${remainText(t)}`
       : `「${t.title}」${level === 'red' ? '红色警告' : '黄色提醒'}，${remainText(t)}`
-    void window.pantry.notify({ kind: 'task', title: '任务提醒', body, target: undefined })
+    // 走统一通知管理器：与普通消息同一声 message.wav，受消息提示音开关/免打扰约束；
+    // 直接调 pantry.notify 只会弹系统通知，不会响铃。
+    void notifyEvent({ kind: 'task', title: '任务提醒', body, target: undefined })
   }
 }
 let remindTimer: number | null = null

@@ -30,16 +30,19 @@ const devices = ref<Device[]>([])
 // dev:view 返回的完整 sys 数据（info + perf）
 const devInfo = ref<Record<string, any> | null>(null)
 const devPerf = ref<Record<string, any> | null>(null)
+// 设备命令执行回显
+const execOutput = ref('')
 
 // 更新发布
 const updateFile = ref<File | null>(null)
 const uploadingUpdate = ref(false)
 const updateProgress = ref(0)
-const updateResult = ref<{ ok: boolean; version?: string; error?: string } | null>(null)
+const updateResult = ref<{ ok: boolean; version?: string; detail?: string; error?: string } | null>(null)
 
 // 监听上传进度
+let offUploadProgress: (() => void) | null = null
 if (typeof window !== 'undefined' && window.pantry.onUploadUpdateProgress) {
-  window.pantry.onUploadUpdateProgress((data) => {
+  offUploadProgress = window.pantry.onUploadUpdateProgress((data) => {
     if (!data.done && data.percent != null) {
       updateProgress.value = data.percent
     }
@@ -65,10 +68,11 @@ async function uploadUpdate(): Promise<void> {
       updateResult.value = { ok: false, error: '临时文件写入失败' }
       return
     }
-    const resp = await window.pantry.serverUploadUpdate(r.path)
+    const resp = await window.pantry.serverUploadUpdate({ filePath: r.path, name: updateFile.value.name })
     if (resp.ok) {
       updateProgress.value = 100
-      updateResult.value = { ok: true, version: resp.version }
+      const detail = (resp.keys && resp.keys.length > 0) ? resp.keys.join(', ') : (resp.platform ?? '')
+      updateResult.value = { ok: true, version: resp.version, detail }
     } else {
       updateResult.value = { ok: false, error: resp.error || '上传失败' }
     }
@@ -102,7 +106,8 @@ async function doVerify(): Promise<void> {
   authError.value = ''
   try {
     const ack = await window.pantry.serverAdminVerify()
-    if (ack.ok && ack.data?.token) {
+    const data = ack.data as { token?: string } | undefined
+    if (ack.ok && data?.token) {
       verified.value = true
       void loadRooms()
       void loadDevices()
@@ -120,18 +125,21 @@ async function doVerify(): Promise<void> {
 async function loadRooms(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListRooms()
-    if (ack.ok && ack.data?.rooms) rooms.value = ack.data.rooms
+    const data = ack.data as { rooms?: Room[] } | undefined
+    if (ack.ok && data?.rooms) rooms.value = data.rooms
   } catch (e) { console.warn('[admin] listRooms failed:', e) }
 }
 
 async function loadDevices(): Promise<void> {
   try {
     const ack = await window.pantry.serverAdminListDevices()
-    if (ack.ok && ack.data?.devices) devices.value = ack.data.devices
+    const data = ack.data as { devices?: Device[] } | undefined
+    if (ack.ok && data?.devices) devices.value = data.devices
   } catch (e) { console.warn('[admin] listDevices failed:', e) }
 }
 
 function startRefresh(): void {
+  if (refreshTimer) clearInterval(refreshTimer)
   refreshTimer = setInterval(() => {
     void loadRooms()
     void loadDevices()
@@ -155,23 +163,29 @@ async function loadDeviceSys(d: Device): Promise<void> {
         window.pantry.serverAdminSysInfo(),
         window.pantry.serverAdminSysPerf()
       ])
-      if (infoAck.ok) devInfo.value = infoAck.data
-      if (perfAck.ok) devPerf.value = perfAck.data
+      if (infoAck.ok) devInfo.value = infoAck.data as Record<string, any> | null
+      if (perfAck.ok) devPerf.value = perfAck.data as Record<string, any> | null
     } catch (e) { console.warn('[admin] devView failed:', e) }
   } else {
     try {
       const ack = await window.pantry.serverAdminDevView(d.id)
       console.log('[admin] dev:view response:', ack)
-      if (ack.ok && ack.data?.sys) {
-        const s = ack.data.sys
+      const data = ack.data as {
+        sys?: { info?: Record<string, any>; perf?: Record<string, any> }
+        name?: string
+        os?: string
+        ip?: string
+      } | undefined
+      if (ack.ok && data?.sys) {
+        const s = data.sys
         if (s.info) devInfo.value = s.info
         if (s.perf) devPerf.value = s.perf
       } else if (ack.ok) {
         // sys 为空：用 ack 里的基础信息填充，避免永远"加载中"
         devInfo.value = {
-          hostname: ack.data?.name || d.name,
-          type: ack.data?.os || d.os,
-          ips: [{ address: ack.data?.ip || d.ip }],
+          hostname: data?.name || d.name,
+          type: data?.os || d.os,
+          ips: [{ address: data?.ip || d.ip }],
         }
       }
     } catch (e) {
@@ -210,7 +224,7 @@ function fmtBytes(b: number): string {
 const roomTypeLabel = (t: string) => ({ conf: '会议', dm: '私聊', group: '群聊' } as Record<string, string>)[t] || t
 
 onMounted(() => { void doVerify() })
-onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
+onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer); offUploadProgress?.(); offUploadProgress = null })
 </script>
 
 <template>
@@ -263,9 +277,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
       <div v-else-if="activeTab === 'update' && !selectedDevice" class="ap-update">
         <div class="ap-update-card">
           <h3><i class="fas fa-upload"></i> 发布更新包</h3>
-          <p class="ap-update-desc">上传 exe 安装包，自动解析版本号并写入 /files/update.exe 和 /files/version</p>
+          <p class="ap-update-desc">上传 exe / AppImage / dmg / zip，自动识别平台、与版本号，按「平台」发布到 /files/version</p>
           <div class="ap-update-row">
-            <input type="file" accept=".exe" ref="updateFileInput" @change="onUpdateFile" />
+            <input type="file" accept=".exe,.appimage,.AppImage,.dmg,.zip" ref="updateFileInput" @change="onUpdateFile" />
           </div>
           <div v-if="updateFile" class="ap-update-info">
             <i class="fas fa-file-excel"></i> {{ updateFile.name }} ({{ fmtBytes(updateFile.size) }})
@@ -275,7 +289,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
             <span class="ap-update-progress-text">{{ updateProgress }}%</span>
           </div>
           <div v-if="updateResult" class="ap-update-result" :class="{ ok: updateResult.ok, err: !updateResult.ok }">
-            {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}` : updateResult.error }}
+            {{ updateResult.ok ? `发布成功！版本 ${updateResult.version}${updateResult.detail ? ' · ' + updateResult.detail : ''}` : updateResult.error }}
           </div>
           <button class="ap-update-btn" :disabled="!updateFile || uploadingUpdate" @click="uploadUpdate">
             {{ uploadingUpdate ? '上传中…' : '发布更新' }}

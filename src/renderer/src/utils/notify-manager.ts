@@ -4,38 +4,35 @@
  *
  * 之前这块逻辑散在各处（app.ts 的 notifyIfUnfocused、rtc.ts 的 maybeNotify、
  * TaskView/RtcCallRoom 各写一份），而且**没有区分通知类型**——来电和普通消息待遇一样。
- * 现在统一收拢到这里，按 NotifKind 分类型处理：
+ * 分流规则（唯一口径，调用方不参与选音）：
  *
- *   │ 类型      │ 免打扰是否静音 │ 提示音                     │ 何时打扰                    │
- *   │ message   │ 是（全局/会话）│ message.wav（可自定义）      │ 非「正在看这个会话」时      │
- *   │ task      │ 是（全局）      │ message.wav                │ 同上                        │
- *   │ call      │ 否（来电优先）  │ calling.mp3（可自定义）      │ 非「正在看这个会话」时      │
- *   │ meeting   │ 否（来电优先）  │ calling.mp3（可自定义）      │ 同上                        │
- *   │ alarm     │ —              │ 闹钟自带播放，不走这里        │ —                           │
+ *   │ 分组                │ 类型                          │ 提示音                     │ 免打扰           │
+ *   │ 通话类              │ call / meeting                │ calling.mp3 循环铃声        │ 否（来电优先）   │
+ *   │ 非通话类（其余全部）│ message / task / company / system │ message.wav 单次提示音  │ 是（全局/会话）  │
+ *   │ 不走这里            │ alarm                         │ 闹钟自带播放                │ —                │
  *
+ * 即：只要进管理器的非通话事件，统一播消息提示音；只有通话类播铃声。
+
  * 音频文件丢失自动回退默认：由主进程 resolveNotifySound 判定（自定义不存在 →
  * resources/message.wav 或 calling.mp3），渲染层不用猜路径。
  * 播放失败（文件损坏/被删/格式不支持）会清缓存重解析一次，再失败就静默放弃——
  * 绝不能因为提示音出问题影响消息收发本身。
  */
+import { ref, computed } from 'vue'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
+import { sanitizeHtml, escapeHtml } from './html-sanitize'
 
-/** 通知策略（来自本地设置 userData/server-config.json） */
-export interface NotifyPolicy {
-  /** 消息提示音开关 */
-  sound: boolean
-  /** 来电/会议铃声开关 */
-  callSound: boolean
-  /** 全局免打扰（只静音消息类；来电照响） */
-  dnd: boolean
-  /** 单独免打扰的会话 key */
-  dndConvs: string[]
-  /** 自定义消息提示音（绝对路径，空=用 resources/message.wav） */
-  messageSoundFile: string
-  /** 自定义来电铃声（绝对路径，空=用 resources/calling.mp3） */
-  callSoundFile: string
-  /** 每个会话的自定义铃声：key=会话 key，value=绝对路径 */
-  convRings: Record<string, string>
+/** 通知归属范围：个人私聊 / 群 / 公司（审批类走公司） */
+export type NotifyScopeKind = 'dm' | 'group' | 'company'
+export interface NotifyScope {
+  kind: NotifyScopeKind
+  id: number
+}
+export type SoundType = 'message' | 'ring'
+/** 单个范围的自定义音效覆盖：消息提示音 / 来电铃声 */
+export interface SoundOverride {
+  message?: string
+  ring?: string
 }
 
 /** 会话 key：群/私聊统一成 group:<conversationId> / dm:<conversationId>，本地设置用它当键 */
@@ -43,29 +40,185 @@ export function convKey(type: string, conversationId: number): string {
   return `${type === 'dm' ? 'dm' : 'group'}:${conversationId}`
 }
 
+/** 范围 key：dm:<userId> / group:<groupId> / company:<companyId> */
+export function scopeKey(scope: NotifyScope | undefined): string {
+  return scope ? `${scope.kind}:${scope.id}` : ''
+}
+
 /**
- * 当前策略（由 app store 在启动/保存设置时同步进来）。
- * 放在模块内而不是每次调用传参：rtc / task / 聊天各处都能直接调 notifyEvent，
- * 不必各自去 import app store，避免 store 之间循环依赖。
+ * 通知设置（持久化到本地 server-config.json）。
+ * 读写、静音/免打扰、铃声/消息音选择全部由本管理器负责，调用方与设置面板不直接碰存储。
  */
-let policy: NotifyPolicy = {
-  sound: true,
+export interface NotifyConfig {
+  /** 消息提示音开关（非通话类事件） */
+  notifySound: boolean
+  /** 来电/会议铃声开关（通话类事件） */
+  callSound: boolean
+  /** 全局自定义消息提示音（绝对路径，空=用 resources/message.wav） */
+  messageSoundFile: string
+  /** 全局自定义来电铃声（绝对路径，空=用 resources/calling.mp3） */
+  callSoundFile: string
+  /** 全局免打扰（只静音消息类；来电照响） */
+  dnd: boolean
+  /** 单独免打扰的会话 key */
+  dndConvs: string[]
+  /** 兼容旧版：每个会话的来电铃声（key=会话 key，value=路径）；新代码用 soundOverrides */
+  convRings: Record<string, string>
+  /** 按范围覆盖音效：key=scopeKey，value={ message?, ring? }；缺省回退全局 */
+  soundOverrides: Record<string, SoundOverride>
+}
+
+const DEFAULT_CFG: NotifyConfig = {
+  notifySound: true,
   callSound: true,
-  dnd: false,
-  dndConvs: [],
   messageSoundFile: '',
   callSoundFile: '',
-  convRings: {}
+  dnd: false,
+  dndConvs: [],
+  convRings: {},
+  soundOverrides: {}
 }
 
-/** 同步设置（app store 载入/保存通知设置后调用） */
-export function setNotifyPolicy(p: NotifyPolicy): void {
-  policy = { ...p }
+/** 响应式配置：设置面板直接绑定；决策、持久化、缓存失效都在本管理器内完成 */
+export const notifyCfg = ref<NotifyConfig>({ ...DEFAULT_CFG })
+
+/** 去掉 Vue 响应式 Proxy，产出可安全走 IPC 结构化克隆的纯数据 */
+function plainCfg(): NotifyConfig {
+  const c = notifyCfg.value
+  return {
+    notifySound: c.notifySound,
+    callSound: c.callSound,
+    messageSoundFile: c.messageSoundFile,
+    callSoundFile: c.callSoundFile,
+    dnd: c.dnd,
+    dndConvs: [...c.dndConvs],
+    convRings: { ...c.convRings },
+    soundOverrides: JSON.parse(JSON.stringify(c.soundOverrides)) as Record<string, SoundOverride>
+  }
 }
 
-/** 读当前策略（设置面板展示用） */
-export function getNotifyPolicy(): NotifyPolicy {
-  return policy
+/** 启动时载入通知设置；失败保持默认，不阻塞登录 */
+export async function loadNotifyCfg(): Promise<void> {
+  try {
+    const s = await window.pantry.serverGetSettings()
+    const soundOverrides = s.soundOverrides && typeof s.soundOverrides === 'object'
+      ? (s.soundOverrides as Record<string, SoundOverride>)
+      : {}
+    // 旧版 convRings 迁移到 soundOverrides.ring（仅当新表为空时）
+    const legacy = s.convRings && typeof s.convRings === 'object' ? s.convRings : {}
+    if (Object.keys(soundOverrides).length === 0 && Object.keys(legacy).length > 0) {
+      for (const [k, v] of Object.entries(legacy)) {
+        soundOverrides[k] = { ring: v as string }
+      }
+    }
+    notifyCfg.value = {
+      notifySound: s.notifySound !== false,
+      callSound: s.callSound !== false,
+      messageSoundFile: s.messageSoundFile ?? '',
+      callSoundFile: s.callSoundFile ?? '',
+      dnd: s.dnd === true,
+      dndConvs: Array.isArray(s.dndConvs) ? s.dndConvs : [],
+      convRings: { ...legacy },
+      soundOverrides
+    }
+  } catch (e) {
+    console.warn('[notify] 读取通知设置失败', e)
+  }
+}
+
+/** 变更通知设置：更新本地响应式配置 → 持久化；音频文件变更时清播放缓存 */
+const AUDIO_CFG_KEYS = ['messageSoundFile', 'callSoundFile', 'convRings', 'soundOverrides'] as const
+
+export async function saveNotifyCfg(patch: Partial<NotifyConfig>): Promise<void> {
+  notifyCfg.value = { ...notifyCfg.value, ...patch }
+  try {
+    await window.pantry.serverSaveSettings(plainCfg())
+  } catch (e) {
+    console.warn('[notify] 保存通知设置失败', e)
+  }
+  if (AUDIO_CFG_KEYS.some((k) => k in patch)) invalidateSoundCache()
+}
+
+/**
+ * 解析某范围某类型最终使用的音频路径。
+ * 优先级：范围覆盖（个人/群/公司）→ 全局默认；空串表示用 resources 下默认音。
+ */
+export function resolveSoundPath(scope: NotifyScope | undefined, type: SoundType): string {
+  const ov = notifyCfg.value.soundOverrides[scopeKey(scope)]
+  if (ov) {
+    const p = type === 'ring' ? ov.ring : ov.message
+    if (p) return p
+  }
+  return type === 'ring' ? notifyCfg.value.callSoundFile : notifyCfg.value.messageSoundFile
+}
+
+/** 设置某范围的自定义音效；传空串清除该类型覆盖 */
+export async function setScopeSound(scope: NotifyScope, type: SoundType, file: string): Promise<void> {
+  const key = scopeKey(scope)
+  const next = { ...notifyCfg.value.soundOverrides }
+  const cur = { ...(next[key] ?? {}) }
+  if (file) cur[type] = file
+  else delete cur[type]
+  if (Object.keys(cur).length === 0) delete next[key]
+  else next[key] = cur
+  await saveNotifyCfg({ soundOverrides: next })
+}
+
+/** 读取某范围的自定义音效路径（未设置返回空串） */
+export function scopeSoundOf(scope: NotifyScope | undefined, type: SoundType): string {
+  return notifyCfg.value.soundOverrides[scopeKey(scope)]?.[type] ?? ''
+}
+
+
+/** 会话是否免打扰 */
+export function isConvMuted(key: string): boolean {
+  return notifyCfg.value.dndConvs.includes(key)
+}
+
+/** 切换会话免打扰 */
+export async function setConvMuted(key: string, muted: boolean): Promise<void> {
+  const list = notifyCfg.value.dndConvs.filter((k) => k !== key)
+  if (muted) list.push(key)
+  await saveNotifyCfg({ dndConvs: list })
+}
+
+/** 会话自定义铃声（空串=清除，回到全局来电铃声） */
+export function convRingOf(key: string): string {
+  return notifyCfg.value.convRings[key] ?? ''
+}
+
+export async function setConvRing(key: string, file: string): Promise<void> {
+  const next = { ...notifyCfg.value.convRings }
+  if (file) next[key] = file
+  else delete next[key]
+  await saveNotifyCfg({ convRings: next })
+}
+
+/** 统一通知按钮 */
+export interface NotifyButton {
+  text: string
+  role?: 'primary' | 'danger' | 'default'
+  /** 点击后执行；条目先关闭，再触发回调 */
+  onClick?: () => unknown | Promise<unknown>
+}
+
+/** 应用内统一通知条目（标题 + 正文 + 按钮列表） */
+export interface NotifyItem {
+  id: number
+  kind: NotifKind
+  title: string
+  /** 已消毒后的正文（html=true 时是安全 HTML，否则是转义后的纯文本） */
+  content: string
+  /** 正文是否按 HTML 渲染 */
+  html: boolean
+  /** 触发方用户 id（申请/邀请/消息来源） */
+  fromId?: number
+  /** 音效覆盖归属范围（个人/群/公司） */
+  scope?: NotifyScope
+  target?: NotifTarget
+  buttons: NotifyButton[]
+  /** 无按钮条目自动消失毫秒数；0/缺省不自动消失 */
+  autoDismiss?: number
 }
 
 /** 通知上下文 */
@@ -73,6 +226,12 @@ export interface NotifyContext {
   kind: NotifKind
   title: string
   body: string
+  /** 正文是否按 HTML 渲染（默认纯文本；开启后经消毒再上屏） */
+  html?: boolean
+  /** 触发方用户 id */
+  fromId?: number
+  /** 音效覆盖归属范围（个人/群/公司） */
+  scope?: NotifyScope
   /** 该事件所属会话（有会话的通知才有免打扰/自定义铃声的概念） */
   convKey?: string
   /** 该会话是否正是当前打开着的会话（窗口聚焦时这类事件完全不打扰） */
@@ -80,6 +239,58 @@ export interface NotifyContext {
   /** 高风险事件（远程控制请求等）：无论聚焦与否都发系统通知 */
   force?: boolean
   target?: NotifTarget
+  /** 携带按钮时进入应用内面板；按钮列表 */
+  buttons?: NotifyButton[]
+  /** 无按钮条目自动消失毫秒数；缺省 8000 */
+  autoDismiss?: number
+  /** 是否进入应用内统一队列（缺省 true；false 时只响铃 + 系统通知，不挂卡片） */
+  panel?: boolean
+}
+
+// ─── 应用内统一通知队列 ───
+
+const notifyQueue = ref<NotifyItem[]>([])
+let notifySeq = 1
+
+/** 当前待展示的第一条通知（面板逐条弹出） */
+export const currentNotify = computed(() => notifyQueue.value[0] ?? null)
+
+/** 推入一条应用内通知；正文按 html 标记消毒/转义后存储 */
+export function pushNotify(ctx: NotifyContext): number {
+  const id = notifySeq++
+  const content = ctx.html ? sanitizeHtml(ctx.body) : escapeHtml(ctx.body)
+  const buttons = ctx.buttons ?? []
+  notifyQueue.value.push({
+    id,
+    kind: ctx.kind,
+    title: ctx.title,
+    content,
+    html: ctx.html === true,
+    fromId: ctx.fromId,
+    scope: ctx.scope,
+    target: ctx.target,
+    buttons,
+    autoDismiss: ctx.autoDismiss
+  })
+  // 无按钮的轻提示按 autoDismiss（缺省 8 秒）自动消失；带按钮的条目等待点击
+  if (buttons.length === 0) {
+    const ms = ctx.autoDismiss ?? 8000
+    window.setTimeout(() => dismissNotify(id), ms)
+  }
+  return id
+}
+
+/** 关闭指定通知 */
+export function dismissNotify(id: number): void {
+  notifyQueue.value = notifyQueue.value.filter((n) => n.id !== id)
+}
+
+/** 点击某条目按钮：关闭后执行回调 */
+export function resolveNotify(id: number, buttonIndex: number): void {
+  const item = notifyQueue.value.find((n) => n.id === id)
+  const handler = item?.buttons[buttonIndex]?.onClick
+  dismissNotify(id)
+  if (handler) void Promise.resolve().then(() => handler())
 }
 
 // ─── 音频播放 ───
@@ -284,34 +495,39 @@ async function windowFocused(): Promise<boolean> {
 }
 
 /**
- * 通知管理器统一入口。消息、来电、会议、任务提醒都走这里。
+ * 通知管理器统一入口。消息、来电、会议、任务提醒、系统提示都走这里。
+ * 分流规则（逻辑唯一口径）：
+ *   - call / meeting：通话类，播循环来电铃声（calling.mp3，可自定义）；
+ *   - 其余一切（message / task / company / system）：非通话类，统一播一次消息提示音
+ *     （message.wav，可自定义）；
+ *   - alarm：闹钟自带播放，不走这里。
  * 注意：调用方不要再自己去判聚焦/免打扰，全部交给这里，避免各处规则不一致。
  */
 export async function notifyEvent(ctx: NotifyContext): Promise<void> {
   const kind = ctx.kind
-  if (kind === 'alarm' || kind === 'system') {
-    // 闹钟自己响；系统提示只弹通知不响音
-    if (kind === 'system') {
-      await window.pantry.notify({ kind, title: ctx.title, body: ctx.body, target: ctx.target }).catch(() => {})
-    }
-    return
-  }
+  if (kind === 'alarm') return
 
   const isCallKind = kind === 'call' || kind === 'meeting'
   const conv = ctx.convKey ?? ''
-  const muted = !!conv && policy.dndConvs.includes(conv)
-  // 免打扰只静音消息/任务；来电优先（静音了来电会漏接）
-  const silenced = !isCallKind && (policy.dnd || muted)
+  const cfg = notifyCfg.value
+  const muted = !!conv && cfg.dndConvs.includes(conv)
+  // 免打扰只静音消息类；来电优先（静音了来电会漏接）
+  const silenced = !isCallKind && (cfg.dnd || muted)
 
   const focused = await windowFocused()
   // 正在看这个会话就不打扰：既不用弹系统通知，也不用响
   const viewingIt = focused && !!ctx.inCurrentConv
 
+  // 音效归属范围：个人/群/公司覆盖 → 全局默认；通话类取 ring，其余取 message
+  const soundType: SoundType = isCallKind ? 'ring' : 'message'
+  const soundPath = resolveSoundPath(ctx.scope, soundType)
+
   if (!silenced && !viewingIt) {
     if (isCallKind) {
-      if (policy.callSound) await startRing(policy.convRings[conv] || policy.callSoundFile)
-    } else if (policy.sound) {
-      await playOnce(kind, policy.messageSoundFile)
+      if (cfg.callSound) await startRing(soundPath)
+    } else if (cfg.notifySound) {
+      // 非通话类统一用消息提示音；kind 只影响系统通知的级别/文案，不影响选音
+      await playOnce('message', soundPath)
     }
   }
 
@@ -321,6 +537,9 @@ export async function notifyEvent(ctx: NotifyContext): Promise<void> {
   const shouldNotify = ctx.force || !viewingIt
   if (!shouldNotify) return
   await window.pantry.notify({ kind, title: ctx.title, body: ctx.body, target: ctx.target }).catch(() => {})
+
+  // 应用内统一条目：通话类由来电弹窗承接，其余进入统一队列（可带按钮/HTML 正文）
+  if (!isCallKind && ctx.panel !== false) pushNotify(ctx)
 }
 
 /** 清掉全部音频缓存（设置里换了音频文件后调用，让新文件立即生效） */

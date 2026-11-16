@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
+import VideoStream, { CameraUnavailableError, MediaPermissionError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 import UserAvatar from '@renderer/components/UserAvatar.vue'
@@ -274,7 +274,13 @@ async function applyDevicesFromPanel(p: {
 }): Promise<void> {
   try {
     if (p.audioInId) {
-      const ms = await VideoStream.GetAudioStream(p.audioInId, { sampleRate: p.sampleRate, channelCount: p.channelCount })
+      let ms: MediaStream
+      try {
+        ms = await VideoStream.GetAudioStream(p.audioInId, { sampleRate: p.sampleRate, channelCount: p.channelCount })
+      } catch (e) {
+        if (e instanceof MediaPermissionError) { showToast(e.message); return }
+        throw e
+      }
       const track = ms.getAudioTracks()[0] ?? null
       await VideoStream.UpdateAudioStream(new MediaStream(track ? [track] : []))
       engine?.replaceTrack(track, 'audio')
@@ -300,8 +306,9 @@ async function applyDevicesFromPanel(p: {
     }
     showDevices.value = false
   } catch (err) {
-    if (err instanceof CameraUnavailableError) {
-      // 无可用摄像头 → 回退频谱头像，不弹错误窗
+    if (err instanceof MediaPermissionError) showToast(err.message)
+    if (err instanceof CameraUnavailableError || err instanceof MediaPermissionError) {
+      // 无可用摄像头 / 权限被拒 → 回退频谱头像，不中断通话
       const t = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
       localPreview.value = VideoStream.stream
@@ -338,8 +345,8 @@ async function switchMic(deviceId: string): Promise<void> {
     await VideoStream.UpdateAudioStream(new MediaStream(track ? [track] : []))
     engine?.replaceTrack(track, 'audio')
     currentMic.value = deviceId
-  } catch {
-    showToast('麦克风切换失败')
+  } catch (e) {
+    showToast(e instanceof MediaPermissionError ? e.message : '麦克风切换失败')
   }
 }
 async function switchCamera(deviceId: string): Promise<void> {
@@ -360,8 +367,9 @@ async function switchCamera(deviceId: string): Promise<void> {
     engine?.replaceTrack(track, 'video')
     currentCam.value = deviceId
   } catch (err) {
-    if (err instanceof CameraUnavailableError) {
-      // 无可用摄像头 → 回退频谱头像，不弹错误窗
+    if (err instanceof MediaPermissionError) showToast(err.message)
+    if (err instanceof CameraUnavailableError || err instanceof MediaPermissionError) {
+      // 无可用摄像头 / 权限被拒 → 回退频谱头像，不中断通话
       const t = spectrumVideoTrack() ?? VideoStream.GetEmptyVideoStream().getVideoTracks()[0] ?? null
       await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
       localPreview.value = VideoStream.stream

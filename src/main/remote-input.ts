@@ -13,7 +13,8 @@
  *            需要「辅助功能」权限，启动时用 AXIsProcessTrusted 自检并上报结果。
  *
  * 两种键鼠模式（控制端发起会话时指定）：
- *  - remote：本机鼠标锁定（ClipCursor）+ 隐藏（ShowCursor(false)），所有键鼠事件上报控制端。
+ *  - remote：本机鼠标锁定在屏幕边界（ClipCursor），光标保持可见以便采集进画面帧；
+ *            键鼠事件由控制端上报。
  *  - local ：本机鼠标照常显示，仅按归一化坐标同步移动被控端鼠标。
  *  只有 Windows 有这套「锁定+隐藏」的权限模型，其它平台一律按 local 处理并记日志说明。
  *
@@ -369,7 +370,6 @@ async function startMacCgEvent(): Promise<boolean> {
 let backend: InputBackend = 'none'
 let capability: InputCapability = { ok: false, backend: 'none', detail: '尚未开始远程会话' }
 let screenSize = { w: 1920, h: 1080 }
-let cursorHidden = false
 let cursorLocked = false
 /** 按下中（未抬起）的键/钮，断线复位时补发 Up */
 const pendingButtons = new Set<'left' | 'right' | 'middle'>()
@@ -442,12 +442,11 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
   }
   if (effMode === 'remote') {
     if (!cursorLocked) { winSend({ t: 'cliplock' }); cursorLocked = true }
-    if (!cursorHidden) { winSend({ t: 'hide' }); cursorHidden = true }
+    // 不再隐藏被控端光标：光标必须保留在屏幕/画面帧里，控制端直接看到远程鼠标位置。
   } else if (IS_WIN) {
     winSend({ t: 'clipfree' })
     winSend({ t: 'show' })
     cursorLocked = false
-    cursorHidden = false
   }
   return { ...capability }
 }
@@ -567,7 +566,6 @@ export function remoteInputReset(): void {
     winSend({ t: 'show' })
   }
   cursorLocked = false
-  cursorHidden = false
 }
 
 /** 彻底停止（会话结束）：复位 + 结束常驻进程。 */
@@ -590,7 +588,6 @@ export function remoteInputStop(): void {
   backend = 'none'
   capability = { ok: false, backend: 'none', detail: '会话已结束' }
   cursorLocked = false
-  cursorHidden = false
 }
 
 /** 应用退出前兜底清理：子进程不会随父进程自动退出，必须显式收掉 */

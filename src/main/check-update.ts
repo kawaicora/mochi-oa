@@ -22,15 +22,53 @@ interface ServerConfig {
     token?: string;
 }
 
-interface UpdateInfo {
-    version: string;
-    downloadUrl: string;
-    sha256?: string;
+interface UpdatePlatformEntry {
+    downloadUrl: string
+    version?: string
 }
 
-const UPDATE_DIR = "mochi-update";
-const INSTALLER_NAME = "update.exe";
-const SUCCESS_FLAG = "update-success.flag";
+interface UpdateInfo {
+    version: string
+    /** 老写法扁平兼容项（旧 Windows 客户端读取）；新客户端仅在无平台条目时给 Windows 回退 */
+    downloadUrl?: string
+    /** 以平台名为键（windows / linux / darwin）；一个安装包覆盖全部架构 */
+    platforms: Record<string, UpdatePlatformEntry>
+}
+
+const UPDATE_DIR = "mochi-update"
+const SUCCESS_FLAG = "update-success.flag"
+
+/** 自身平台键：标准平台名 windows/linux/darwin（不再区分架构）。 */
+function ownPlatform(): string {
+    return process.platform === "win32" ? "windows"
+        : process.platform === "darwin" ? "darwin"
+        : process.platform === "linux" ? "linux"
+        : process.platform
+}
+
+/** 按自身平台匹配更新包：精确平台条目 → 老写法扁平 downloadUrl（仅 Windows）。 */
+function resolveDownloadUrl(update: UpdateInfo): string | null {
+    const plats = update.platforms ?? {}
+    const own = ownPlatform()
+    const exact = plats[own]?.downloadUrl
+    if (exact) return exact
+    // 兼容老写法：没有平台条目时，仅 Windows 回退到根节点扁平 downloadUrl
+    if (own === "windows" && update.downloadUrl) return update.downloadUrl
+    return null
+}
+
+/** 从下载地址取安装包扩展名，缺省 exe。 */
+function installerExt(url: string): string {
+    try {
+        const u = new URL(url)
+        const seg = u.pathname.split("/").pop() ?? ""
+        const dot = seg.lastIndexOf(".")
+        if (dot > 0) return seg.slice(dot + 1).toLowerCase()
+    } catch {
+        /* 忽略解析失败 */
+    }
+    return "exe"
+}
 
 // 主进程 → 渲染进程的更新进度 / 状态事件通道（渲染层 UpdateProgressOverlay 订阅）
 const UPDATE_PROGRESS_EVENT = "update:event:progress";
@@ -106,8 +144,14 @@ async function checkUpdate(): Promise<void> {
 
         const update = await response.json() as UpdateInfo;
 
-        if (!update.version || !update.downloadUrl) {
+        if (!update.version) {
             throw new Error("服务器返回的更新信息不完整");
+        }
+
+        const relativeUrl = resolveDownloadUrl(update);
+        if (!relativeUrl) {
+            console.log(`自动更新：当前平台 ${ownPlatform()} 暂无对应更新包`);
+            return;
         }
 
         const currentVersion = app.getVersion();
@@ -129,12 +173,12 @@ async function checkUpdate(): Promise<void> {
         }
 
         console.log(
-            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}`
+            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}（${ownPlatform()}）`
         );
-        console.debug(`自动更新：下载地址 ${update.downloadUrl}`);
+        console.debug(`自动更新：下载地址 ${relativeUrl}`);
         // 解析服务器下载地址
         const downloadUrl = new URL(
-            update.downloadUrl,
+            relativeUrl,
             serverUrl
         ).toString();
 
@@ -195,7 +239,7 @@ async function downloadInstaller(
     await mkdir(dir, { recursive: true });
 
     const tempPath = join(dir, "update.tmp");
-    const installerPath = join(dir, INSTALLER_NAME);
+    const installerPath = join(dir, `update_${ownPlatform()}.${installerExt(url)}`);
 
     await rm(tempPath, { force: true });
 
@@ -335,6 +379,22 @@ function classifyDownloadError(
 async function installUpdate(
     installerPath: string
 ): Promise<void> {
+
+    // 非 Windows：AppImage / dmg 无统一静默安装链路，保留安装包并提示手动安装，不退出应用。
+    if (process.platform !== "win32") {
+        console.warn("自动更新：当前平台无静默安装链路，安装包已下载，需手动安装", installerPath);
+        broadcastUpdate(UPDATE_STATE_EVENT, {
+            state: "done",
+            version: app.getVersion(),
+            message: "当前平台安装包需手动安装"
+        });
+        notify({
+            kind: "system",
+            title: "更新包已下载",
+            body: `安装包已保存：${installerPath}，请手动完成安装`
+        });
+        return;
+    }
 
     const flagPath = join(
         app.getPath("userData"),

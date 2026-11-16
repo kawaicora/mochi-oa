@@ -13,7 +13,7 @@ import type {
 import { SfuAckFields, sfuFromAck } from '@shared/sfu'
 import type { NotifKind, NotifTarget } from '@shared/ipc'
 import { notifyEvent, stopRing } from '@renderer/utils/notify-manager'
-import VideoStream, { CameraUnavailableError } from '@renderer/media/VideoStream'
+import VideoStream, { CameraUnavailableError, MediaPermissionError } from '@renderer/media/VideoStream'
 import RtcEngine from '@renderer/rtc/RtcEngine'
 import { saveCallRecording } from '@renderer/rtc/recording'
 import RemoteUi from '@renderer/remote/RemoteUi'
@@ -253,6 +253,13 @@ export const useRtcStore = defineStore('rtc', () => {
     incomingDm.value = null
   }
 
+  /** 忽略群来电/会议邀请：立刻停铃并清空待接状态 */
+  function rejectGroup(): void {
+    if (!incomingGroup.value) return
+    stopRing()
+    incomingGroup.value = null
+  }
+
   async function startGroupCall(groupId: number, kind: RtcKind): Promise<void> {
     error.value = ''
     try {
@@ -451,7 +458,13 @@ export const useRtcStore = defineStore('rtc', () => {
     if (!activeCall.value) return
     try {
       if (p.audioInId) {
-        const ms = await VideoStream.GetAudioStream(p.audioInId, { sampleRate: p.sampleRate, channelCount: p.channelCount })
+        let ms: MediaStream
+        try {
+          ms = await VideoStream.GetAudioStream(p.audioInId, { sampleRate: p.sampleRate, channelCount: p.channelCount })
+        } catch (e) {
+          if (e instanceof MediaPermissionError) { error.value = e.message; return }
+          throw e
+        }
         const track = ms.getAudioTracks()[0] ?? null
         await VideoStream.UpdateAudioStream(new MediaStream(track ? [track] : []))
         engine?.replaceTrack(track, 'audio')
@@ -464,8 +477,9 @@ export const useRtcStore = defineStore('rtc', () => {
           engine?.replaceTrack(track, 'video')
           activeCall.value.isCameraOff = p.cameraId === 'default'
         } catch (err) {
-          if (err instanceof CameraUnavailableError) {
-            // 无可用摄像头 → 回退频谱头像，不弹错误窗
+          if (err instanceof MediaPermissionError) error.value = err.message
+          if (err instanceof CameraUnavailableError || err instanceof MediaPermissionError) {
+            // 无可用摄像头 / 权限被拒 → 回退频谱头像，不中断通话
             const t = VideoStream.GetAvatarVideoTrack(myAvatarAbs())
             await VideoStream.UpdateVideoStream(new MediaStream(t ? [t] : []))
             engine?.replaceTrack(t, 'video')
@@ -500,14 +514,16 @@ export const useRtcStore = defineStore('rtc', () => {
       let cam: MediaStream
       try {
         cam = await VideoStream.GetCameraStream()
-      } catch {
+      } catch (e) {
+        if (e instanceof MediaPermissionError) error.value = e.message
         // 无可用摄像头 → 用占位空视频
         cam = VideoStream.GetEmptyVideoStream()
       }
       let mic: MediaStream
       try {
         mic = await VideoStream.GetAudioStream()
-      } catch {
+      } catch (e) {
+        if (e instanceof MediaPermissionError) error.value = e.message
         // 无可用麦克风 → 用静音空音频
         mic = VideoStream.GetEmptyAudioStream()
       }
@@ -519,7 +535,8 @@ export const useRtcStore = defineStore('rtc', () => {
       let mic: MediaStream
       try {
         mic = await VideoStream.GetAudioStream()
-      } catch {
+      } catch (e) {
+        if (e instanceof MediaPermissionError) error.value = e.message
         // 无可用麦克风 → 用静音空音频
         mic = VideoStream.GetEmptyAudioStream()
       }
@@ -591,6 +608,7 @@ export const useRtcStore = defineStore('rtc', () => {
     startDmCall,
     answerDm,
     rejectDm,
+    rejectGroup,
     startGroupCall,
     joinGroupCall,
     createMeeting,

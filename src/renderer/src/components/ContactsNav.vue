@@ -16,6 +16,8 @@ const emit = defineEmits<{
 
 const app = useAppStore()
 
+const inviteCount = computed(() => app.companyInvites.length + app.groupInvites.length)
+
 // 2.2.1 子标签
 const subTabs: { key: ContactsScope; label: string; icon: string }[] = [
   { key: 'groups', label: '群聊', icon: 'fas fa-users' },
@@ -81,6 +83,7 @@ function pickCompany(id: number): void {
       >
         <i :class="t.icon"></i>
         <span>{{ t.label }}</span>
+        <span v-if="t.key === 'invites' && inviteCount > 0" class="nav-badge">{{ inviteCount > 99 ? '99+' : inviteCount }}</span>
       </button>
     </div>
 
@@ -171,6 +174,7 @@ function pickCompany(id: number): void {
 .sub-tab:hover { background: var(--dt-hover); }
 .sub-tab.active { background: var(--dt-active); color: var(--dt-primary); }
 .sub-tab.active i { color: var(--dt-primary); }
+.nav-badge { margin-left: auto; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--dt-danger, #e34d59); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
 
 .dept-member {
   display: flex;

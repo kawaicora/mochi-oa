@@ -61,6 +61,37 @@ async function saveApprovalSettings(): Promise<void> {
   } catch (e) { console.error('[审批设置] 保存失败', e); promptMsg.value = '保存失败' }
 }
 
+// 公司审批提示音：按公司范围覆盖，缺省回退全局消息音
+const companyScope = computed(() => app.activeCompany ? { kind: 'company' as const, id: app.activeCompany.id } : undefined)
+function companySoundPath(): string {
+  return companyScope.value ? app.scopeSoundOf(companyScope.value, 'message') : ''
+}
+function shortSoundName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+async function pickCompanySound(): Promise<void> {
+  const scope = companyScope.value
+  if (!scope) return
+  const p = await window.pantry.pickFile()
+  if (!p) return
+  await app.setScopeSound(scope, 'message', p)
+}
+async function clearCompanySound(): Promise<void> {
+  const scope = companyScope.value
+  if (!scope) return
+  await app.setScopeSound(scope, 'message', '')
+}
+
+// 职位模块开关（owner/admin）：按公司维度启用/关闭职位功能
+async function toggleJobEnabled(): Promise<void> {
+  const c = app.activeCompany
+  if (!c) return
+  companyMenu.value = false
+  const next = !app.jobEnabled
+  const { ok, error } = await app.setCompanyJobEnabled(c.id, next)
+  if (!ok) { promptMsg.value = error || '操作失败'; return }
+  promptMsg.value = next ? '职位模块已开启' : '职位模块已关闭'
+}
 // 企业齿轮/右键菜单
 const companyMenu = ref(false)
 function openCompanyMenu(e?: MouseEvent): void {
@@ -279,6 +310,8 @@ async function doJoinCompany(): Promise<void> {
 
 onMounted(() => {
   void app.refreshFriendRequests()
+  void app.refreshCompanyInvites()
+  void app.refreshGroupInvites()
 })
 
 // 右键
@@ -338,6 +371,7 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
             <div v-if="companyMenu" class="company-menu" @click.stop>
               <button class="cm-item" @click="goCompanySettings"><i class="fas fa-clock"></i> 考勤设置</button>
               <button class="cm-item" @click="openApprovalSettings"><i class="fas fa-users"></i> 审批设置</button>
+              <button class="cm-item" @click="toggleJobEnabled"><i class="fas fa-id-badge"></i> 职位模块：{{ app.jobEnabled ? '已开启' : '已关闭' }}</button>
               <button class="cm-item" @click="changeCompanyLogo"><i class="fas fa-image"></i> 公司logo修改</button>
               <template v-if="app.isOwner">
                 <div class="cm-sep"></div>
@@ -431,7 +465,45 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
     <!-- 企业/团队邀请 -->
     <template v-else-if="scope === 'invites'">
       <div class="content-head"><i class="far fa-envelope"></i><span class="content-title">企业/团队邀请</span></div>
-      <div class="content-scroll"><div class="hint pad">邀请功能建设中，请在企业管理端处理入职邀请。</div></div>
+      <div class="content-scroll">
+        <!-- 待处理公司邀请 -->
+        <template v-if="app.companyInvites.length">
+          <div class="block-title">企业邀请（{{ app.companyInvites.length }}）</div>
+          <div class="member-list" style="margin-bottom:16px">
+            <div v-for="inv in app.companyInvites" :key="inv.id" class="member-row">
+              <div class="member-av group">{{ (inv.companyName || '企').slice(0, 1) }}</div>
+              <div class="member-info">
+                <div class="member-name">{{ inv.companyName || '企业' }}</div>
+                <div class="member-sub">{{ inv.inviterNick || inv.username || '对方' }} 邀请你加入</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="dt-btn dt-btn-primary" @click="app.respondCompanyInvite(inv.id, true)"><i class="fas fa-check"></i> 同意</button>
+                <button class="dt-btn" @click="app.respondCompanyInvite(inv.id, false)"><i class="fas fa-times"></i> 拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 待处理群邀请 -->
+        <template v-if="app.groupInvites.length">
+          <div class="block-title">群邀请（{{ app.groupInvites.length }}）</div>
+          <div class="member-list" style="margin-bottom:16px">
+            <div v-for="inv in app.groupInvites" :key="inv.id" class="member-row">
+              <div class="member-av group">{{ (inv.groupName || '群').slice(0, 1) }}</div>
+              <div class="member-info">
+                <div class="member-name">{{ inv.groupName || '群聊' }}</div>
+                <div class="member-sub">{{ inv.inviterNick || inv.username || '对方' }} 邀请你加入群</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="dt-btn dt-btn-primary" @click="app.respondGroupInvite(inv.id, true)"><i class="fas fa-check"></i> 同意</button>
+                <button class="dt-btn" @click="app.respondGroupInvite(inv.id, false)"><i class="fas fa-times"></i> 拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="!app.companyInvites.length && !app.groupInvites.length" class="hint pad">暂无待处理的企业或群邀请</div>
+      </div>
     </template>
 
     <!-- 创建或加入企业/团队 -->
@@ -520,6 +592,16 @@ const deptGroups = computed(() => (props.deptId == null ? [] : app.groups.filter
           <div style="margin-top: 12px">
             <div style="font-size: 13px; color: var(--dt-text-2); margin-bottom: 6px">默认抄送人</div>
             <CompanyContactPicker v-model="approvalCc" title="选择默认抄送人" placeholder="选择默认抄送人" />
+          </div>
+          <div style="margin-top: 14px">
+            <div style="font-size: 13px; color: var(--dt-text-2); margin-bottom: 6px">审批提示音（本公司；留空用全局消息音）</div>
+            <div style="display:flex; align-items:center; gap:10px">
+              <span style="font-size:12px; color:var(--dt-text-2); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" :title="companySoundPath()">
+                {{ companySoundPath() ? shortSoundName(companySoundPath()) : '默认（全局消息提示音）' }}
+              </span>
+              <button class="dt-btn" @click="pickCompanySound">选择</button>
+              <button v-if="companySoundPath()" class="dt-btn" @click="clearCompanySound">恢复默认</button>
+            </div>
           </div>
         </div>
         <div class="modal-foot">

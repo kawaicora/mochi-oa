@@ -30,6 +30,17 @@ export interface ApprovalCardData {
   body?: string
   byNick?: string
   status?: string
+  /** 卡片类型；构造时由 kind 写入载荷，便于 kind 在传输中丢失时按内容自愈 */
+  cardType?: ApprovalCardKind
+}
+
+export interface ParsedApprovalCard {
+  requestId: number | null
+  title: string
+  body: string
+  byNick: string
+  status?: string
+  cardType: ApprovalCardKind | null
 }
 
 /** kind 白名单校验 */
@@ -48,30 +59,60 @@ export function buildApprovalCard(kind: ApprovalCardKind, p: ApprovalCardData): 
     requestId: Number(p.requestId),
     title: p.title || APPROVAL_CARD_TITLE[kind],
     body: p.body || '',
-    byNick: p.byNick || ''
+    byNick: p.byNick || '',
+    cardType: kind
   }
   if (p.status) out.status = p.status
   return JSON.stringify(out)
+}
+
+/** 旧卡片载荷未带 cardType 时，按标题关键字推断类型；无法判定返回 null */
+function kindByTitle(title: string): ApprovalCardKind | null {
+  if (/报销/.test(title)) return 'expense_card'
+  if (/备用金/.test(title)) return 'advance_card'
+  if (/上网|代理/.test(title)) return 'proxy_card'
+  if (/考勤|补卡|请假|调休|加班/.test(title)) return 'attendance_card'
+  return null
 }
 
 /**
  * 解析卡片 content JSON。任何字段缺失/JSON 损坏 → requestId 返回 null，其余字段给默认空串；
  * 调用方据此决定"能否深链"与"摘要展示"，绝不抛异常（消息气泡渲染不能因一条坏卡片崩）。
  */
-export function parseApprovalCard(content: string): Required<Omit<ApprovalCardData, 'status'>> & { status?: string } {
-  const fail = { requestId: null, title: '', body: '', byNick: '' }
+export function parseApprovalCard(content: string): ParsedApprovalCard {
+  const fail: ParsedApprovalCard = { requestId: null, title: '', body: '', byNick: '', cardType: null }
   try {
     const c = JSON.parse(content) as Record<string, unknown>
     if (!c || typeof c !== 'object') return fail
     const rid = Number(c.requestId)
+    const title = typeof c.title === 'string' ? c.title : ''
+    const body = typeof c.body === 'string' ? c.body : (typeof c.reason === 'string' ? c.reason : '')
+    const byNick = typeof c.byNick === 'string' ? c.byNick
+      : (typeof c.nick === 'string' ? c.nick : (typeof c.applicant === 'string' ? c.applicant : ''))
+    const rawType = typeof c.cardType === 'string' ? c.cardType : ''
+    const cardType = isApprovalCardKind(rawType) ? rawType : kindByTitle(title)
     return {
       requestId: Number.isFinite(rid) ? rid : null,
-      title: typeof c.title === 'string' ? c.title : '',
-      body: typeof c.body === 'string' ? c.body : '',
-      byNick: typeof c.byNick === 'string' ? c.byNick : '',
-      ...(typeof c.status === 'string' ? { status: c.status } : {})
+      title,
+      body,
+      byNick,
+      ...(typeof c.status === 'string' ? { status: c.status } : {}),
+      cardType
     }
   } catch {
     return fail
   }
+}
+
+/**
+ * 判定一条消息 content 是否为审批卡片（按内容兜底，不依赖消息 kind）。
+ * 命中条件：可解析为对象、requestId 为有效数字、且标题/正文/申请人至少有一项非空；
+ * 类型优先取载荷 cardType，其次按标题关键字推断。无法识别返回 null。
+ */
+export function detectApprovalCard(content: string): { kind: ApprovalCardKind; data: ParsedApprovalCard } | null {
+  const data = parseApprovalCard(content)
+  if (data.requestId == null) return null
+  if (!data.title && !data.body && !data.byNick) return null
+  if (!data.cardType) return null
+  return { kind: data.cardType, data }
 }

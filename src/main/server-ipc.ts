@@ -9,6 +9,8 @@ import { tmpdir, networkInterfaces } from 'node:os'
 import { readFile, writeFile, mkdir, stat, readdir, appendFile } from 'node:fs/promises'
 import { existsSync} from 'node:fs'
 import { spawn } from 'node:child_process'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import * as iconv from 'iconv-lite'
 import { setSystemProxy, clearSystemProxy } from './system-proxy'
 import { startTunProxy, stopTunProxy } from './tun-proxy'
@@ -18,9 +20,23 @@ import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
+import { detectFromBufferAsync } from './update-detect'
 
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
+
+/** IPC 与 emitter 监听是否已绑定；重复调用只绑定一次，避免推送事件被叠加注册 */
+let serverIpcBound = false
+
+/** 允许透传到服务端的消息种类；卡片类 kind 必须放行，否则会被兜底成 text 导致 JSON 原文上屏 */
+type SendKind = 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card'
+const SEND_KINDS = new Set<SendKind>([
+  'text', 'image', 'file', 'video', 'audio', 'folder',
+  'proxy_card', 'expense_card', 'advance_card', 'attendance_card'
+])
+function normalizeSendKind(kind: unknown): SendKind {
+  return typeof kind === 'string' && (SEND_KINDS as Set<string>).has(kind) ? (kind as SendKind) : 'text'
+}
 
 /** 主进程落盘日志（userData/logs/renderer-console.log，与渲染层同文件统一排查） */
 function sendToMainWindow(win: BrowserWindow | null, channel: string, payload: unknown): void {
@@ -137,6 +153,8 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 }
 
 export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  if (serverIpcBound) return
+  serverIpcBound = true
   /**
    * 退回登录页时关掉所有附加窗口（会议、任务详情、预览、远程、工具栏…）。
    * 只保留主窗口（登录页与主界面都在主窗口里）。先 close 让各窗口走正常收尾
@@ -216,7 +234,6 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('sessionNewDevice', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionNewDevice, d))
   serverClient.on('sessionRevoked', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverSessionRevoked, d))
   serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
-  serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
   // 断线重试失败 → 渲染层提示并回登录页（token 保留，不用清）
   serverClient.on('reconnectGaveUp', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverReconnectGaveUp, d))
 
@@ -257,6 +274,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('groupRemoved', (d) => broadcastToAllWindows(IpcEvents.groupRemoved, d))
   serverClient.on('friendsUpdated', () => broadcastToAllWindows(IpcEvents.friendsUpdated, {}))
   serverClient.on('friendRequest', (d) => broadcastToAllWindows(IpcEvents.friendRequest, d))
+  serverClient.on('companyInviteReceived', (d) => broadcastToAllWindows(IpcEvents.companyInviteReceived, d))
+  serverClient.on('companyJoinRequest', (d) => broadcastToAllWindows(IpcEvents.companyJoinRequest, d))
+  serverClient.on('groupJoinRequest', (d) => broadcastToAllWindows(IpcEvents.groupJoinRequest, d))
   serverClient.on('holidaysUpdated', () => broadcastToAllWindows(IpcEvents.holidaysUpdated, {}))
   serverClient.on('tasksUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.tasksUpdated, d ?? {}))
   serverClient.on('projectsUpdated', (d: unknown) => broadcastToAllWindows(IpcEvents.projectsUpdated, d ?? {}))
@@ -376,6 +396,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverCompanyAddMember, (_e, companyId, target, departmentId) =>
     serverClient.addCompanyMember(Number(companyId) || 0, typeof target === 'number' ? target : String(target), typeof departmentId === 'number' ? departmentId : undefined)
   )
+  ipcMain.handle(IpcChannels.serverCompanyInvite, (_e, companyId, opts) =>
+    serverClient.invite(Number(companyId) || 0, opts)
+  )
+  ipcMain.handle(IpcChannels.serverCompanyMyInvites, () => serverClient.myInvites())
+  ipcMain.handle(IpcChannels.serverCompanyAcceptInvite, (_e, invitationId) =>
+    serverClient.acceptInvite(Number(invitationId) || 0)
+  )
+  ipcMain.handle(IpcChannels.serverCompanyDeclineInvite, (_e, invitationId) =>
+    serverClient.declineInvite(Number(invitationId) || 0)
+  )
   ipcMain.handle(IpcChannels.serverCompanyTransfer, (_e, companyId, userId) =>
     serverClient.companyTransfer(Number(companyId) || 0, Number(userId) || 0)
   )
@@ -384,6 +414,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   )
   ipcMain.handle(IpcChannels.serverUpdateCompanyLogo, (_e, companyId, logo) =>
     serverClient.updateCompanyLogo(Number(companyId) || 0, typeof logo === 'string' ? logo : '')
+  )
+  ipcMain.handle(IpcChannels.serverCompanyJobEnabledSet, (_e, payload) =>
+    serverClient.companyJobEnabledSet((payload as Record<string, unknown>) ?? {})
   )
   ipcMain.handle(IpcChannels.serverUserSearch, (_e, keyword) =>
     serverClient.searchUsers(typeof keyword === 'string' ? keyword : '')
@@ -443,11 +476,14 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   ipcMain.handle(IpcChannels.serverGroupInvite, (_e, groupId, userId) =>
     serverClient.groupInvite(Number(groupId) || 0, Number(userId) || 0)
   )
-  ipcMain.handle(IpcChannels.serverGroupAcceptInvite, (_e, groupId) =>
-    serverClient.groupAcceptInvite(Number(groupId) || 0)
+  ipcMain.handle(IpcChannels.serverGroupAcceptInvite, (_e, invitationId) =>
+    serverClient.groupAcceptInvite(Number(invitationId) || 0)
   )
-  ipcMain.handle(IpcChannels.serverGroupDeclineInvite, (_e, groupId) =>
-    serverClient.groupDeclineInvite(Number(groupId) || 0)
+  ipcMain.handle(IpcChannels.serverGroupDeclineInvite, (_e, invitationId) =>
+    serverClient.groupDeclineInvite(Number(invitationId) || 0)
+  )
+  ipcMain.handle(IpcChannels.serverGroupMyInvites, () =>
+    serverClient.groupMyInvites()
   )
   ipcMain.handle(IpcChannels.serverGroupTransfer, (_e, groupId, userId) =>
     serverClient.groupTransfer(Number(groupId) || 0, Number(userId) || 0)
@@ -470,13 +506,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     serverClient.groupHistory(Number(groupId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
   ipcMain.handle(IpcChannels.serverChatSend, (_e, groupId, content, kind) =>
-    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), kind === 'image' || kind === 'file' || kind === 'video' || kind === 'folder' ? kind : 'text')
+    serverClient.sendGroupMessage(Number(groupId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverDmHistory, (_e, withUserId, beforeTs, limit) =>
     serverClient.dmHistory(Number(withUserId) || 0, typeof beforeTs === 'number' ? beforeTs : undefined, typeof limit === 'number' ? limit : undefined)
   )
   ipcMain.handle(IpcChannels.serverDmSend, (_e, toUserId, content, kind) =>
-    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), kind === 'image' || kind === 'file' || kind === 'video' || kind === 'folder' ? kind : 'text')
+    serverClient.sendDmMessage(Number(toUserId) || 0, String(content), normalizeSendKind(kind))
   )
   ipcMain.handle(IpcChannels.serverMessageDelete, (_e, conversationId, messageId, content) =>
     serverClient.deleteMessage(Number(conversationId) || 0, String(messageId), String(content ?? ''))
@@ -714,13 +750,13 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     serverClient.uploadFile(String(filePath), Number(companyId) || 0)
   )
   // 分块上传（带进度）：每块完成后向对应窗口推送 uploadProgress 事件
-  ipcMain.handle(IpcChannels.serverUploadChunked, (e, filePath, clientId, companyId, relativePath) => {
+  ipcMain.handle(IpcChannels.serverUploadChunked, (e, filePath, clientId, companyId, relativePath, originalName) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     return serverClient.uploadFileChunked(String(filePath), (percent) => {
       if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
         win.webContents.send(IpcEvents.uploadProgress, { clientId, percent })
       }
-    }, Number(companyId) || 0, String(relativePath ?? ''))
+    }, Number(companyId) || 0, String(relativePath ?? ''), String(originalName ?? ''))
   })
   // 下载整个文件夹到配置目录（按原结构建目录）
   ipcMain.handle(IpcChannels.serverDownloadFolder, async (_e, relPath) => {
@@ -874,76 +910,108 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   })
 
   // 上传更新包到 /api/admin/update（主进程发起 HTTP，无 CORS 限制，带进度）
-  ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, filePath: string) => {
+  ipcMain.handle(IpcChannels.serverUploadUpdate, async (event, payload) => {
+    const send = (channel: string, data: unknown) => (event.sender.send as (ch: string, d: unknown) => void)(channel, data)
     try {
       const cfg = loadServerConfig()
       if (!cfg.serverUrl) return { ok: false, error: '未配置服务器地址' }
+      const p = (payload ?? {}) as { filePath?: string; name?: string; platform?: string; version?: string }
+      const filePath = String(p.filePath ?? '')
+      if (!filePath) return { ok: false, error: '缺少更新包文件' }
       const buf = await readFile(filePath)
-      const total = buf.length
+      const origName = String(p.name ?? basename(filePath))
+      // 客户端本地识别平台/版本；渲染层显式传入的字段优先覆盖。
+      const detected = await detectFromBufferAsync(buf, origName)
+      const formPlatform = p.platform || detected.platform
+      const formVersion = p.version || detected.version
       const boundary = '----mochiUpdate' + Date.now().toString(16)
-      const header = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="update.exe"\r\nContent-Type: application/octet-stream\r\n\r\n`
-      )
-      const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
-      const body = Buffer.concat([header, buf, footer])
+
+      // multipart 各部分：可选平台/版本表单字段 + 文件字段（保留原始文件名，供服务端识别格式）
+      const parts: Buffer[] = []
+      const field = (key: string, val: string): void => {
+        if (!val) return
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`))
+      }
+      field('platform', formPlatform)
+      field('version', formVersion)
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${origName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+      ))
+      parts.push(buf)
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`))
+      const body = Buffer.concat(parts)
 
       const url = new URL(`${cfg.serverUrl.replace(/\/+$/, '')}/api/admin/update?overwrite=true`)
-      const mod = url.protocol === 'https:' ? await import('node:https') : await import('node:http')
-      const req = mod.request(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length
+      const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest
+
+      return await new Promise<{ ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }>((resolve) => {
+        let settled = false
+        const finish = (result: { ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }): void => {
+          if (settled) return
+          settled = true
+          clearInterval(timer)
+          resolve(result)
         }
-      }, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8')
-          try {
-            const data = JSON.parse(text)
-            event.sender.send('server:uploadUpdate:progress', { done: true, ok: data.ok === true, version: data.version, error: data.error })
-          } catch {
-            event.sender.send('server:uploadUpdate:progress', { done: true, ok: false, error: `响应解析失败: ${text.slice(0, 200)}` })
+
+        const req = doRequest(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${cfg.token}`,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': body.length
           }
+        }, (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8')
+            let result: { ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }
+            try {
+              const data = JSON.parse(text)
+              result = { ok: data.ok === true, version: data.version, platform: data.platform, keys: data.keys, error: data.error }
+            } catch {
+              result = { ok: false, error: `响应解析失败: ${text.slice(0, 200)}` }
+            }
+            send('server:uploadUpdate:progress', { done: true, ...result })
+            finish(result)
+          })
         })
-      })
-      req.on('error', (err: Error) => {
-        event.sender.send('server:uploadUpdate:progress', { done: true, ok: false, error: err.message })
-      })
-      // 按 64KB 分块写入，跟踪进度
-      const CHUNK = 64 * 1024
-      let offset = 0
-      const writeChunk = () => {
-        while (offset < body.length) {
-          const end = Math.min(offset + CHUNK, body.length)
-          const ok = req.write(body.subarray(offset, end))
-          offset = end
-          if (!ok) {
-            req.once('drain', writeChunk)
-            return
+        req.on('error', (err: Error) => {
+          const result = { ok: false, error: err.message }
+          send('server:uploadUpdate:progress', { done: true, ...result })
+          finish(result)
+        })
+        // 120s 未响应直接失败，避免永久卡住
+        req.setTimeout(120000, () => {
+          req.destroy(new Error('上传超时（120s 无响应）'))
+        })
+
+        // 按 64KB 分块写入，跟踪进度
+        const CHUNK = 64 * 1024
+        let offset = 0
+        let uploadFinished = false
+        const writeChunk = () => {
+          while (offset < body.length) {
+            const end = Math.min(offset + CHUNK, body.length)
+            const ok = req.write(body.subarray(offset, end))
+            offset = end
+            if (!ok) {
+              req.once('drain', writeChunk)
+              return
+            }
           }
+          uploadFinished = true
+          send('server:uploadUpdate:progress', { done: false, percent: 100, written: body.length, total: body.length })
+          req.end()
         }
-        req.end()
-      }
-      // 定期上报进度
-      const timer = setInterval(() => {
-        const written = (req as any).socket?.bytesWritten ?? 0
-        const pct = Math.min(99, Math.round((written / body.length) * 100))
-        event.sender.send('server:uploadUpdate:progress', { done: false, percent: pct, written, total: body.length })
-      }, 200)
-      req.on('close', () => clearInterval(timer))
-      writeChunk()
-      // 等待结果（通过 promise 等待 done 事件）
-      return await new Promise<{ ok: boolean; version?: string; error?: string }>((resolve) => {
-        const handler = (_e: unknown, data: { done: boolean; ok: boolean; version?: string; error?: string }) => {
-          if (data.done) {
-            event.sender.removeListener('server:uploadUpdate:progress', handler)
-            resolve({ ok: data.ok, version: data.version, error: data.error })
-          }
-        }
-        event.sender.on('server:uploadUpdate:progress', handler)
+        // 定期上报进度
+        const timer = setInterval(() => {
+          if (uploadFinished) return
+          const written = (req as any).socket?.bytesWritten ?? 0
+          const pct = Math.min(99, Math.round((written / body.length) * 100))
+          send('server:uploadUpdate:progress', { done: false, percent: pct, written, total: body.length })
+        }, 200)
+        writeChunk()
       })
     } catch (err) {
       console.error('[update] 上传失败', err)
@@ -1225,6 +1293,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       const { app } = require('electron') as typeof import('electron')
       const dir = join(app.getPath('temp'), 'mochi-oa-paste')
       await mkdir(dir, { recursive: true })
+      // 临时名内部加时间戳保证唯一；原始文件名由上传链路显式携带，不依赖此磁盘名。
       const dest = join(dir, `${Date.now()}_${safe}`)
       await writeFile(dest, buf)
       console.log(`[paste] 临时文件 ${dest} ${buf.length}B`)

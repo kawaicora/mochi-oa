@@ -3,11 +3,13 @@ import { IpcChannels, IpcEvents, type NotifKind, type NotifTarget } from '../sha
 import type {
   Ack,
   AuthAck,
+  CompanyInvitation,
   NewDeviceLoginEvent,
   OpenMeetingWindowParams,
   RtcChatMessageEvent,
   RtcDmIncomingEvent,
   GroupInviteEvent,
+  GroupInvitation,
   ServerGroupMember,
   RtcDmRejectedEvent,
   RtcEndedEvent,
@@ -172,9 +174,9 @@ const api = {
     safeInvoke(IpcChannels.serverSetMainMail, cfg),
   serverDownloadFile: (url: string): Promise<{ ok: boolean; path?: string; fileUrl?: string; error?: string }> =>
     safeInvoke(IpcChannels.serverDownloadFile, url),
-  serverUploadUpdate: (filePath: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
-    safeInvoke(IpcChannels.serverUploadUpdate, filePath),
-  onUploadUpdateProgress: (cb: (data: { done: boolean; percent?: number; written?: number; total?: number; ok?: boolean; version?: string; error?: string }) => void) => {
+  serverUploadUpdate: (payload: { filePath: string; name?: string; platform?: string; version?: string }): Promise<{ ok: boolean; version?: string; platform?: string; keys?: string[]; error?: string }> =>
+    safeInvoke(IpcChannels.serverUploadUpdate, payload),
+  onUploadUpdateProgress: (cb: (data: { done: boolean; percent?: number; written?: number; total?: number; ok?: boolean; version?: string; platform?: string; keys?: string[]; error?: string }) => void) => {
     return subscribe('server:uploadUpdate:progress', cb)
   },
   serverReadFileBytes: (filePath: string): Promise<{ ok: boolean; data?: ArrayBuffer; error?: string }> =>
@@ -215,6 +217,14 @@ const api = {
   serverMembers: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverMembers, companyId),
   serverAddCompanyMember: (companyId: number, target: number | string, departmentId?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverCompanyAddMember, companyId, target, departmentId ?? null),
+  serverCompanyInvite: (companyId: number, opts?: { expiresAt?: string }): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyInvite, companyId, opts ?? null),
+  serverCompanyMyInvites: (): Promise<Ack & { data?: { invitations: CompanyInvitation[] } }> =>
+    safeInvoke(IpcChannels.serverCompanyMyInvites),
+  serverCompanyAcceptInvite: (invitationId: number): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyAcceptInvite, invitationId),
+  serverCompanyDeclineInvite: (invitationId: number): Promise<Ack> =>
+    safeInvoke(IpcChannels.serverCompanyDeclineInvite, invitationId),
   serverSearchUsers: (keyword: string): Promise<Ack> => safeInvoke(IpcChannels.serverUserSearch, keyword),
   serverDeleteDepartment: (companyId: number, departmentId: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverDepartmentDelete, companyId, departmentId),
@@ -238,13 +248,15 @@ const api = {
   serverGroupMute: (groupId: number, userId: number, seconds: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupMute, groupId, userId, seconds),
   serverGroupAdd: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAdd, groupId, userId),
   serverGroupInvite: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupInvite, groupId, userId),
-  serverGroupAcceptInvite: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAcceptInvite, groupId),
-  serverGroupDeclineInvite: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDeclineInvite, groupId),
+  serverGroupAcceptInvite: (invitationId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupAcceptInvite, invitationId),
+  serverGroupDeclineInvite: (invitationId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDeclineInvite, invitationId),
+  serverGroupMyInvites: (): Promise<Ack & { data?: { invites: GroupInvitation[] } }> => safeInvoke(IpcChannels.serverGroupMyInvites),
   serverGroupTransfer: (groupId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupTransfer, groupId, userId),
   serverGroupDissolve: (groupId: number): Promise<Ack> => safeInvoke(IpcChannels.serverGroupDissolve, groupId),
   serverCompanyTransfer: (companyId: number, userId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyTransfer, companyId, userId),
   serverCompanyDissolve: (companyId: number): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyDissolve, companyId),
   serverUpdateCompanyLogo: (companyId: number, logo: string): Promise<Ack> => safeInvoke(IpcChannels.serverUpdateCompanyLogo, companyId, logo),
+  serverCompanyJobEnabledSet: (payload: unknown): Promise<Ack> => safeInvoke(IpcChannels.serverCompanyJobEnabledSet, payload),
 
   // 会话 / 聊天
   serverConversations: (type?: 'group' | 'dm'): Promise<Ack> =>
@@ -437,8 +449,8 @@ const api = {
   // 文件上传
   serverUploadFile: (filePath: string, companyId?: number): Promise<Ack> =>
     safeInvoke(IpcChannels.serverUpload, filePath, companyId ?? 0),
-  serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
-    safeInvoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? ''),
+  serverUploadChunked: (filePath: string, clientId: string, companyId?: number, relativePath?: string, originalName?: string): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> =>
+    safeInvoke(IpcChannels.serverUploadChunked, filePath, clientId, companyId ?? 0, relativePath ?? '', originalName ?? ''),
   pickFile: (filter?: 'image' | 'video' | 'audio'): Promise<string | null> => safeInvoke(IpcChannels.filePick, filter ?? null),
   pickFiles: (filter?: 'image' | 'video' | 'audio'): Promise<string[]> => safeInvoke(IpcChannels.filePickMulti, filter ?? null),
   pickFolder: (): Promise<string | null> => safeInvoke(IpcChannels.filePickFolder),
@@ -453,7 +465,7 @@ const api = {
   },
   serverListFolderFiles: (folderPath: string): Promise<string[]> =>
     safeInvoke(IpcChannels.serverListFolderFiles, folderPath),
-  serverDownloadFolder: (relPath: string): Promise<Ack & { data?: { destDir?: string; count?: number } }> =>
+  serverDownloadFolder: (relPath: string): Promise<Ack & { destDir?: string; count?: number }> =>
     safeInvoke(IpcChannels.serverDownloadFolder, relPath),
   captureScreen: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
     safeInvoke(IpcChannels.fileCaptureScreen),
@@ -548,6 +560,12 @@ const api = {
   onGroupRemoved: (l: (d: { groupId: number }) => void) => subscribe<{ groupId: number }>(IpcEvents.groupRemoved, l),
   onFriendsUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.friendsUpdated, () => l()),
   onFriendRequest: (l: (d: unknown) => void) => subscribe<unknown>(IpcEvents.friendRequest, l),
+  onCompanyInviteReceived: (l: (d: { invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string; invitedBy?: number; userId?: number } }) => void) =>
+    subscribe<{ invitation?: { id?: number; companyId?: number; companyName?: string; inviterNick?: string; username?: string; userNick?: string } }>(IpcEvents.companyInviteReceived, l),
+  onCompanyJoinRequest: (l: (d: { companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }) => void) =>
+    subscribe<{ companyId?: number; companyName?: string; fromId?: number; fromName?: string; fromNick?: string }>(IpcEvents.companyJoinRequest, l),
+  onGroupJoinRequest: (l: (d: { groupId?: number; groupName?: string; fromId?: number; fromName?: string; fromNick?: string }) => void) =>
+    subscribe<{ groupId?: number; groupName?: string; fromId?: number; fromName?: string; fromNick?: string }>(IpcEvents.groupJoinRequest, l),
   onHolidaysUpdated: (l: () => void) => subscribe<unknown>(IpcEvents.holidaysUpdated, () => l()),
   onTasksUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.tasksUpdated, l),
   onProjectsUpdated: (l: (d: { companyId?: number }) => void) => subscribe<{ companyId?: number }>(IpcEvents.projectsUpdated, l),

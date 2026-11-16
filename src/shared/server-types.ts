@@ -44,6 +44,8 @@ export interface ServerSettings {
   dndConvs?: string[]
   /** 每个会话的自定义铃声：key=会话 key，value=绝对路径（缺省用全局来电铃声） */
   convRings?: Record<string, string>
+  /** 按范围覆盖音效：key=dm:<userId> / group:<groupId> / company:<companyId>，value={message?, ring?} */
+  soundOverrides?: Record<string, { message?: string; ring?: string }>
   /** 记住密码：勾选后下次打开登录页自动填好账号与密码（本地保存） */
   rememberPassword?: boolean
   /** 记住的账号（配合 rememberPassword；未勾选时为空） */
@@ -130,6 +132,7 @@ export interface Company {
   code?: string
   ownerId: number
   avatar?: string
+  jobEnabled?: boolean
   createdAt?: string
 }
 
@@ -186,10 +189,27 @@ export interface ServerGroupMember {
 
 /** 群邀请推送（普通成员邀请他人入群） */
 export interface GroupInviteEvent {
+  invitationId?: number
   groupId: number
   groupName: string
   from: { userId: number; nick: string }
   ts: number
+}
+
+/** 待处理群邀请 */
+export interface GroupInvitation {
+  id: number
+  groupId: number
+  groupName?: string
+  userId: number
+  username?: string
+  userNick?: string
+  invitedBy: number
+  inviterNick?: string
+  code: string
+  expiresAt?: string | null
+  status: InvitationStatus
+  createdAt?: string
 }
 
 /** 会话类型 */
@@ -253,6 +273,7 @@ export interface ServerChatMessage {
   avatar?: string
   kind: MessageKind
   content: string
+  fileId?: string
   ts: number
 }
 
@@ -277,8 +298,14 @@ export interface CompanyInvitation {
   id: number
   companyId: number
   companyName?: string
+  companyCode?: string
+  userId?: number
+  username?: string
+  userNick?: string
+  departmentId?: number | null
+  invitedBy?: number
+  inviterNick?: string
   code: string
-  createdBy: number
   status: InvitationStatus
   expiresAt?: string | null
   createdAt?: string

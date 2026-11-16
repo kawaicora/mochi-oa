@@ -7,6 +7,7 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability } from './RemoteSession'
+import { mapRemotePoint, type RemotePoint } from '../utils/remote-coords'
 import { rlog, rwarn } from '../../../shared/remote-log'
 
 const props = defineProps<{
@@ -29,15 +30,15 @@ const connected = ref(false)
 const errMsg = ref('')
 
 // ── 键鼠采集 → LiveKit data ──
-function screenOf(e: MouseEvent): { x: number; y: number } | null {
+function screenOf(e: MouseEvent): RemotePoint | null {
   const m = meta.value
   const holder = holderEl.value
   if (!m || !m.w || !m.h || !holder) return null
   const rect = holder.getBoundingClientRect()
-  return {
-    x: Math.round(((e.clientX - rect.left) / rect.width) * m.w),
-    y: Math.round(((e.clientY - rect.top) / rect.height) * m.h)
-  }
+  // 帧尺寸取不到时回退被控端屏幕尺寸；映射目标始终是 meta 上报的屏幕尺寸
+  const frameW = videoEl.value?.videoWidth || m.w
+  const frameH = videoEl.value?.videoHeight || m.h
+  return mapRemotePoint(rect, e.clientX, e.clientY, frameW, frameH, m.w, m.h)
 }
 function btnOf(button: number): 'left' | 'middle' | 'right' {
   return button === 2 ? 'right' : button === 1 ? 'middle' : 'left'
@@ -241,7 +242,8 @@ function close(): void {
   align-items: center;
   justify-content: center;
   background: #000;
-  cursor: crosshair;
+  /* 本地原生光标隐藏，光标以远程画面内嵌的被控端光标为准 */
+  cursor: none;
 }
 .rw-video {
   width: 100%;

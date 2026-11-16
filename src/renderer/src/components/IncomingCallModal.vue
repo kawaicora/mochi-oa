@@ -49,7 +49,7 @@ const rtc = useRtcStore()
         </div>
         <div class="call-modal-from">来自：{{ rtc.incomingGroup.from.nick }}</div>
         <div class="call-modal-actions">
-          <button class="call-btn ignore" @click="rtc.incomingGroup = null" title="忽略">
+          <button class="call-btn ignore" @click="rtc.rejectGroup()" title="忽略">
             <i class="fas fa-times"></i>
           </button>
           <button class="call-btn accept" @click="rtc.joinGroupCall()" title="加入">

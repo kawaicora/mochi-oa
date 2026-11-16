@@ -25,6 +25,7 @@ import type {
   Department,
   Group,
   GroupInviteEvent,
+  GroupInvitation,
   InvitationStatus,
   MemberProfile,
   OrgImportResult,
@@ -84,6 +85,22 @@ function safeUrl(url: string): string {
   } catch {
     return String(url).replace(/token=[^&]+/g, 'token=***')
   }
+}
+
+/** ws/wss → http(s) 取服务访问根地址（去掉尾部斜杠） */
+function httpBase(url: string): string {
+  return (url || '')
+    .replace(/^wss:/i, 'https:')
+    .replace(/^ws:/i, 'http:')
+    .replace(/\/+$/, '')
+}
+
+/** 相对文件路径按服务端根地址补全；已是 http(s) 绝对 URL 原样返回 */
+function joinAbsolute(base: string, rel: string): string {
+  if (!rel) return rel
+  if (/^https?:\/\//i.test(rel)) return rel
+  if (!base) return rel
+  return base + (rel.startsWith('/') ? rel : '/' + rel)
 }
 
 /** 带超时的 emit + ack 包装。
@@ -548,6 +565,9 @@ export class ServerClient extends EventEmitter {
     socket.on('group:removed', (d: { groupId: number }) => this.emit('groupRemoved', d))
     socket.on('friends:updated', () => this.emit('friendsUpdated'))
     socket.on('friend:request', (d: unknown) => this.emit('friendRequest', d))
+    socket.on('company:inviteReceived', (d: unknown) => this.emit('companyInviteReceived', d))
+    socket.on('company:joinRequest', (d: unknown) => this.emit('companyJoinRequest', d))
+    socket.on('group:joinRequest', (d: unknown) => this.emit('groupJoinRequest', d))
     socket.on('holiday:updated', () => this.emit('holidaysUpdated'))
     socket.on('task:tasksUpdated', (d: { companyId?: number }) => this.emit('tasksUpdated', d))
     socket.on('task:projectsUpdated', (d: { companyId?: number }) => this.emit('projectsUpdated', d))
@@ -938,9 +958,9 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ invitations: CompanyInvitation[] }>(this.socket, 'company:listInvitations', { companyId })
   }
 
-  async acceptInvite(code: string): Promise<Ack & { data?: { company: Company } }> {
+  async acceptInvite(invitationId: number): Promise<Ack & { data?: { company: Company } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck<{ company: Company }>(this.socket, 'company:acceptInvite', { code })
+    return emitWithAck<{ company: Company }>(this.socket, 'company:acceptInvite', { invitationId })
   }
 
   async declineInvite(invitationId: number): Promise<Ack> {
@@ -1019,13 +1039,17 @@ export class ServerClient extends EventEmitter {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck(this.socket, 'group:invite', { groupId, userId })
   }
-  async groupAcceptInvite(groupId: number): Promise<Ack> {
+  async groupAcceptInvite(invitationId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'group:acceptInvite', { groupId })
+    return emitWithAck(this.socket, 'group:acceptInvite', { invitationId })
   }
-  async groupDeclineInvite(groupId: number): Promise<Ack> {
+  async groupDeclineInvite(invitationId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
-    return emitWithAck(this.socket, 'group:declineInvite', { groupId })
+    return emitWithAck(this.socket, 'group:declineInvite', { invitationId })
+  }
+  async groupMyInvites(): Promise<Ack & { data?: { invites: GroupInvitation[] } }> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck<{ invites: GroupInvitation[] }>(this.socket, 'group:myInvites', {})
   }
   async groupTransfer(groupId: number, userId: number): Promise<Ack> {
     if (!this.socket) return { ok: false, error: '未连接' }
@@ -1048,9 +1072,14 @@ export class ServerClient extends EventEmitter {
     return emitWithAck(this.socket, 'company:updateLogo', { companyId, logo })
   }
 
+  async companyJobEnabledSet(payload: Record<string, unknown>): Promise<Ack> {
+    if (!this.socket) return { ok: false, error: '未连接' }
+    return emitWithAck(this.socket, 'company:jobEnabledSet', payload)
+  }
+
   // ─── 消息 ───────────────────────────────────────────────
 
-  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
+  async sendGroupMessage(groupId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck<{ id: string }>(this.socket, 'chat:send', { groupId, kind, content })
   }
@@ -1060,7 +1089,7 @@ export class ServerClient extends EventEmitter {
     return emitWithAck<{ messages: ServerChatMessage[] }>(this.socket, 'chat:history', { groupId, beforeTs, limit })
   }
 
-  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
+  async sendDmMessage(toUserId: number, content: string, kind: 'text' | 'image' | 'file' | 'video' | 'audio' | 'folder' | 'proxy_card' | 'expense_card' | 'advance_card' | 'attendance_card' = 'text'): Promise<Ack & { data?: { id: string } }> {
     if (!this.socket) return { ok: false, error: '未连接' }
     return emitWithAck<{ id: string }>(this.socket, 'dm:send', { toUserId, kind, content })
   }
@@ -1246,7 +1275,8 @@ export class ServerClient extends EventEmitter {
     filePath: string,
     onProgress?: (percent: number) => void,
     companyId = 0,
-    relativePath = ''
+    relativePath = '',
+    originalName = ''
   ): Promise<{ ok: boolean; error?: string; url?: string; uuid?: string; fileName?: string; size?: number }> {
     if (!this.token) { this.logNoToken('uploadFileChunked'); return { ok: false, error: '未登录（无会话 token，请重新登录）' } }
     const base = this._state.serverUrl.replace(/\/$/, '')
@@ -1257,7 +1287,7 @@ export class ServerClient extends EventEmitter {
     try {
       const uploadId = randomUUID()
       const { size } = await stat(filePath)
-      const name = basename(filePath)
+      const name = originalName.trim() || basename(filePath)
       const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
       const mime =
         /^(png|jpe?g|gif|webp|bmp|svg)$/.test(ext) ? `image/${ext === 'jpg' ? 'jpeg' : ext}`
@@ -1315,7 +1345,7 @@ export class ServerClient extends EventEmitter {
 
   async downloadFolder(relPath: string, destDir: string): Promise<{ ok: boolean; error?: string; destDir?: string; count?: number }> {
     if (!this.token) { this.logNoToken('downloadFolder'); return { ok: false, error: '未登录（无会话 token）' } }
-    const base = this._state.serverUrl.replace(/\/$/, '')
+    const base = httpBase(this._state.serverUrl)
     if (!base) return { ok: false, error: '未配置服务器地址' }
     try {
       const listUrl = `${base}/api/folder/files?path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(this.token)}`
@@ -1329,6 +1359,9 @@ export class ServerClient extends EventEmitter {
       let count = 0
       for (const f of files) {
         if (!f.url || !f.relPath) continue
+        // 服务端在相对 URL 模式下返回 /files/... 相对路径，主进程必须按 base 补全成绝对地址，
+        // 否则 httpGet 的 new URL('/files/...') 抛 Invalid URL。
+        const fileUrl = joinAbsolute(base, f.url)
         // 服务端返回的相对路径可能是百分号编码的，落盘前逐段还原中文
         const localRel = decodeUrlPath(stripCompany(f.relPath))
         if (!localRel) continue
@@ -1336,7 +1369,7 @@ export class ServerClient extends EventEmitter {
         const baseNorm = normalize(destDir)
         if (target !== baseNorm && !target.startsWith(baseNorm + sep)) continue // 防穿越
         await mkdir(join(target, '..'), { recursive: true })
-        const fr = await httpGet(f.url)
+        const fr = await httpGet(fileUrl)
         if (fr.status >= 200 && fr.status < 300) {
           await writeFile(target, fr.buf)
           count += 1

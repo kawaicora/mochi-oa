@@ -9,20 +9,21 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession from './RemoteSession'
 import RemoteUi, { remoteViewer } from './RemoteUi'
+import { mapRemotePoint, type RemotePoint } from '../utils/remote-coords'
 
 const videoEl = ref<HTMLVideoElement | null>(null)
 const holderEl = ref<HTMLDivElement | null>(null)
 
 // 被控端屏幕尺寸（未收到 meta 前为 null，不发送 move）
-function screenOf(e: MouseEvent): { x: number; y: number } | null {
+function screenOf(e: MouseEvent): RemotePoint | null {
   const m = remoteViewer.meta
   if (!m || !m.w || !m.h) return null
   const holder = holderEl.value
   if (!holder) return null
   const rect = holder.getBoundingClientRect()
-  const x = ((e.clientX - rect.left) / rect.width) * m.w
-  const y = ((e.clientY - rect.top) / rect.height) * m.h
-  return { x: Math.round(x), y: Math.round(y) }
+  const frameW = videoEl.value?.videoWidth || m.w
+  const frameH = videoEl.value?.videoHeight || m.h
+  return mapRemotePoint(rect, e.clientX, e.clientY, frameW, frameH, m.w, m.h)
 }
 
 function btnOf(button: number): 'left' | 'middle' | 'right' {
@@ -121,7 +122,8 @@ function end(): void {
   align-items: center;
   justify-content: center;
   background: #000;
-  cursor: crosshair;
+  /* 本地原生光标隐藏，光标以远程画面内嵌的被控端光标为准 */
+  cursor: none;
 }
 .rv-video {
   width: 100%;
