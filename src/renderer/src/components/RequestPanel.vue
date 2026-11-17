@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { NotifyItem, NotifyButton } from '../utils/notify-manager'
 
 const props = defineProps<{ item: NotifyItem }>()
-const emit = defineEmits<{ (e: 'select', index: number): void }>()
+const emit = defineEmits<{ (e: 'select', index: number): void; (e: 'open'): void }>()
 
 const icon = computed(() => {
   switch (props.item.kind) {
@@ -28,6 +28,12 @@ function btnClass(btn: NotifyButton): string {
   return base
 }
 
+/** 卡片是否可点击跳转（会话消息 / 审批卡片深链） */
+const clickable = computed(() => {
+  const t = props.item.target
+  return !!t && t.kind === 'main' && !!(t.conversationId || t.approvalCard)
+})
+
 function select(index: number): void {
   emit('select', index)
 }
@@ -35,7 +41,7 @@ function select(index: number): void {
 
 <template>
   <div class="rp-mask" @click.self>
-    <div class="rp-card" role="dialog" aria-modal="true">
+    <div class="rp-card" :class="{ clickable }" role="dialog" aria-modal="true" @click="emit('open')">
       <div class="rp-head">
         <i :class="icon"></i>
         <span class="rp-title">{{ item.title }}</span>
@@ -49,7 +55,7 @@ function select(index: number): void {
           v-for="(btn, i) in item.buttons"
           :key="i"
           :class="btnClass(btn)"
-          @click="select(i)"
+          @click.stop="select(i)"
         >
           {{ btn.text }}
         </button>
@@ -76,6 +82,7 @@ function select(index: number): void {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
   overflow: hidden;
 }
+.rp-card.clickable { cursor: pointer; }
 .rp-head {
   display: flex;
   align-items: center;

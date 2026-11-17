@@ -180,10 +180,7 @@ export const useAppStore = defineStore('app', () => {
   })
   // 需求 7.3：审批卡片系统通知被点击 → 主窗口唤起后，深链到对应审批 View 并定位申请单
   window.pantry.onOpenApprovalCard(({ cardKind, requestId }) => {
-    if (cardKind === 'attendance_card') setAttendanceDeepLink(requestId)
-    else if (cardKind === 'expense_card') setExpenseDeepLink(requestId)
-    else if (cardKind === 'advance_card') setAdvanceDeepLink(requestId)
-    else if (cardKind === 'proxy_card') setProxyDeepLink(requestId)
+    applyApprovalCard(cardKind, requestId)
   })
 
   // ─── 群设置（owner/admin） ───
@@ -1162,6 +1159,24 @@ export const useAppStore = defineStore('app', () => {
     }
     if (item) await openConversation(item)
   }
+
+  /** 审批卡片深链：按卡片类型跳到对应审批 View 并定位申请单 */
+  function applyApprovalCard(cardKind: 'attendance_card' | 'expense_card' | 'advance_card' | 'proxy_card', requestId: number): void {
+    if (cardKind === 'attendance_card') setAttendanceDeepLink(requestId)
+    else if (cardKind === 'expense_card') setExpenseDeepLink(requestId)
+    else if (cardKind === 'advance_card') setAdvanceDeepLink(requestId)
+    else if (cardKind === 'proxy_card') setProxyDeepLink(requestId)
+  }
+
+  /** 通知/面板目标跳转：会话消息 → 定位会话并加载历史；审批卡片 → 深链到申请单 */
+  function resolvePanelTarget(target?: NotifTarget): void {
+    if (!target) return
+    if (target.kind === 'main') {
+      if (target.approvalCard) applyApprovalCard(target.approvalCard.cardKind, target.approvalCard.requestId)
+      else if (target.conversationId) void navigateToConversation(target.conversationId)
+    }
+  }
+
   async function loadGroupHistory(groupId: number): Promise<void> {
     const ack = await window.pantry.serverChatHistory(groupId, undefined, 80)
     messages.value = (d<{ messages: ServerChatMessage[] }>(ack)?.messages ?? []).slice().reverse()
@@ -1395,7 +1410,11 @@ export const useAppStore = defineStore('app', () => {
           : { kind: 'group', id: conv?.groupId ?? msg.conversationId },
         convKey: convKey(msg.type, msg.conversationId),
         inCurrentConv: inConv,
-        target: notifTarget
+        target: notifTarget,
+        // 普通聊天消息不进居中弹窗：正文只是 [图片]/[文件] 占位，弹窗无法跳转也无意义；
+        // 只走系统通知 + 会话未读角标，点击系统通知按 conversationId 定位会话并加载历史。
+        // 审批卡片保留面板承接摘要与深链。
+        panel: !!cardK
       })
     }
     if (conv) {
@@ -1545,6 +1564,8 @@ export const useAppStore = defineStore('app', () => {
     openGroup,
     openDm,
     openConversation,
+    navigateToConversation,
+    resolvePanelTarget,
     loadGroupHistory,
     loadDmHistory,
     sendText,
