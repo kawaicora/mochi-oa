@@ -293,7 +293,7 @@ app.whenReady().then(() => {
   })
 
   registerServerIpcHandlers(getMainWindow)
-  checkUpdateJoin().catch((err) => {
+  checkUpdateJoin("startup").catch((err) => {
     console.error("自动更新失败", err)
   })
   createWindow()

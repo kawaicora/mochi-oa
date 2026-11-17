@@ -494,6 +494,8 @@ export class ServerClient extends EventEmitter {
     socket.on('message:deleted', (d: ServerMessageDeleted) => this.emit('messageDeleted', d))
     socket.on('conversations:updated', (d: unknown) => this.emit('conversationsUpdated', d))
     socket.on('chat:readReceipt', (d: unknown) => this.emit('chatReadReceipt', d))
+    // 管理员发布更新包后服务端广播 → 在线客户端立即静默检查版本
+    socket.on('client:updateAvailable', (d: unknown) => this.emit('updateAvailable', d))
 
     // 公司通知类推送：proxy 审批 / 考勤审批等 → 统一 emit('companyNotification')
     socket.on('proxy:request:notification', (d: unknown) => {

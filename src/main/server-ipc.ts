@@ -21,6 +21,7 @@ import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
 import { detectFromBufferAsync } from './update-detect'
+import { checkUpdateJoin } from './check-update'
 
 /** 上一次已知的登录用户 id（用 有值→无值 的跳变判定「刚退回登录页」） */
 let lastUserId: number | undefined
@@ -236,6 +237,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   serverClient.on('companyNotification', (d) => sendToMainWindow(getMainWindow(), IpcEvents.companyNotified, d))
   // 断线重试失败 → 渲染层提示并回登录页（token 保留，不用清）
   serverClient.on('reconnectGaveUp', (d) => sendToMainWindow(getMainWindow(), IpcEvents.serverReconnectGaveUp, d))
+
+  // 服务端发布更新包后广播 → 在线客户端立即静默检查版本；已是最新则无感跳过。
+  // 离线客户端收不到本事件，下次启动时由启动检查兜底自动更新。
+  serverClient.on('updateAvailable', (d: unknown) => {
+    const p = (d ?? {}) as { version?: unknown; platform?: unknown }
+    console.log(`收到更新广播，触发静默版本检查（服务器版本=${p.version ?? '未知'}，平台=${p.platform ?? '未知'}）`)
+    checkUpdateJoin('broadcast').catch((err) => {
+      console.error('广播触发的自动更新失败', err)
+    })
+  })
 
   // RTC 信令推送 → renderer（广播到所有窗口，会议独立窗口也需接收）
   serverClient.on('rtcDmIncoming', (d) => {
