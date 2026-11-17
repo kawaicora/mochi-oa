@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { flashTray } from './tray'
 import { resourceFilePath } from './branding'
-import { IpcEvents, type NotifKind, type NotifTarget } from '../shared/ipc'
+import { IpcEvents, type NavigateToConversationPayload, type NotifKind, type NotifTarget } from '../shared/ipc'
 
 /** 打开独立会议窗口（create/join，带 meetingNo/password 参数） */
 export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; meetingNo?: string; password?: string }): void {
@@ -42,8 +42,14 @@ export function openTarget(t: NotifTarget): void {
     showMainWindow?.()
     // 需求 7.3：审批卡片通知 → 通知渲染层深链到对应审批 View 并定位申请单
     if (t.approvalCard) getMainWindow?.()?.webContents.send(IpcEvents.openApprovalCard, t.approvalCard)
-    // 携带会话参数 → 通知渲染层定位到该会话
-    if (t.conversationId) getMainWindow?.()?.webContents.send(IpcEvents.navigateToConversation, t.conversationId)
+    // 携带会话参数 → 通知渲染层定位到该会话（可附带具体消息 id 滚动定位）
+    if (t.conversationId) {
+      const payload: NavigateToConversationPayload = {
+        conversationId: t.conversationId,
+        messageId: t.messageId ?? null
+      }
+      getMainWindow?.()?.webContents.send(IpcEvents.navigateToConversation, payload)
+    }
   } else if (t.kind === 'meeting') {
     openMeetingWindow({ mode: t.mode, kind: t.callType, meetingNo: t.meetingNo, password: t.password })
   }

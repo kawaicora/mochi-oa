@@ -42,6 +42,13 @@ provide('toast', toast)
 function onPanelSelect(index: number): void {
   if (app.currentPanel) app.resolveRequestPanel(app.currentPanel.id, index)
 }
+// 点击面板卡片本体：按通知目标定位会话/审批深链，随后关闭面板
+function onPanelOpen(): void {
+  const panel = app.currentPanel
+  if (!panel) return
+  app.resolvePanelTarget(panel.target)
+  app.resolveRequestPanel(panel.id, -1)
+}
 function fmtAt(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -112,7 +119,7 @@ onBeforeUnmount(() => {
   </transition-group>
 
   <!-- 通用请求面板：标题 + 内容 + 按钮列表，队列逐条弹出 -->
-  <RequestPanel v-if="app.currentPanel" :item="app.currentPanel" @select="onPanelSelect" />
+  <RequestPanel v-if="app.currentPanel" :item="app.currentPanel" @select="onPanelSelect" @open="onPanelOpen" />
 </template>
 
 <style scoped>
