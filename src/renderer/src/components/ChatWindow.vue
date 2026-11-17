@@ -18,7 +18,7 @@ import { setExpenseDeepLink } from '../utils/expense-deeplink'
 import { setAdvanceDeepLink } from '../utils/advance-deeplink'
 import { setAttendanceDeepLink } from '../utils/attendance-deeplink'
 import {
-  APPROVAL_CARD_TITLE, detectApprovalCard, parseApprovalCard, isApprovalCardKind,
+  APPROVAL_CARD_TITLE, buildApprovalCard, detectApprovalCard, parseApprovalCard, isApprovalCardKind,
   type ApprovalCardKind, type ParsedApprovalCard
 } from '../utils/approval-card'
 
@@ -128,6 +128,26 @@ watch(
     await nextTick()
     scrollBottom()
     scheduleReadFlush()
+  }
+)
+
+// 通知点击定位到具体消息：历史拉取是异步的，轮询等待对应行上屏后滚动到可视区并高亮
+watch(
+  () => app.focusMessageId,
+  async (mid) => {
+    if (!mid) return
+    for (let i = 0; i < 10; i++) {
+      await nextTick()
+      const row = msgListEl.value?.querySelector(`[data-mid="${CSS.escape(mid)}"]`)
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        row.classList.add('msg-row-focus')
+        setTimeout(() => row.classList.remove('msg-row-focus'), 2600)
+        break
+      }
+      await new Promise((r) => setTimeout(r, 120))
+    }
+    app.focusMessageId = null
   }
 )
 
@@ -319,6 +339,65 @@ function openCard(m: ServerChatMessage): void {
     case 'expense_card': setExpenseDeepLink(rid); break
     case 'advance_card': setAdvanceDeepLink(rid); break
     case 'attendance_card': setAttendanceDeepLink(rid); break
+  }
+}
+
+/** 卡片解析数据（无卡片返回 null） */
+function cardData(m: ServerChatMessage): ParsedApprovalCard | null {
+  return resolveCard(m)?.data ?? null
+}
+
+/** 待审批卡片：未携带结果状态（approved/rejected）即视为待处理 */
+function isPendingCard(m: ServerChatMessage): boolean {
+  const d = cardData(m)
+  return !!d && !d.status
+}
+
+/** 考勤卡片审批中（防重复点击）的消息 id 列表 */
+const actingCard = ref<string[]>([])
+/** 各卡片驳回原因（考勤驳回原因为可选） */
+const rejectNotes = ref<Record<string, string>>({})
+
+/** 审批成功后本地把卡片状态翻成已通过/已驳回，按钮不再重复出现 */
+function applyCardStatus(m: ServerChatMessage, status: 'approved' | 'rejected'): void {
+  const d = cardData(m)
+  const kind = cardOf(m)
+  if (!d || !kind || d.requestId == null) return
+  m.content = buildApprovalCard(kind, {
+    requestId: d.requestId,
+    title: d.title,
+    body: d.body,
+    byNick: d.byNick,
+    status
+  })
+}
+
+/** 聊天内考勤卡片直接通过/驳回；后端按 approverIds/角色做最终权限校验 */
+async function actAttendance(m: ServerChatMessage, approve: boolean): Promise<void> {
+  const d = cardData(m)
+  if (!d || d.requestId == null || actingCard.value.includes(m.id)) return
+  const rid = Number(d.requestId)
+  const note = (rejectNotes.value[m.id] ?? '').trim()
+  actingCard.value = [...actingCard.value, m.id]
+  try {
+    const payload: Record<string, unknown> = { id: rid, companyId: app.activeCompanyId }
+    if (!approve) payload.note = note
+    const ack = approve
+      ? await window.pantry.serverAttendanceApprove(payload)
+      : await window.pantry.serverAttendanceReject(payload)
+    if (!ack.ok) {
+      flashToast(ack.error || '操作失败')
+      return
+    }
+    applyCardStatus(m, approve ? 'approved' : 'rejected')
+    delete rejectNotes.value[m.id]
+    flashToast(approve ? '已通过' : '已驳回')
+    window.dispatchEvent(new CustomEvent('mochi:checkin:refresh'))
+  } catch (e) {
+    console.error('[考勤] 卡片审批异常', e)
+    flashToast('操作异常')
+  } finally {
+    actingCard.value = actingCard.value.filter((x) => x !== m.id)
   }
 }
 
@@ -677,6 +756,11 @@ async function confirmRecall(): Promise<void> {
 /** 当前右键菜单对应的消息 */
 const menuMsg = computed(() => (showMsgMenu.value ? app.messages.find((x) => x.id === showMsgMenu.value!.id) : undefined))
 
+/** 消息是否已下载到本地（图片/视频/文件/音频自动预览缓存；文件夹下载后写入 destDir） */
+function isCached(m: ServerChatMessage | undefined): boolean {
+  return !!m && !!app.localCache[m.id]?.path
+}
+
 /** 下载当前右键文件/文件夹到配置的下载目录 */
 async function onDownload(): Promise<void> {
   const id = showMsgMenu.value?.id
@@ -685,14 +769,16 @@ async function onDownload(): Promise<void> {
   const m = app.messages.find((x) => x.id === id)
   if (!m) return
   // 自动下载开关开着时收到即已下载到本地；避免右键重复下载（不生成 xxx (1) 副本）
-  if (m.kind !== 'folder' && app.localCache[id]?.path) {
+  if (app.localCache[id]?.path) {
     flashToast(`已下载 → ${app.localCache[id]!.path}`)
     return
   }
   if (m.kind === 'folder') {
     const r = await app.downloadFolder(m.content)
-    if (r.ok) flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
-    else flashToast(`下载失败：${r.error || '未知错误'}`)
+    if (r.ok && r.destDir) {
+      app.localCache[m.id] = { fileUrl: m.content, path: r.destDir }
+      flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
+    } else flashToast(`下载失败：${r.error || '未知错误'}`)
   } else {
     // 需用绝对 URL（相对 /files/... 传下载接口会报 Invalid URL）
     const url = server.absFileUrl(m.content)
@@ -715,7 +801,10 @@ async function onOpenFileLocation(): Promise<void> {
   if (!path) {
     if (m.kind === 'folder') {
       const r = await app.downloadFolder(m.content)
-      if (r.ok && r.destDir) path = r.destDir
+      if (r.ok && r.destDir) {
+        path = r.destDir
+        app.localCache[m.id] = { fileUrl: m.content, path: r.destDir }
+      }
     } else {
       const url = server.absFileUrl(m.content)
       beginDownload(url, fileNameOf(m.content))
@@ -868,11 +957,20 @@ function folderNameOf(content: string): string {
   return decodeURIComponent(content.split('/').pop() || '文件夹')
 }
 
-/** 下载整个文件夹到配置目录（默认 Documents/麻薯） */
-async function onDownloadFolder(m: { content: string }): Promise<void> {
-  const r = await app.downloadFolder(m.content)
-  if (r.ok) flashToast(`已下载 ${r.count ?? 0} 个文件 → ${r.destDir}`)
-  else flashToast(`下载失败：${r.error || '未知错误'}`)
+/** 点击文件夹卡片：命中缓存直接打开目录；未下载则先下载再打开所在目录 */
+async function onOpenFolder(m: ServerChatMessage): Promise<void> {
+  let dir = app.localCache[m.id]?.path
+  if (!dir) {
+    const r = await app.downloadFolder(m.content)
+    if (r.ok && r.destDir) {
+      dir = r.destDir
+      app.localCache[m.id] = { fileUrl: m.content, path: r.destDir }
+    } else {
+      flashToast(`下载失败：${r.error || '未知错误'}`)
+      return
+    }
+  }
+  await window.pantry.openFileLocation(dir)
 }
 
 // ─── 本地预览（自动下载） + 3D 模型预览 ───
@@ -1067,7 +1165,23 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
               <div v-else-if="cardOf(m) === 'attendance_card'" class="msg-card" @click="openCard(m)">
                 <div class="msg-card-t">考勤申请</div>
                 <div class="msg-card-b">{{ cardSummary(m) }}</div>
-                <div class="msg-card-btn">查看/处理</div>
+                <template v-if="isPendingCard(m)">
+                  <input
+                    v-model="rejectNotes[m.id]"
+                    class="card-reject-input"
+                    placeholder="驳回原因（可选）"
+                    @click.stop
+                  />
+                  <div class="msg-card-actions" @click.stop>
+                    <button class="card-btn ok" :disabled="actingCard.includes(m.id)" @click="actAttendance(m, true)">
+                      <i class="fas fa-check"></i>&nbsp;通过
+                    </button>
+                    <button class="card-btn danger" :disabled="actingCard.includes(m.id)" @click="actAttendance(m, false)">
+                      <i class="fas fa-times"></i>&nbsp;驳回
+                    </button>
+                  </div>
+                </template>
+                <div v-else class="msg-card-btn">查看/处理</div>
               </div>
               <!-- 视频：FLV 走 flv.js；rm/avi/mkv/3gp/rmvb 走服务端 ffmpeg 转码；其余原生 Blob 播放 -->
               <MsgVideo
@@ -1102,12 +1216,9 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
                   <i :class="fileIcon(m.content)"></i>&nbsp;{{ fileNameOf(m.content) }}
                 </a>
               </template>
-              <div v-else-if="m.kind === 'folder'" class="msg-folder">
+              <div v-else-if="m.kind === 'folder'" class="msg-folder" @click="onOpenFolder(m)">
                 <i class="fas fa-folder msg-folder-icon"></i>
-                <span class="msg-folder-name" :title="m.content">{{ folderNameOf(m.content) }}</span>
-                <button v-if="m.fromId !== myId" class="msg-folder-dl" @click="onDownloadFolder(m)">
-                  <i class="fas fa-download"></i>&nbsp;下载
-                </button>
+                <span class="msg-folder-name" :title="folderNameOf(m.content)">{{ folderNameOf(m.content) }}</span>
               </div>
             </div>
           </div>
@@ -1200,7 +1311,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       <button v-if="menuMsg && menuMsg.kind === 'text'" class="ctx-item" @click="onCopyText"><i class="far fa-copy"></i> 复制</button>
       <!-- 图片消息：把图片本身写进剪贴板（可直接粘贴到微信/Word 等） -->
       <button v-if="menuMsg && menuMsg.kind === 'image'" class="ctx-item" @click="onCopyImage"><i class="far fa-copy"></i> 复制图片</button>
-      <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
+      <button v-if="menuMsg && menuMsg.kind !== 'text' && !isCached(menuMsg)" class="ctx-item" @click="onDownload"><i class="fas fa-download"></i> 下载</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="onOpenFileLocation"><i class="far fa-folder-open"></i> 打开文件所在路径</button>
       <button v-if="menuMsg && menuMsg.kind !== 'text'" class="ctx-item" @click="openWithSystemApp(menuMsg)"><i class="fas fa-external-link-alt"></i> 以系统默认方式打开</button>
       <button v-if="menuMsg?.fromId == myId || 
@@ -1435,6 +1546,11 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 .msg-row.me {
   flex-direction: row-reverse;
 }
+.msg-row-focus .msg-bubble {
+  outline: 2px solid var(--dt-primary);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
 .msg-avatar {
   width: 36px;
   height: 36px;
@@ -1493,6 +1609,32 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 .msg-card-t { font-size: 13px; font-weight: 700; color: var(--dt-primary); margin-bottom: 4px; }
 .msg-card-b { font-size: 13px; color: var(--dt-text); margin-bottom: 6px; }
 .msg-card-btn { font-size: 12px; color: var(--dt-primary); text-decoration: underline; }
+.msg-card-actions { display: flex; gap: 8px; margin-top: 8px; }
+.card-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #fff;
+}
+.card-btn.ok { background: #2fbb6b; }
+.card-btn.ok:hover { background: #27a35c; }
+.card-btn.danger { background: #d92b3a; }
+.card-btn.danger:hover { background: #c22533; }
+.card-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.card-reject-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d9dee5;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff;
+}
 .msg-img {
   max-width: 240px;
   max-height: 240px;
@@ -1566,6 +1708,7 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
   align-items: center;
   gap: 8px;
   min-width: 180px;
+  cursor: pointer;
 }
 .msg-folder-icon {
   font-size: 22px;

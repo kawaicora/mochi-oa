@@ -397,9 +397,17 @@ export const IpcChannels = {
 /** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
 export type NotifTarget =
   | { kind: 'main'; nav?: string; conversationId?: number;
+      /** 点击通知后需要定位到的具体消息 id（普通聊天消息） */
+      messageId?: string | null
       /** 需求 7.3：审批卡片通知点击 → 渲染层深链到对应审批 View 并定位该申请单 */
       approvalCard?: { cardKind: 'attendance_card' | 'expense_card' | 'advance_card' | 'proxy_card'; requestId: number } }
   | { kind: 'meeting'; mode: 'create' | 'join'; callType?: 'voice' | 'video'; meetingNo?: string; password?: string }
+
+/** navigateToConversation 事件载荷：会话定位 + 可选的消息定位 */
+export interface NavigateToConversationPayload {
+  conversationId: number
+  messageId?: string | null
+}
 
 /**
  * 通知类型：通知管理器按类型区分处理（提示音、托盘闪动、紧急程度、免打扰策略）。
