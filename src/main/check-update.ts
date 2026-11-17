@@ -91,13 +91,16 @@ let updatePromise: Promise<void> | null = null;
  * await checkUpdateJoin();
  *
  * 重复调用时不会同时执行多个更新流程。
+ *
+ * @param source 触发来源：startup=应用启动兜底检查；broadcast=服务端发布更新包后的在线广播检查。
  */
-export function checkUpdateJoin(): Promise<void> {
+export function checkUpdateJoin(source: "startup" | "broadcast" = "startup"): Promise<void> {
     if (updatePromise) {
+        console.log(`自动更新：已有检查流程在进行，本次（来源：${source}）并入等待`)
         return updatePromise;
     }
 
-    updatePromise = checkUpdate()
+    updatePromise = checkUpdate(source)
         .finally(() => {
             updatePromise = null;
         });
@@ -108,11 +111,11 @@ export function checkUpdateJoin(): Promise<void> {
 /**
  * 检查服务器版本并执行更新。
  */
-async function checkUpdate(): Promise<void> {
+async function checkUpdate(source: "startup" | "broadcast" = "startup"): Promise<void> {
     const cfg: ServerConfig = loadServerConfig();
 
     if (!cfg.serverUrl) {
-        console.log("自动更新：未配置服务器地址");
+        console.log("自动更新：未配置服务器地址，跳过检查");
         return;
     }
 
@@ -125,7 +128,7 @@ async function checkUpdate(): Promise<void> {
     }
 
     try {
-        console.log("自动更新：检查服务器版本");
+        console.log(`自动更新：开始检查（来源：${source}，平台：${ownPlatform()}）`);
         console.debug(`自动更新：服务器地址 ${serverUrl}/files/version`);
         const response = await fetch(
             `${serverUrl}/files/version`,
@@ -150,7 +153,7 @@ async function checkUpdate(): Promise<void> {
 
         const relativeUrl = resolveDownloadUrl(update);
         if (!relativeUrl) {
-            console.log(`自动更新：当前平台 ${ownPlatform()} 暂无对应更新包`);
+            console.log(`自动更新：当前平台 ${ownPlatform()} 暂无对应更新包，跳过`);
             return;
         }
 
@@ -167,13 +170,13 @@ async function checkUpdate(): Promise<void> {
 
         if (!semver.gt(latestVersion, localVersion)) {
             console.log(
-                `自动更新：当前已是最新版本 ${currentVersion}`
+                `自动更新：当前已是最新版本 ${currentVersion}，无需更新（来源：${source}）`
             );
             return;
         }
 
         console.log(
-            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}（${ownPlatform()}）`
+            `自动更新：发现新版本 ${currentVersion} -> ${latestVersion}（${ownPlatform()}，来源：${source}）`
         );
         console.debug(`自动更新：下载地址 ${relativeUrl}`);
         // 解析服务器下载地址
