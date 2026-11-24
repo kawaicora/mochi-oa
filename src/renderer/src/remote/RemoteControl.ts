@@ -103,6 +103,7 @@ class RemoteControl {
     let room: Room
     try {
       room = await connectSfu({ url: d.url!, token: d.token!, roomName: d.roomName! }, {
+        label: '设备被控端',
         onDisconnected: () => {
           console.log('[remote] SFU 断开')
           this.room = null

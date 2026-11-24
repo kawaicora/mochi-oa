@@ -13,6 +13,7 @@
 
 import { Room, RoomEvent, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
 import type { RtcSfuInfo } from '@shared/server-types'
+import { attachSfuDiagnostics } from './rtc-debug'
 
 /** 连接回调 */
 export interface SfuConnectOpts {
@@ -23,6 +24,8 @@ export interface SfuConnectOpts {
    * 例如 RtcEngine 的 TrackSubscribed / Reconnected）。
    */
   onRoomCreated?: (room: Room) => void
+  /** 场景中文标签（用于 SFU 诊断日志分场景显示），如「会议通话」「远程协助-控制端」 */
+  label?: string
 }
 
 /** 统一连接一个 LiveKit SFU room。失败抛错，由调用方处理。 */
@@ -34,6 +37,8 @@ export async function connectSfu(sfu: RtcSfuInfo, opts: SfuConnectOpts = {}): Pr
   }
   try {
     await room.connect(sfu.url, sfu.token)
+    // 连接成功后挂接中文格式化的 SFU 连接信息诊断日志（中转/直连、IP 端口、候选类型、对端信息）
+    attachSfuDiagnostics(room, sfu, opts.label ?? 'RTC 会话')
     return room
   } catch (e) {
     // 连接失败：必须彻底断开再抛错。Room 默认 autoReconnect 会一直在后台重连，
