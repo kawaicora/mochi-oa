@@ -134,6 +134,7 @@ class RemoteSession {
     let room: Room
     try {
       room = await connectSfu(opts.sfu, {
+        label: '远程协助-被控端',
         onDisconnected: () => {
           if (!this.closed) {
             this.sayErr('SFU 断开 → 结束会话')
@@ -242,6 +243,7 @@ class RemoteSession {
     let room: Room
     try {
       room = await connectSfu(opts.sfu, {
+        label: '远程协助-控制端',
         onDisconnected: () => {
           if (!this.closed) {
             this.sayErr('SFU 断开 → 结束会话')

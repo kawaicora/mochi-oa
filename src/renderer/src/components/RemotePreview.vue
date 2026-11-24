@@ -36,6 +36,7 @@ async function start() {
 
     // 用和会议相同的 connectSfu() 连接
     room = await connectSfu(s, {
+      label: '设备预览(控制端)',
       onRoomCreated: (r) => {
         // 必须在 connect 前订阅事件
         r.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {

@@ -116,6 +116,7 @@ class RtcEngine {
     try {
       // 统一连接（connectSfu）：事件订阅在 onRoomCreated 里完成（需在 connect 前绑定才不会错过）
       const room = await connectSfu(sfu, {
+        label: '会议通话',
         onRoomCreated: (r) => {
           this.room = r
 
