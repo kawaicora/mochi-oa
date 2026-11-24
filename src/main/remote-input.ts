@@ -13,10 +13,10 @@
  *            需要「辅助功能」权限，启动时用 AXIsProcessTrusted 自检并上报结果。
  *
  * 两种键鼠模式（控制端发起会话时指定）：
- *  - remote：本机鼠标锁定在屏幕边界（ClipCursor），光标保持可见以便采集进画面帧；
+ *  - remote：本机鼠标锁定在屏幕边界（ClipCursor），光标始终保持可见以便采集进画面帧；
  *            键鼠事件由控制端上报。
  *  - local ：本机鼠标照常显示，仅按归一化坐标同步移动被控端鼠标。
- *  只有 Windows 有这套「锁定+隐藏」的权限模型，其它平台一律按 local 处理并记日志说明。
+ *  被控端光标在任何模式下都不隐藏；只有 Windows 有「锁定光标边界」的能力，其它平台一律按 local 处理并记日志说明。
  *
  * 断线/结束必须复位：
  *  - 鼠标/键盘「按下中」断开 → 补发对应的 Up（防止粘连）。
@@ -131,7 +131,6 @@ while ($true) {
         [void][U32]::ClipCursor([ref]$r)
       }
       'clipfree' { [void][U32]::ClipCursor([IntPtr]::Zero) }
-      'hide' { [void][U32]::ShowCursor($false) }
       'show' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
       'ping' { [Console]::Out.WriteLine('{"ok":true,"pong":true}') }
       default { [Console]::Out.WriteLine('{"ok":false,"reason":"unknown cmd"}') }
@@ -434,18 +433,21 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
 
   rlog(S, `输入后端 = ${backend} ok=${capability.ok} 说明=${capability.detail}`)
 
-  // 键鼠模式：只有 Windows 有「锁定+隐藏本机光标」
+  // 键鼠模式：只有 Windows 有「锁定本机光标边界」的能力；被控端光标任何模式下都保持可见
   let effMode = mode
   if (effMode === 'remote' && !IS_WIN) {
-    rwarn(S, 'remote 模式（锁定+隐藏本机光标）在 Windows 之外不可用，本会话按 local 处理（仅同步位置）')
+    rwarn(S, 'remote 模式（锁定本机光标边界）在 Windows 之外不可用，本会话按 local 处理（仅同步位置）')
     effMode = 'local'
+  }
+  if (IS_WIN) {
+    // 兜底复位上一会话遗留的隐藏状态：被控端光标始终可见，代码路径里不再提供隐藏指令
+    winSend({ t: 'show' })
   }
   if (effMode === 'remote') {
     if (!cursorLocked) { winSend({ t: 'cliplock' }); cursorLocked = true }
-    // 不再隐藏被控端光标：光标必须保留在屏幕/画面帧里，控制端直接看到远程鼠标位置。
+    // 光标必须保留在屏幕/画面帧里，控制端直接看到远程鼠标位置，不隐藏被控端光标。
   } else if (IS_WIN) {
     winSend({ t: 'clipfree' })
-    winSend({ t: 'show' })
     cursorLocked = false
   }
   return { ...capability }
