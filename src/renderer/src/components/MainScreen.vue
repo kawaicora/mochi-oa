@@ -19,6 +19,7 @@ import JobView from './JobView.vue'
 import { fireDueAlarms, setAlarmActionHandler, snoozeAlarm, stopAlarm, type Alarm } from '../utils/alarms'
 import PlaceholderPanel from './PlaceholderPanel.vue'
 import PersonalSettings from './PersonalSettings.vue'
+import GlobalSettings from './GlobalSettings.vue'
 import UserAvatar from './UserAvatar.vue'
 import AdminPanel from './AdminPanel.vue'
 import type { ServerSession } from '@shared/server-types'
@@ -188,49 +189,10 @@ async function doLogout(): Promise<void> {
   await server.logout()
 }
 
-// 服务器设置
-const srvHost = ref('')
-const srvPort = ref('')
-const srvProtocol = ref<'http' | 'https'>('http')
-const srvError = ref('')
-const srvPreview = ref('')
-const downloadDir = ref('')
-function buildUrl(): string {
-  const host = srvHost.value.trim() || '127.0.0.1'
-  const port = srvPort.value.trim() || '3000'
-  return `${srvProtocol.value}://${host}:${port}`
-}
-async function chooseDownloadDir(): Promise<void> {
-  const p = await window.pantry.pickFolder()
-  if (p) downloadDir.value = p
-}
-async function openSettings(): Promise<void> {
+// 设置（服务器连接 / 通知 / 启动 / 主邮件）
+function openSettings(): void {
   showAccountMenu.value = false
-  const cfg = await window.pantry.serverGetSettings()
-  downloadDir.value = cfg.downloadDir || ''
-  try {
-    const u = new URL(cfg.serverUrl)
-    srvProtocol.value = u.protocol === 'https:' ? 'https' : 'http'
-    srvHost.value = u.hostname
-    srvPort.value = u.port || (u.protocol === 'https:' ? '443' : '80')
-  } catch {
-    srvHost.value = '127.0.0.1'; srvPort.value = '3000'; srvProtocol.value = 'http'
-  }
-  srvPreview.value = buildUrl()
-  srvError.value = ''
   showSettings.value = true
-}
-async function saveSettings(): Promise<void> {
-  const url = buildUrl()
-  srvError.value = ''
-  try {
-    await window.pantry.serverSaveSettings({ downloadDir: downloadDir.value.trim() || undefined })
-    // 换服务器：清 token + 断旧会话 + 用新地址重连（渲染层随之回登录页，多余窗口一并关闭）
-    await server.changeServerUrl(url)
-    showSettings.value = false
-  } catch (e) {
-    srvError.value = e instanceof Error ? e.message : String(e)
-  }
 }
 
 function fmtTime(iso: string): string {
@@ -294,7 +256,7 @@ function joinRoom(roomId: string): void {
         </div>
         <button class="menu-item" @click="showPersonalSettings = true"><i class="fas fa-user-edit"></i> 个人信息</button>
         <button class="menu-item" @click="openAccount"><i class="fas fa-shield-alt"></i> 账号安全 · 登录会话</button>
-        <button class="menu-item" @click="openSettings"><i class="fas fa-server"></i> 服务器设置</button>
+        <button class="menu-item" @click="openSettings"><i class="fas fa-cog"></i> 设置</button>
         <div class="menu-divider"></div>
         <button class="menu-item danger" @click="doLogout"><i class="fas fa-sign-out-alt"></i> 退出登录</button>
       </div>
@@ -426,34 +388,8 @@ function joinRoom(roomId: string): void {
       </div>
     </div>
 
-    <!-- 服务器设置 -->
-    <div v-if="showSettings" class="modal-mask" @click.self="showSettings = false">
-      <div class="modal">
-        <div class="modal-head">服务器设置</div>
-        <div class="modal-body">
-          <p class="modal-desc">填写连接的服务端地址与端口</p>
-          <div class="srv-row">
-            <select v-model="srvProtocol" class="srv-select"><option value="http">http://</option><option value="https">https://</option></select>
-            <input v-model="srvHost" class="srv-input" placeholder="127.0.0.1" />
-            <span class="srv-colon">:</span>
-            <input v-model="srvPort" class="srv-input srv-port" placeholder="3000" />
-          </div>
-          <div v-if="srvError" class="srv-error">{{ srvError }}</div>
-          <p class="srv-preview">连接地址：{{ buildUrl() }}</p>
-
-          <p class="modal-desc dl-desc">文件夹下载目录</p>
-          <div class="srv-row">
-            <input v-model="downloadDir" class="srv-input" placeholder="例如：Documents/麻薯" />
-            <button class="dt-btn" @click="chooseDownloadDir"><i class="far fa-folder-open"></i>&nbsp;浏览</button>
-          </div>
-          <p class="srv-hint">接收到的文件夹将下载到此目录（按原结构建子目录）</p>
-        </div>
-        <div class="modal-foot">
-          <button class="dt-btn dt-btn-default" @click="showSettings = false">取消</button>
-          <button class="dt-btn dt-btn-primary" @click="saveSettings">保存并连接</button>
-        </div>
-      </div>
-    </div>
+    <!-- 全局设置：服务器连接 / 通知 / 启动 / 主邮件 -->
+    <GlobalSettings v-if="showSettings" @close="showSettings = false" />
 
     <!-- 个人信息设置 -->
     <PersonalSettings v-if="showPersonalSettings" @close="showPersonalSettings = false" />

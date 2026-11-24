@@ -18,11 +18,11 @@
  *
  * data 协议（JSON，沿用原 DataChannel 协议，仅承载通道换成 LiveKit data）：
  *  控制端 → 被控端：{t:'move',x,y} | {t:'down',btn} | {t:'up',btn} | {t:'scroll',d}
- *                   | {t:'kdown',k} | {t:'kup',k} | {t:'bye'}
+ *                   | {t:'kdown',k} | {t:'kup',k} | {t:'cursorShow'} | {t:'bye'}
  *  被控端 → 控制端：{t:'meta',w,h,mode,input}
  */
 
-import { RoomEvent, type Room } from 'livekit-client'
+import { RoomEvent, type Room, type TrackPublishOptions } from 'livekit-client'
 import type { RtcSfuInfo } from '@shared/server-types'
 import { connectSfu, sendData, publishOrReplace } from '../rtc/livekitClient'
 import { rlog, rwarn, rlogThrottled, newTraceId } from '../../../shared/remote-log'
@@ -30,12 +30,37 @@ import { rlog, rwarn, rlogThrottled, newTraceId } from '../../../shared/remote-l
 export type RemoteRole = 'master' | 'slave'
 export type RemoteMode = 'remote' | 'local'
 
+/**
+ * 远程屏幕轨发布参数：画面不允许降清。
+ * - maintain-resolution：带宽受限时保分辨率、优先掉帧，不压分辨率；
+ * - 关闭 simulcast：不额外发布低清副本层；
+ * - 高码率 + 高优先级：屏幕文字/UI 细节优先。
+ */
+const SCREEN_PUBLISH_OPTIONS: TrackPublishOptions = {
+  degradationPreference: 'maintain-resolution',
+  simulcast: false,
+  screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 30, priority: 'high' },
+  videoEncoding: { maxBitrate: 12_000_000, maxFramerate: 30, priority: 'high' }
+}
+
 /** 被控端键鼠注入能力（main 进程探测，透传给控制端提示用） */
 export interface RemoteInputCapability {
   ok: boolean
   backend: string
   detail: string
   screen?: { w: number; h: number }
+}
+
+/** 一块显示器的几何与缩放信息（与主进程 remote-input.ts 口径一致） */
+export interface RemoteDisplayMeta {
+  id: string
+  label: string
+  x: number
+  y: number
+  w: number
+  h: number
+  scaleFactor: number
+  primary: boolean
 }
 
 interface ControlMsg {
@@ -49,13 +74,16 @@ interface ControlMsg {
   h?: number
   mode?: RemoteMode
   input?: RemoteInputCapability
+  id?: string
+  displays?: RemoteDisplayMeta[]
+  active?: string
 }
 
 export interface RemoteSessionCallbacks {
   /** 控制端：收到被控端屏幕/声音流 */
   onRemoteStream?: (stream: MediaStream) => void
-  /** 控制端：收到被控端屏幕元信息（尺寸/模式/键鼠注入能力） */
-  onMeta?: (m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability }) => void
+  /** 控制端：收到被控端屏幕元信息（尺寸/模式/键鼠注入能力/显示器列表） */
+  onMeta?: (m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string }) => void
   /** 连接状态变化；ended=true 表示会话真的结束了（两端都据此收 UI） */
   onState?: (s: { connected: boolean; ended?: boolean }) => void
   onError?: (msg: string) => void
@@ -87,11 +115,20 @@ class RemoteSession {
   private trace = ''
   /** 被控端键鼠注入能力（上报告知控制端） */
   private inputCap: RemoteInputCapability | null = null
+  /** 被控端全部显示器与当前活动显示器 id */
+  private _displays: RemoteDisplayMeta[] = []
+  private _activeDisplay = ''
 
   get isActive(): boolean { return !this.closed && !!this.room }
   get currentRole(): RemoteRole | null { return this.role }
   get screenMeta(): { w: number; h: number } | null { return this._meta }
   private _meta: { w: number; h: number } | null = null
+
+  /** 控制端：被控端显示器列表 */
+  get displays(): RemoteDisplayMeta[] { return this._displays }
+
+  /** 控制端：当前活动显示器 id */
+  get activeDisplayId(): string { return this._activeDisplay }
 
   private say(msg: string, ...rest: unknown[]): void {
     rlog(`session/${this.role ?? '?'}${this.trace ? ' ' + this.trace : ''}`, msg, ...rest)
@@ -127,6 +164,8 @@ class RemoteSession {
     this.callbacks = opts.callbacks ?? {}
     this.closed = false
     this._meta = null
+    this._displays = []
+    this._activeDisplay = ''
     this.trace = newTraceId('slave')
     this.say(`被控端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
@@ -168,12 +207,14 @@ class RemoteSession {
       return false
     }
     this.localStream = screen
+    // 屏幕采集内容偏向文字/UI 细节，提示编码器保清晰度
+    for (const vt of screen.getVideoTracks()) vt.contentHint = 'detail'
     this.say(`屏幕/声音采集成功 tracks=${screen.getTracks().map((t) => t.kind).join('+') || '(无)'}`)
 
     // 3. 发布屏幕/声音轨道到 SFU（控制端订阅）
     try {
       for (const t of screen.getTracks()) {
-        if (t.kind === 'video') await publishOrReplace(room, 'screen', 'video', t)
+        if (t.kind === 'video') await publishOrReplace(room, 'screen', 'video', t, SCREEN_PUBLISH_OPTIONS)
         else if (t.kind === 'audio') await publishOrReplace(room, 'system-audio', 'audio', t)
       }
       this.say('屏幕/声音已发布到 SFU')
@@ -196,6 +237,16 @@ class RemoteSession {
       this.sayErr(`启动键鼠注入失败：${this.inputCap.detail}`)
     }
 
+    // 4.1 枚举被控端全部显示器（供控制端下拉切换）
+    try {
+      const d = await window.pantry.remoteInputListDisplays()
+      this._displays = d?.displays ?? []
+      this._activeDisplay = this._displays.find((x) => x.primary)?.id ?? this._displays[0]?.id ?? ''
+      this.say(`枚举显示器 ${this._displays.length} 块，当前=${this._activeDisplay}`)
+    } catch (e) {
+      this.sayErr(`枚举显示器失败：${(e as Error)?.message ?? e}`)
+    }
+
     // 5. data 通道：收控制端键鼠指令 / bye，上报 meta
     room.on(RoomEvent.DataReceived, (payload, participant) => {
       if (this.closed) return
@@ -209,6 +260,10 @@ class RemoteSession {
       if (msg.t === 'bye') {
         this.say('收到对端 bye → 结束会话')
         this.stop('peer-bye')
+        return
+      }
+      if (msg.t === 'switchDisplay') {
+        void this.switchDisplay(String(msg.id ?? ''))
         return
       }
       rlogThrottled(`session/${this.role}`, 'ctrl', `收到控制指令 t=${msg.t}`, 1000, msg.t === 'move' ? undefined : msg)
@@ -237,6 +292,8 @@ class RemoteSession {
     this.callbacks = opts.callbacks ?? {}
     this.closed = false
     this._meta = null
+    this._displays = []
+    this._activeDisplay = ''
     this.trace = newTraceId('master')
     this.say(`控制端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
@@ -289,7 +346,9 @@ class RemoteSession {
           w: Number(msg.w) || 0,
           h: Number(msg.h) || 0,
           mode: msg.mode === 'remote' ? 'remote' : 'local',
-          input: msg.input
+          input: msg.input,
+          displays: msg.displays,
+          active: msg.active
         })
         return
       }
@@ -311,22 +370,63 @@ class RemoteSession {
     }
   }
 
-  /** 被控端：上报屏幕尺寸/模式/注入能力 */
-  private sendMeta(): void {
-    const payload: ControlMsg = {
-      t: 'meta',
-      w: window.screen.width,
-      h: window.screen.height,
-      mode: this.mode,
-      input: this.inputCap ?? undefined
-    }
-    this.dataToPeer(payload)
-    this.say(`已上报 meta ${payload.w}x${payload.h} 注入=${this.inputCap?.backend ?? '探测中'}`)
+  /** 控制端：请求被控端切换显示器（注入目标 + 采集画面一起切）。 */
+  requestSwitchDisplay(id: string): void {
+    this.sendControl({ t: 'switchDisplay', id })
   }
 
-  /** 控制端：接收被控端 meta（屏幕尺寸/模式/注入能力） */
-  private setMeta(m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability }): void {
+  /** 被控端：切换注入/采集目标显示器：先切主进程注入目标，再重新采集该屏视频轨，最后刷新 meta。 */
+  private async switchDisplay(id: string): Promise<void> {
+    if (!id || id === this._activeDisplay) return
+    const r = await window.pantry.remoteInputSwitchDisplay(id)
+    if (!r.ok || !r.display) {
+      this.sayErr(`切换显示器失败：${r.reason ?? '未知原因'}`)
+      return
+    }
+    this._activeDisplay = r.display.id
+    this.say(`切换显示器 → ${r.display.label} ${r.display.w}x${r.display.h}`)
+    // 重新采集目标屏（音频 loopback 轨保持不变，只替换视频轨）
+    try {
+      const s = await (navigator.mediaDevices as unknown as {
+        getDisplayMedia: (c: MediaStreamConstraints) => Promise<MediaStream>
+      }).getDisplayMedia({ video: { cursor: 'always' }, audio: false } as unknown as MediaStreamConstraints)
+      const track = s.getVideoTracks()[0]
+      if (track && this.room) {
+        track.contentHint = 'detail'
+        const oldVideo = this.localStream?.getVideoTracks() ?? []
+        oldVideo.forEach((t) => { try { t.stop() } catch { /* ignore */ } })
+        oldVideo.forEach((t) => { try { this.localStream?.removeTrack(t) } catch { /* ignore */ } })
+        this.localStream?.addTrack(track)
+        if (!this.localStream) this.localStream = s
+        await publishOrReplace(this.room, 'screen', 'video', track, SCREEN_PUBLISH_OPTIONS)
+      }
+    } catch (e) {
+      this.sayErr(`切换显示器重新采集失败：${(e as Error)?.message ?? e}`)
+    }
+    this.sendMeta()
+  }
+
+  /** 被控端：上报屏幕尺寸/模式/注入能力/显示器列表 */
+  private sendMeta(): void {
+    const sc = this.inputCap?.screen
+    const payload: ControlMsg = {
+      t: 'meta',
+      w: sc?.w || window.screen.width,
+      h: sc?.h || window.screen.height,
+      mode: this.mode,
+      input: this.inputCap ?? undefined,
+      displays: this._displays,
+      active: this._activeDisplay
+    }
+    this.dataToPeer(payload)
+    this.say(`已上报 meta ${payload.w}x${payload.h} 显示器=${this._displays.length} 注入=${this.inputCap?.backend ?? '探测中'}`)
+  }
+
+  /** 控制端：接收被控端 meta（屏幕尺寸/模式/注入能力/显示器列表） */
+  private setMeta(m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string }): void {
     this._meta = { w: m.w, h: m.h }
+    this._displays = m.displays ?? []
+    this._activeDisplay = m.active ?? ''
     this.callbacks.onMeta?.(m)
   }
 
@@ -373,6 +473,8 @@ class RemoteSession {
     this.callbacks = {}
     this._meta = null
     this.inputCap = null
+    this._displays = []
+    this._activeDisplay = ''
   }
 }
 

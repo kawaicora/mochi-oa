@@ -1552,9 +1552,9 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
         console.log(`[screenshot] 截图窗口已关闭`)
       }
       
-      sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, out)
+      sendToMainWindow(getMainWindow(), IpcEvents.screenshotSaved, { path: out, dataUrl })
       console.log(`[screenshot] 保存截图完成事件 -> ${out} ${buf.length}B`)
-      return { ok: true, path: out }
+      return { ok: true, path: out, dataUrl }
     } catch (e) {
       return { ok: false, error: String(e) }
     }

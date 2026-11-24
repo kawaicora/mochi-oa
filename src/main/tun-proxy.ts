@@ -7,9 +7,10 @@
  *   - Linux：要求以 root/sudo 运行客户端；否则尝试 pkexec。
  */
 import { spawn, ChildProcess } from 'node:child_process'
-import { writeFileSync, mkdirSync, existsSync, rmSync, chmodSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, rmSync, chmodSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { app } from 'electron'
 
 export interface TunTarget { host: string; port: number; username?: string; password?: string }
 
@@ -17,29 +18,59 @@ let tunProc: ChildProcess | null = null
 let tunConfigPath = ''
 let tunExePath = ''
 
-/** 定位当前平台 sing-box 二进制。打包后从 process.resourcesPath/sing-box 取；开发态从 resources/sing-box 取。 */
+const SING_VERSION = '1.14.3'
+
+/**
+ * 资源根目录口径（与 branding.ts / remote-input.ts 一致）：
+ * 打包后 extraResources 落位 process.resourcesPath/resources；开发态取项目根 resources，兜底 cwd/resources。
+ * 旧实现只认 process.resourcesPath，dev 态它指向 Electron 自带 resources 目录，导致项目 resources/sing-box 永远找不到。
+ */
+function resourceRoots(): string[] {
+  const roots: string[] = []
+  if (app.isPackaged) {
+    roots.push(path.join(process.resourcesPath, 'resources'))
+  } else {
+    roots.push(path.join(app.getAppPath(), 'resources'))
+    roots.push(path.join(process.cwd(), 'resources'))
+  }
+  return roots
+}
+
+/**
+ * 定位当前平台 sing-box 二进制。磁盘目录口径：
+ *   resources/sing-box/<win|linux|darwin>-<arch>/sing-box-<ver>-<windows|linux|darwin>-<arch>/<exe>
+ * 注意：平台目录用 win（不是 win32），Windows 版本目录名用 windows（不是 win32）。
+ */
 function resolveSingBox(): string | null {
   const plat = process.platform
   const arch = process.arch === 'x64' ? 'amd64' : process.arch
-  const base = (appResourcesPath())
-  let verDir = 'sing-box-1.14.3-' + plat + '-' + arch
-  const candidates = [
-    path.join(base, 'sing-box', `${plat}-${arch}`, verDir),
-    path.join(base, 'sing-box', `${plat}-${arch}`),
-    path.join(base, 'sing-box'),
-  ]
-  for (const d of candidates) {
-    const exe = path.join(d, plat === 'win32' ? 'sing-box.exe' : 'sing-box')
-    console.log("try get singbox path: " + exe)
-    if (existsSync(exe)) { return exe }
+  const platDir = plat === 'win32' ? 'win' : plat
+  const verPlat = plat === 'win32' ? 'windows' : plat
+  const exeName = plat === 'win32' ? 'sing-box.exe' : 'sing-box'
+  const verDir = `sing-box-${SING_VERSION}-${verPlat}-${arch}`
+
+  for (const root of resourceRoots()) {
+    const base = path.join(root, 'sing-box', `${platDir}-${arch}`)
+    const direct = [
+      path.join(base, verDir, exeName),
+      path.join(base, exeName)
+    ]
+    for (const c of direct) {
+      if (existsSync(c)) return c
+    }
+    // 兜底：平台目录下任意版本子目录里找 exe（版本号升级后不必改代码）
+    try {
+      for (const sub of readdirSync(base, { withFileTypes: true })) {
+        if (sub.isDirectory()) {
+          const p = path.join(base, sub.name, exeName)
+          if (existsSync(p)) return p
+        }
+      }
+    } catch { /* base 不存在 */ }
+    const rootExe = path.join(root, 'sing-box', exeName)
+    if (existsSync(rootExe)) return rootExe
   }
   return null
-}
-function appResourcesPath(): string {
-  try {
-    if (typeof process !== 'undefined' && (process as any).resourcesPath) { return (process as any).resourcesPath }
-  } catch { /* ignore */ }
-  return path.join(process.cwd(), 'resources')
 }
 
 /** 生成 sing-box TUN 配置：TUN inbound（auto_route 接管全流量含 UDP）+ http 出站指向服务端代理。 */

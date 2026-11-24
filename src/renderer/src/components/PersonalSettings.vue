@@ -1,28 +1,13 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useServerStore } from '../stores/server'
-import { useAppStore } from '../stores/app'
 import UserAvatar from './UserAvatar.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
 const server = useServerStore()
-const app = useAppStore()
 
-/** 取文件名用于展示（完整路径太长） */
-function shortName(p: string): string {
-  return p.split(/[\\/]/).pop() || p
-}
-
-/** 选择自定义提示音/铃声文件 */
-async function pickSound(which: 'message' | 'call'): Promise<void> {
-  const p = await window.pantry.pickFile()
-  if (!p) return
-  if (which === 'message') await app.saveNotifyCfg({ messageSoundFile: p })
-  else await app.saveNotifyCfg({ callSoundFile: p })
-}
-
-const tab = ref<'info' | 'security' | 'mail'>('info')
+const tab = ref<'info' | 'security'>('info')
 
 // 基本信息
 const nick = ref(server.state.nick || server.state.username || '')
@@ -41,21 +26,7 @@ const pwdSaving = ref(false)
 const pwdError = ref('')
 const pwdTip = ref('')
 
-// 自动下载开关
-const autoDownload = ref(true)
-// 开机自启开关
-const autoLaunch = ref(false)
-/** 开机自启设置失败的原因（注册表被策略拦、自启动文件没权限等） */
-const autoLaunchError = ref('')
-/** 当前是否以管理员/root 运行 */
-const elevated = ref(false)
-
-
-onMounted(async () => {
-  const cfg = await window.pantry.serverGetSettings()
-  autoDownload.value = cfg.autoDownload !== false
-  autoLaunch.value = await window.pantry.getAutoLaunch()
-  elevated.value = await window.pantry.isElevated()
+onMounted(() => {
   // 回填当前用户头像（登录/重启后从服务端 auth:me 载入，不再回退默认）
   avatar.value = server.state.avatar || ''
   // 回填手机号与紧急联系人（拓展信息 JSON）
@@ -69,9 +40,7 @@ onMounted(async () => {
       /* 解析失败保持空白 */
     }
   }
-  void loadMainMail()
 })
-
 
 async function onChangeAvatar(): Promise<void> {
   error.value = ''
@@ -116,28 +85,6 @@ async function onSave(): Promise<void> {
   }
 }
 
-async function onAutoDownloadChange(): Promise<void> {
-  await window.pantry.serverSaveSettings({ autoDownload: autoDownload.value })
-}
-
-async function onAutoLaunchChange(): Promise<void> {
-  const want = !autoLaunch.value  // 先切换：点开关就是要反转当前状态
-  try {
-    const r = await window.pantry.setAutoLaunch(want)
-    autoLaunch.value = r.openAtLogin
-    if (!r.ok || r.openAtLogin !== want) {
-      autoLaunchError.value = r.error
-        ? `设置开机自启失败：${r.error}`
-        : '设置开机自启失败，系统未接受该设置（可能需要管理员权限）'
-    } else {
-      autoLaunchError.value = ''
-    }
-    elevated.value = await window.pantry.isElevated()
-  } catch (e) {
-    autoLaunchError.value = `调用失败：${e instanceof Error ? e.message : String(e)}`
-  }
-}
-
 async function onChangePassword(): Promise<void> {
   if (pwdSaving.value) return
   pwdError.value = ''
@@ -171,73 +118,6 @@ async function onChangePassword(): Promise<void> {
     pwdSaving.value = false
   }
 }
-
-// ---- 主邮件配置（仅 SERVER_ADMIN）----
-const mailServerAdmin = ref(false)
-const mailSource = ref<'env' | 'db'>('db')
-const mailCanEdit = ref(false)
-const mailForm = reactive({ email: '', displayName: '', host: '', port: 465, secure: true, user: '', password: '' })
-const mailSaving = ref(false)
-const mailTip = ref('')
-const mailError = ref('')
-
-async function loadMainMail(): Promise<void> {
-  try {
-    const ack = await window.pantry.serverGetMainMail()
-    if (!ack.ok || !ack.data) {
-      mailError.value = ack.error || '获取主邮件配置失败'
-      return
-    }
-    mailServerAdmin.value = ack.data.serverAdmin
-    mailSource.value = ack.data.source
-    mailCanEdit.value = ack.data.canEdit
-    const c = ack.data.config
-    if (c) {
-      mailForm.email = c.email
-      mailForm.displayName = c.displayName
-      mailForm.host = c.host
-      mailForm.port = c.port
-      mailForm.secure = c.secure
-      mailForm.user = c.user
-      mailForm.password = ''
-    }
-  } catch (e) {
-    mailError.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-async function onSaveMainMail(): Promise<void> {
-  if (mailSaving.value) return
-  mailSaving.value = true
-  mailTip.value = ''
-  mailError.value = ''
-  try {
-    if (!mailForm.email.trim() || !mailForm.host.trim()) {
-      mailError.value = '发信地址与 SMTP 主机必填'
-      return
-    }
-    const ack = await window.pantry.serverSetMainMail({
-      email: mailForm.email.trim(),
-      displayName: mailForm.displayName.trim() || undefined,
-      host: mailForm.host.trim(),
-      port: Number(mailForm.port) || 465,
-      secure: mailForm.secure,
-      user: mailForm.user.trim() || undefined,
-      password: mailForm.password
-    })
-    if (ack.ok) {
-      mailTip.value = '主邮件配置已保存并生效'
-      mailForm.password = ''
-      await loadMainMail()
-    } else {
-      mailError.value = ack.error || '保存失败'
-    }
-  } catch (e) {
-    mailError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    mailSaving.value = false
-  }
-}
 </script>
 
 <template>
@@ -248,7 +128,6 @@ async function onSaveMainMail(): Promise<void> {
       <div class="ps-tabs">
         <button class="ps-tab" :class="{ on: tab === 'info' }" @click="tab = 'info'">基本信息</button>
         <button class="ps-tab" :class="{ on: tab === 'security' }" @click="tab = 'security'">安全</button>
-        <button v-if="mailServerAdmin" class="ps-tab" :class="{ on: tab === 'mail' }" @click="tab = 'mail'">主邮件</button>
       </div>
 
       <div v-if="tab === 'info'" class="modal-body">
@@ -278,8 +157,7 @@ async function onSaveMainMail(): Promise<void> {
         <div v-if="tip" class="ps-tip">{{ tip }}</div>
       </div>
 
-      <div v-else-if="tab === 'security'" class="modal-body">
-        <!-- 安全相关菜单 -->
+      <div v-else class="modal-body">
         <div class="sec-group">
           <div class="sec-title"><i class="fas fa-key"></i>&nbsp;修改密码</div>
           <div class="ps-field">
@@ -302,148 +180,6 @@ async function onSaveMainMail(): Promise<void> {
           <div v-if="pwdError" class="ps-error">{{ pwdError }}</div>
           <div v-if="pwdTip" class="ps-tip">{{ pwdTip }}</div>
         </div>
-<!-- 
-        <div class="sec-group">
-          <div class="sec-title"><i class="fas fa-download"></i>&nbsp;文件下载</div>
-          <label class="switch-row">
-            <span class="switch-label">收到图片 / 视频 / 可预览文件时自动下载到本地</span>
-            <span class="switch" :class="{ on: autoDownload }" @click="onAutoDownloadChange">
-              <i class="switch-knob"></i>
-            </span>
-          </label>
-          <p class="sec-hint">文件夹等不可预览的仍需手动下载</p>
-        </div> -->
-
-        <!-- 通知：消息 / 来电分开控制；闹钟自带铃声不走这里 -->
-        <div class="sec-group">
-          <div class="sec-title"><i class="fas fa-bell"></i>&nbsp;消息通知</div>
-          <label class="switch-row">
-            <span class="switch-label">新消息播放提示音</span>
-            <span class="switch" :class="{ on: app.notifyCfg.notifySound }" @click="app.saveNotifyCfg({ notifySound: !app.notifyCfg.notifySound })">
-              <i class="switch-knob"></i>
-            </span>
-          </label>
-          <div class="ps-field">
-            <label class="ps-label">消息提示音文件</label>
-            <div class="file-row">
-              <span class="file-name" :title="app.notifyCfg.messageSoundFile">
-                {{ app.notifyCfg.messageSoundFile ? shortName(app.notifyCfg.messageSoundFile) : '默认（resources/message.wav）' }}
-              </span>
-              <button class="dt-btn" @click="pickSound('message')">选择</button>
-              <button v-if="app.notifyCfg.messageSoundFile" class="dt-btn" @click="app.saveNotifyCfg({ messageSoundFile: '' })">恢复默认</button>
-            </div>
-          </div>
-          <p class="sec-hint">自定义文件丢失会自动回退默认提示音</p>
-        </div>
-
-        <div class="sec-group">
-          <div class="sec-title"><i class="fas fa-phone-alt"></i>&nbsp;来电 / 会议</div>
-          <label class="switch-row">
-            <span class="switch-label">来电与会议邀请播放铃声</span>
-            <span class="switch" :class="{ on: app.notifyCfg.callSound }" @click="app.saveNotifyCfg({ callSound: !app.notifyCfg.callSound })">
-              <i class="switch-knob"></i>
-            </span>
-          </label>
-          <div class="ps-field">
-            <label class="ps-label">来电铃声文件</label>
-            <div class="file-row">
-              <span class="file-name" :title="app.notifyCfg.callSoundFile">
-                {{ app.notifyCfg.callSoundFile ? shortName(app.notifyCfg.callSoundFile) : '默认（resources/calling.mp3）' }}
-              </span>
-              <button class="dt-btn" @click="pickSound('call')">选择</button>
-              <button v-if="app.notifyCfg.callSoundFile" class="dt-btn" @click="app.saveNotifyCfg({ callSoundFile: '' })">恢复默认</button>
-            </div>
-          </div>
-          <p class="sec-hint">接听 / 拒接 / 对方取消时会自动停铃；单个群或个人可在聊天窗口标题栏单独设置铃声</p>
-        </div>
-
-        <div class="sec-group">
-          <div class="sec-title"><i class="fas fa-bell-slash"></i>&nbsp;免打扰</div>
-          <label class="switch-row">
-            <span class="switch-label">全局免打扰（静音所有消息提示音）</span>
-            <span class="switch" :class="{ on: app.notifyCfg.dnd }" @click="app.saveNotifyCfg({ dnd: !app.notifyCfg.dnd })">
-              <i class="switch-knob"></i>
-            </span>
-          </label>
-          <p class="sec-hint">
-            来电铃声不受免打扰影响（避免漏接）；单独屏蔽某个群或个人，在该聊天窗口的标题栏里切换。
-            <template v-if="app.notifyCfg.dndConvs.length">已单独免打扰 {{ app.notifyCfg.dndConvs.length }} 个会话。</template>
-          </p>
-        </div>
-
-        <div class="sec-group">
-          <div class="sec-title"><i class="fas fa-rocket"></i>&nbsp;启动</div>
-          <label class="switch-row">
-            <span class="switch-label">开机时自动启动并进入后台托盘</span>
-            <span class="switch" :class="{ on: autoLaunch }" @click="onAutoLaunchChange">
-              <i class="switch-knob"></i>
-            </span>
-          </label>
-          <p class="sec-hint">
-            Windows 写入注册表启动项，Linux 写入 ~/.config/autostart（并注册 systemd 用户服务），
-            macOS 写入系统登录项；开机后静默驻留托盘，不弹窗。
-          </p>
-          <p v-if="!elevated" class="sec-hint" style="color:var(--dt-text-3)">
-            <i class="fas fa-shield-alt"></i> 当前非管理员运行，设置开机自启时会请求系统授权
-          </p>
-          <p v-else class="sec-hint" style="color:#52c41a">
-            <i class="fas fa-shield-alt"></i> 已以管理员权限运行
-          </p>
-          <p v-if="autoLaunchError" class="sec-hint sec-hint-error">{{ autoLaunchError }}</p>
-        </div>
-      </div>
-
-      <div v-else class="modal-body">
-        <div v-if="!mailServerAdmin" class="mail-banner">
-          <i class="fas fa-shield-alt"></i>&nbsp;仅服务器管理员（SERVER_ADMIN）可配置主邮件
-        </div>
-        <template v-else>
-          <div v-if="mailSource === 'env'" class="mail-env-tip">
-            <i class="fas fa-server"></i>&nbsp;主邮件已由服务器环境配置（.env / Docker 的 MAIL_* 变量），如需修改请在服务器端编辑 .env 后重启服务。
-          </div>
-          <div class="mail-grid">
-            <div class="ps-field">
-              <label class="ps-label">发信地址</label>
-              <input v-model="mailForm.email" class="ps-input" placeholder="admin@example.com" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">发件人名称</label>
-              <input v-model="mailForm.displayName" class="ps-input" placeholder="如 OA 通知" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">SMTP 主机</label>
-              <input v-model="mailForm.host" class="ps-input" placeholder="smtp.example.com" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">SMTP 端口</label>
-              <input v-model.number="mailForm.port" class="ps-input" placeholder="465" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">SMTP 用户名</label>
-              <input v-model="mailForm.user" class="ps-input" placeholder="留空默认同发信地址" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">SMTP 密码</label>
-              <input v-model="mailForm.password" type="password" class="ps-input" :placeholder="mailCanEdit ? '留空则保持当前密码' : '（已隐藏）'" :readonly="!mailCanEdit" />
-            </div>
-            <div class="ps-field">
-              <label class="ps-label">加密方式</label>
-              <label class="switch-row" :class="{ disabled: !mailCanEdit }">
-                <span class="switch-label">SSL / TLS 加密</span>
-                <span class="switch" :class="{ on: mailForm.secure }" @click="mailCanEdit && (mailForm.secure = !mailForm.secure)">
-                  <i class="switch-knob"></i>
-                </span>
-              </label>
-            </div>
-          </div>
-          <div class="sec-row" v-if="mailCanEdit">
-            <button class="dt-btn dt-btn-primary" :disabled="mailSaving" @click="onSaveMainMail">
-              {{ mailSaving ? '保存中…' : '保存并启用' }}
-            </button>
-          </div>
-          <div v-if="mailError" class="ps-error">{{ mailError }}</div>
-          <div v-if="mailTip" class="ps-tip">{{ mailTip }}</div>
-        </template>
       </div>
 
       <div class="modal-foot">
@@ -562,101 +298,5 @@ async function onSaveMainMail(): Promise<void> {
 }
 .sec-row {
   margin-top: 4px;
-}
-.switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  cursor: pointer;
-}
-.switch-label {
-  font-size: 13px;
-  color: var(--dt-text);
-  flex: 1;
-}
-.switch {
-  position: relative;
-  width: 42px;
-  height: 22px;
-  border-radius: 11px;
-  background: #d5d9e0;
-  flex-shrink: 0;
-  transition: background 0.2s;
-}
-.switch.on {
-  background: var(--dt-primary);
-}
-.switch-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: left 0.2s;
-}
-.switch.on .switch-knob {
-  left: 22px;
-}
-.sec-hint {
-  font-size: 12px;
-  color: var(--dt-text-4);
-  margin-top: 4px;
-}
-.sec-hint-error {
-  color: #f53f3f;
-}
-.mail-banner {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 6px;
-  background: var(--dt-bg-hover, #f5f6f8);
-  color: var(--dt-text-2);
-  font-size: 13px;
-}
-.mail-env-tip {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 6px;
-  background: #fff7e6;
-  color: #8a6d3b;
-  font-size: 13px;
-  margin-bottom: 12px;
-}
-.mail-grid {
-  display: flex;
-  flex-direction: column;
-}
-.switch-row.disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-/* 自定义音频文件行 */
-.file-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.file-name {
-  flex: 1;
-  min-width: 0;
-  height: 36px;
-  line-height: 36px;
-  padding: 0 12px;
-  border: 1px dashed var(--dt-border);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--dt-text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 </style>

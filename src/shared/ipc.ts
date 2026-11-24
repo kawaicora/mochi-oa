@@ -391,7 +391,12 @@ export const IpcChannels = {
   // 远程控制输入注入（被控端 main）：start 设键鼠模式，event 分发控制指令，stop 复位+结束
   remoteInputStart: 'remote:input:start',
   remoteInputStop: 'remote:input:stop',
-  remoteInputEvent: 'remote:input:event'
+  remoteInputEvent: 'remote:input:event',
+  remoteInputListDisplays: 'remote:input:listDisplays',
+  remoteInputSwitchDisplay: 'remote:input:switchDisplay',
+  // 全局快捷键：读取/保存配置（含冲突检测）
+  hotkeyGet: 'hotkey:get',
+  hotkeySet: 'hotkey:set'
 } as const
 
 /** 通知管理器：目标窗口 + 参数（点击通知按此打开窗口） */
@@ -524,7 +529,9 @@ export const IpcEvents = {
   devEnumerate: 'dev:event:enumerate',
   devStart: 'dev:event:start',
   devStop: 'dev:event:stop',
-  devExecResult: 'dev:event:execResult'
+  devExecResult: 'dev:event:execResult',
+  /** 全局快捷键触发：{ action: HotkeyAction } */
+  hotkeyAction: 'hotkey:event:action'
 } as const
 
 /** 独立截屏工具栏窗口固定尺寸（DIP）——高度贴近内容(按钮~23px+上下padding)，消除上下空余 */

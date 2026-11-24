@@ -23,25 +23,35 @@
  *  - Windows 强制解冻 + 显示鼠标（ClipCursor(null) + ShowCursor(true)）多次兜底。
  */
 
-import { app } from 'electron'
+import { app, screen } from 'electron'
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { platform } from 'node:os'
 import { rlog, rwarn, rerr, rlogThrottled } from '../shared/remote-log'
 import { DOM_TO_EVDEV, DOM_TO_MAC, mapKey } from './remote-input-keymap'
 import { UINPUT_PY } from './remote-input-uinput'
 import { CGEVENT_JXA } from './remote-input-cgevent'
+import {
+  type RemoteDisplayInfo,
+  type InputPlatform,
+  displayPhysicalSize as displayPhysicalSizePure,
+  transformPoint as transformPointPure
+} from './remote-input-geometry'
 
 const S = 'input'
 const IS_WIN = platform() === 'win32'
 const IS_LINUX = platform() === 'linux'
 const IS_DARWIN = platform() === 'darwin'
+const PLATFORM: InputPlatform = IS_WIN ? 'win32' : IS_DARWIN ? 'darwin' : 'linux'
 
 export type InputBackend =
+  | 'windows-rust'
   | 'windows-powershell'
+  | 'linux-rust-uinput'
   | 'linux-uinput'
   | 'linux-xdotool'
+  | 'macos-rust-cgevent'
   | 'macos-cgevent'
   | 'none'
 
@@ -63,6 +73,42 @@ interface RemoteInputCommand {
   c?: number
   btn?: string
 }
+
+const FALLBACK_DISPLAY: RemoteDisplayInfo = {
+  id: '0', label: '主屏', x: 0, y: 0, w: 1920, h: 1080, scaleFactor: 1, primary: true
+}
+
+/** 枚举全部显示器；枚举失败时回退单块主屏描述。 */
+export function listDisplays(): RemoteDisplayInfo[] {
+  try {
+    const primaryId = screen.getPrimaryDisplay().id
+    const all = screen.getAllDisplays().map((d, i) => ({
+      id: String(d.id),
+      label: `显示器 ${i + 1}`,
+      x: Math.round(d.bounds.x),
+      y: Math.round(d.bounds.y),
+      w: Math.round(d.bounds.width),
+      h: Math.round(d.bounds.height),
+      scaleFactor: d.scaleFactor || 1,
+      primary: d.id === primaryId
+    }))
+    return all.length ? all : [FALLBACK_DISPLAY]
+  } catch (e) {
+    rerr(S, `枚举显示器失败：${e instanceof Error ? e.message : String(e)}`)
+    return [FALLBACK_DISPLAY]
+  }
+}
+
+/** 按 id 找显示器；找不到回退主屏/第一块。 */
+function resolveDisplay(id?: string | null): RemoteDisplayInfo {
+  const all = listDisplays()
+  if (id) {
+    const hit = all.find((d) => d.id === id)
+    if (hit) return hit
+  }
+  return all.find((d) => d.primary) ?? all[0] ?? FALLBACK_DISPLAY
+}
+
 
 // ─────────────────────────── Windows：PowerShell + user32 ───────────────────────────
 // 注入分支保持原样，只补一行握手输出与 ping（便于主进程确认后端就绪 + 日志可读）。
@@ -132,6 +178,7 @@ while ($true) {
       }
       'clipfree' { [void][U32]::ClipCursor([IntPtr]::Zero) }
       'show' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
+      'restore' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
       'ping' { [Console]::Out.WriteLine('{"ok":true,"pong":true}') }
       default { [Console]::Out.WriteLine('{"ok":false,"reason":"unknown cmd"}') }
     }
@@ -288,6 +335,80 @@ function helperSend(cmd: RemoteInputCommand): boolean {
   }
 }
 
+// ─────────────────────────── 内置 Rust 常驻助手（首选后端）───────────────────────────
+// 产物由 scripts/build-helper.mjs 落到 resources/remote-input-helper/<plat>-<arch>/，
+// 打包后经 extraResources 随包分发。路径口径与 branding.ts 一致：
+// 打包后 process.resourcesPath/resources；开发态 app.getAppPath()/resources（兜底 cwd/resources）。
+
+/** 解析当前平台 Rust 助手二进制；不存在返回 null（回退旧后端）。 */
+function resolveHelper(): string | null {
+  const plat = process.platform
+  const arch = process.arch === 'x64' ? 'amd64' : process.arch
+  const bin = plat === 'win32' ? 'remote-input-helper.exe' : 'remote-input-helper'
+  const roots: string[] = []
+  if (app.isPackaged) {
+    roots.push(join(process.resourcesPath, 'resources', 'remote-input-helper', `${plat}-${arch}`))
+  } else {
+    roots.push(join(app.getAppPath(), 'resources', 'remote-input-helper', `${plat}-${arch}`))
+    roots.push(join(process.cwd(), 'resources', 'remote-input-helper', `${plat}-${arch}`))
+  }
+  for (const r of roots) {
+    const p = join(r, bin)
+    try { if (existsSync(p)) return p } catch { /* ignore */ }
+  }
+  return null
+}
+
+/** 停掉当前 helper 常驻进程（回退旧后端前清理）。 */
+function stopHelperProc(): void {
+  if (helper) {
+    try { helper.stdin?.end() } catch { /* ignore */ }
+    try { helper.kill() } catch { /* ignore */ }
+    helper = null
+  }
+  helperHandshake = null
+}
+
+/** 启动内置 Rust 助手并等握手；失败（缺二进制/启动报错/握手超时）返回 false。 */
+async function startRustHelper(w: number, h: number): Promise<boolean> {
+  const exe = resolveHelper()
+  if (!exe) {
+    rlog(S, '未找到内置 Rust 助手二进制，回退旧后端')
+    return false
+  }
+  if (process.platform !== 'win32') { try { chmodSync(exe, 0o755) } catch { /* ignore */ } }
+  rlog(S, `启动 Rust 键鼠助手：${exe} ${w} ${h}`)
+  let p: ChildProcess
+  try {
+    p = spawn(exe, [String(w), String(h)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+  } catch (e) {
+    rerr(S, `启动 Rust 助手失败：${e instanceof Error ? e.message : String(e)}`)
+    return false
+  }
+  helper = p
+  helperHandshake = null
+  p.stdin?.setDefaultEncoding('utf8')
+  attachHelperOutput(p, 'rust-helper')
+  await waitHandshake(5000)
+  if (handshakeOk()) {
+    helperBackend = IS_WIN ? 'windows-rust' : IS_LINUX ? 'linux-rust-uinput' : 'macos-rust-cgevent'
+    return true
+  }
+  return false
+}
+
+/** Windows 边界/光标的模式指令：按当前后端路由（PowerShell 旧后端或 Rust 助手）。 */
+function sendWinMode(cmd: RemoteInputCommand): void {
+  if (backend === 'windows-powershell') winSend(cmd)
+  else if (backend === 'windows-rust') helperSend(cmd)
+}
+
+/** Windows 键鼠指令：按当前后端路由。 */
+function helperOrWinSend(cmd: RemoteInputCommand): void {
+  if (backend === 'windows-powershell') winSend(cmd)
+  else helperSend(cmd)
+}
+
 // ─────────────────────────── Linux ───────────────────────────
 
 /** 首选后端：Python3 + uinput（Wayland / X11 通用，零编译） */
@@ -369,6 +490,8 @@ async function startMacCgEvent(): Promise<boolean> {
 let backend: InputBackend = 'none'
 let capability: InputCapability = { ok: false, backend: 'none', detail: '尚未开始远程会话' }
 let screenSize = { w: 1920, h: 1080 }
+/** 当前注入目标显示器（默认主屏）；多屏切换时只改几何，不重启注入进程 */
+let activeDisplay: RemoteDisplayInfo = resolveDisplay(null)
 let cursorLocked = false
 /** 按下中（未抬起）的键/钮，断线复位时补发 Up */
 const pendingButtons = new Set<'left' | 'right' | 'middle'>()
@@ -378,23 +501,58 @@ export function remoteInputCapability(): InputCapability {
   return { ...capability }
 }
 
+/** 列出全部显示器（供控制端下拉切换）。 */
+export function remoteInputListDisplays(): RemoteDisplayInfo[] {
+  return listDisplays()
+}
+
+/** 当前注入目标显示器。 */
+export function remoteInputActiveDisplay(): RemoteDisplayInfo {
+  return activeDisplay
+}
+
+/** 切换注入目标显示器：只改几何与坐标换算，不重启注入常驻进程。 */
+export function remoteInputSwitchDisplay(id: string): { ok: boolean; display?: RemoteDisplayInfo; reason?: string } {
+  const next = resolveDisplay(id)
+  activeDisplay = next
+  const phys = displayPhysicalSizePure(next, PLATFORM)
+  screenSize = phys
+  rlog(S, `切换注入目标显示器 id=${next.id} ${next.label} ${next.w}x${next.h} sf=${next.scaleFactor}`)
+  return { ok: true, display: next }
+}
+
 /**
  * 会话开始：选后端 + 建常驻进程 + 设键鼠模式。
  * 返回本次输入注入的能力描述（控制端据此提示"对端键鼠不可用：原因…"）。
  */
-export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: number; h: number }): Promise<InputCapability> {
+export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: number; h: number }, displayId?: string | null): Promise<InputCapability> {
   remoteInputReset()
-  if (screen && screen.w > 0 && screen.h > 0) screenSize = { w: Math.round(screen.w), h: Math.round(screen.h) }
-  rlog(S, `开始远程输入会话 mode=${mode} screen=${screenSize.w}x${screenSize.h} platform=${platform()}`)
+  activeDisplay = resolveDisplay(displayId)
+  const phys = displayPhysicalSizePure(activeDisplay, PLATFORM)
+  screenSize = (phys.w > 0 && phys.h > 0) ? phys : { w: Math.round(screen?.w || 1920), h: Math.round(screen?.h || 1080) }
+  rlog(S, `开始远程输入会话 mode=${mode} screen=${screenSize.w}x${screenSize.h} display=${activeDisplay.id} platform=${platform()}`)
 
   if (IS_WIN) {
-    backend = 'windows-powershell'
-    helperHandshake = null
-    ensureWinProc()
-    await waitHandshake(3000)
-    capability = { ok: true, backend, detail: 'Windows 原生 SendInput', screen: { ...screenSize } }
+    const rustOk = await startRustHelper(screenSize.w, screenSize.h)
+    if (rustOk) {
+      backend = 'windows-rust'
+      capability = { ok: true, backend, detail: 'Rust 原生 SendInput 注入', screen: { ...screenSize } }
+    } else {
+      stopHelperProc()
+      backend = 'windows-powershell'
+      helperHandshake = null
+      ensureWinProc()
+      await waitHandshake(3000)
+      capability = { ok: true, backend, detail: 'Windows 原生 SendInput（PowerShell 兜底）', screen: { ...screenSize } }
+    }
   } else if (IS_LINUX) {
-    const okUinput = await startLinuxUinput(screenSize.w, screenSize.h)
+    const rustOk = await startRustHelper(screenSize.w, screenSize.h)
+    if (rustOk) {
+      backend = 'linux-rust-uinput'
+      capability = { ok: true, backend, detail: 'Rust uinput 虚拟键鼠（Wayland / X11 通用）', screen: { ...screenSize } }
+    } else {
+      stopHelperProc()
+      const okUinput = await startLinuxUinput(screenSize.w, screenSize.h)
     if (okUinput) {
       backend = 'linux-uinput'
       capability = { ok: true, backend, detail: 'uinput 虚拟键鼠（Wayland / X11 通用）', screen: { ...screenSize } }
@@ -416,15 +574,23 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
         backend = 'none'
         capability = { ok: false, backend, detail: `uinput 与 xdotool 都不可用：${reason}`, screen: { ...screenSize } }
       }
+      }
     }
   } else if (IS_DARWIN) {
-    const ok = await startMacCgEvent()
-    if (ok) {
-      backend = 'macos-cgevent'
-      capability = { ok: true, backend, detail: 'CGEvent 注入（需辅助功能权限）' }
+    const rustOk = await startRustHelper(screenSize.w, screenSize.h)
+    if (rustOk) {
+      backend = 'macos-rust-cgevent'
+      capability = { ok: true, backend, detail: 'Rust CGEvent 注入（需辅助功能权限）' }
     } else {
-      backend = 'none'
-      capability = { ok: false, backend, detail: helperHandshake?.reason || 'CGEvent 助手不可用' }
+      stopHelperProc()
+      const ok = await startMacCgEvent()
+      if (ok) {
+        backend = 'macos-cgevent'
+        capability = { ok: true, backend, detail: 'CGEvent 注入（需辅助功能权限）' }
+      } else {
+        backend = 'none'
+        capability = { ok: false, backend, detail: helperHandshake?.reason || 'CGEvent 助手不可用' }
+      }
     }
   } else {
     backend = 'none'
@@ -440,14 +606,15 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
     effMode = 'local'
   }
   if (IS_WIN) {
-    // 兜底复位上一会话遗留的隐藏状态：被控端光标始终可见，代码路径里不再提供隐藏指令
-    winSend({ t: 'show' })
+    // 先抓拍会话开始时的原始光标状态作为断开恢复基线，再强制显示
+    if (backend === 'windows-rust') helperSend({ t: 'record' })
+    sendWinMode({ t: 'show' })
   }
   if (effMode === 'remote') {
-    if (!cursorLocked) { winSend({ t: 'cliplock' }); cursorLocked = true }
+    if (!cursorLocked) { sendWinMode({ t: 'cliplock' }); cursorLocked = true }
     // 光标必须保留在屏幕/画面帧里，控制端直接看到远程鼠标位置，不隐藏被控端光标。
   } else if (IS_WIN) {
-    winSend({ t: 'clipfree' })
+    sendWinMode({ t: 'clipfree' })
     cursorLocked = false
   }
   return { ...capability }
@@ -458,9 +625,13 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
 export function remoteInputMove(x: number, y: number): void {
   const px = Math.round(x)
   const py = Math.round(y)
-  rlogThrottled(S, 'move', `鼠标移动到 ${px},${py}`, 1000)
-  if (backend === 'windows-powershell') { winSend({ t: 'move', x: px, y: py }); return }
-  if (backend === 'linux-uinput' || backend === 'macos-cgevent') { helperSend({ t: 'move', x: px, y: py }); return }
+  const pt = transformPointPure(activeDisplay, px, py, PLATFORM)
+  rlogThrottled(S, 'move', `鼠标移动到 ${px},${py} → 注入 ${pt.x},${pt.y}`, 1000)
+  if (backend === 'windows-powershell') { winSend({ t: 'move', x: pt.x, y: pt.y }); return }
+  if (backend === 'windows-rust' || backend === 'macos-rust-cgevent' || backend === 'macos-cgevent') {
+    helperSend({ t: 'move', x: pt.x, y: pt.y }); return
+  }
+  if (backend === 'linux-rust-uinput' || backend === 'linux-uinput') { helperSend({ t: 'move', x: px, y: py }); return }
   if (backend === 'linux-xdotool') linuxXdotoolMove(px, py)
 }
 
@@ -473,7 +644,10 @@ export function remoteInputDown(btn: string): void {
   pendingButtons.add(b)
   rlog(S, `鼠标按下 ${b}`)
   if (backend === 'windows-powershell') { winSend({ t: b === 'left' ? 'ldown' : b === 'right' ? 'rdown' : 'mdown' }); return }
-  if (backend === 'linux-uinput') { helperSend({ t: 'down', btn: b }); return }
+  if (
+    backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
+    backend === 'linux-uinput'
+  ) { helperSend({ t: 'down', btn: b }); return }
   if (backend === 'macos-cgevent') { helperSend({ t: 'down', btn: b === 'left' ? '0' : b === 'right' ? '1' : '2' }); return }
   if (backend === 'linux-xdotool') linuxXdotoolBtn(b, true)
 }
@@ -483,7 +657,10 @@ export function remoteInputUp(btn: string): void {
   pendingButtons.delete(b)
   rlog(S, `鼠标抬起 ${b}`)
   if (backend === 'windows-powershell') { winSend({ t: b === 'left' ? 'lup' : b === 'right' ? 'rup' : 'mup' }); return }
-  if (backend === 'linux-uinput') { helperSend({ t: 'up', btn: b }); return }
+  if (
+    backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
+    backend === 'linux-uinput'
+  ) { helperSend({ t: 'up', btn: b }); return }
   if (backend === 'macos-cgevent') { helperSend({ t: 'up', btn: b === 'left' ? '0' : b === 'right' ? '1' : '2' }); return }
   if (backend === 'linux-xdotool') linuxXdotoolBtn(b, false)
 }
@@ -492,7 +669,10 @@ export function remoteInputScroll(delta: number): void {
   const d = Math.round(delta)
   rlogThrottled(S, 'scroll', `滚轮 d=${d}`, 300)
   if (backend === 'windows-powershell') { winSend({ t: 'scroll', d }); return }
-  if (backend === 'linux-uinput' || backend === 'macos-cgevent') { helperSend({ t: 'scroll', d }); return }
+  if (
+    backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
+    backend === 'linux-uinput' || backend === 'macos-cgevent'
+  ) { helperSend({ t: 'scroll', d }); return }
   if (backend === 'linux-xdotool') linuxXdotoolScroll(d)
 }
 
@@ -500,17 +680,20 @@ export function remoteInputKeyDown(code: number): void {
   if (!(code > 0)) return
   pendingKeys.add(code)
   rlog(S, `键盘按下 keyCode=${code}`)
-  if (backend === 'windows-powershell') { winSend({ t: 'kdown', k: code }); return }
-  if (backend === 'linux-uinput') {
-    const m = mapKey(DOM_TO_EVDEV, code, 'evdev')
-    if (!m.ok) { rwarn(S, `键盘注入跳过：${m.reason}`); return }
-    helperSend({ t: 'kdown', c: m.code })
+  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+    helperOrWinSend({ t: 'kdown', k: code })
     return
   }
-  if (backend === 'macos-cgevent') {
+  if (backend === 'linux-uinput' || backend === 'linux-rust-uinput') {
+    const m = mapKey(DOM_TO_EVDEV, code, 'evdev')
+    if (!m.ok) { rwarn(S, `键盘注入跳过：${m.reason}`); return }
+    helperSend({ t: 'kdown', k: m.code })
+    return
+  }
+  if (backend === 'macos-cgevent' || backend === 'macos-rust-cgevent') {
     const m = mapKey(DOM_TO_MAC, code, 'macOS 虚拟键码')
     if (!m.ok) { rwarn(S, `键盘注入跳过：${m.reason}`); return }
-    helperSend({ t: 'kdown', c: m.code })
+    helperSend({ t: 'kdown', k: m.code })
     return
   }
   if (backend === 'linux-xdotool') linuxXdotoolKey(code, true)
@@ -520,20 +703,29 @@ export function remoteInputKeyUp(code: number): void {
   if (!(code > 0)) return
   pendingKeys.delete(code)
   rlog(S, `键盘抬起 keyCode=${code}`)
-  if (backend === 'windows-powershell') { winSend({ t: 'kup', k: code }); return }
-  if (backend === 'linux-uinput') {
-    const m = mapKey(DOM_TO_EVDEV, code, 'evdev')
-    if (!m.ok) return
-    helperSend({ t: 'kup', c: m.code })
+  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+    helperOrWinSend({ t: 'kup', k: code })
     return
   }
-  if (backend === 'macos-cgevent') {
+  if (backend === 'linux-uinput' || backend === 'linux-rust-uinput') {
+    const m = mapKey(DOM_TO_EVDEV, code, 'evdev')
+    if (!m.ok) return
+    helperSend({ t: 'kup', k: m.code })
+    return
+  }
+  if (backend === 'macos-cgevent' || backend === 'macos-rust-cgevent') {
     const m = mapKey(DOM_TO_MAC, code, 'macOS 虚拟键码')
     if (!m.ok) return
-    helperSend({ t: 'kup', c: m.code })
+    helperSend({ t: 'kup', k: m.code })
     return
   }
   if (backend === 'linux-xdotool') linuxXdotoolKey(code, false)
+}
+
+/** 控制端指针滑入远程窗口：强制显示被控端光标（保证采集帧里看得到远程鼠标）。 */
+export function remoteInputShowCursor(): void {
+  if (backend === 'windows-powershell') { winSend({ t: 'show' }); return }
+  if (backend === 'windows-rust') { helperSend({ t: 'show' }); return }
 }
 
 /** 统一分发一条控制端经 DataChannel 发来的控制指令（{ t, ... }）。 */
@@ -546,13 +738,14 @@ export function remoteInputDispatch(evt: Record<string, unknown>): void {
     case 'scroll': remoteInputScroll(Number(evt.d) || 0); break
     case 'kdown': remoteInputKeyDown(Number(evt.k) || 0); break
     case 'kup': remoteInputKeyUp(Number(evt.k) || 0); break
+    case 'cursorShow': remoteInputShowCursor(); break
     default: rwarn(S, `未知控制指令：${JSON.stringify(evt).slice(0, 200)}`); break
   }
 }
 
 /**
- * 断线/结束复位：补发所有「按下中」的 Up + Windows 强制解冻并显示鼠标（多执行几次兜底）。
- * 宁可重复执行，也要保证本地鼠标可用。
+ * 断线/结束复位：补发所有「按下中」的 Up，解冻光标边界，并按会话开始时抓拍的
+ * 基线恢复光标可见性（不把强制显示遗留到会话结束后）。
  */
 export function remoteInputReset(): void {
   if (pendingButtons.size || pendingKeys.size) {
@@ -562,10 +755,26 @@ export function remoteInputReset(): void {
   for (const code of [...pendingKeys]) remoteInputKeyUp(code)
   pendingButtons.clear()
   pendingKeys.clear()
-  if (backend === 'windows-powershell') {
-    winSend({ t: 'clipfree' })
-    winSend({ t: 'show' })
-    winSend({ t: 'show' })
+  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+    sendWinMode({ t: 'clipfree' })
+    // 恢复会话开始时记录的光标状态
+    sendWinMode({ t: 'restore' })
+  }
+  cursorLocked = false
+}
+
+/**
+ * 快捷键解锁被控端本地鼠标：解冻光标边界 + 强制显示光标 + 复位按下中。
+ * 仅解锁当前会话，不结束会话，也不改动断开时的恢复基线。
+ */
+export function remoteInputUnlock(): void {
+  for (const b of [...pendingButtons]) remoteInputUp(b)
+  for (const code of [...pendingKeys]) remoteInputKeyUp(code)
+  pendingButtons.clear()
+  pendingKeys.clear()
+  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+    sendWinMode({ t: 'clipfree' })
+    sendWinMode({ t: 'show' })
   }
   cursorLocked = false
 }

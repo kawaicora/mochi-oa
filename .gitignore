@@ -14,3 +14,7 @@ electron.vite.config.*.mjs
 .ai-workspace
 .ringtestcur.txt
 
+# Rust 键鼠助手编译产物（源码在 plugins/remote-input-helper/，产物由打包脚本生成）
+resources/remote-input-helper/
+plugins/remote-input-helper/target/
+

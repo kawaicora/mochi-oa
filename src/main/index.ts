@@ -4,9 +4,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
 import { registerPermissionHandlers } from './permissions'
-import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputShutdown } from './remote-input'
+import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputUnlock, remoteInputShutdown, remoteInputListDisplays, remoteInputSwitchDisplay, remoteInputActiveDisplay } from './remote-input'
 import { clearSystemProxy } from './system-proxy'
-import { IpcChannels, type NotifTarget } from '../shared/ipc'
+import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
+import { hotkey } from './hotkey'
+import { loadHotkeyConfig, saveHotkeyConfig, detectInternalConflicts } from './hotkey-config'
+import type { HotkeyAction, HotkeyConfig, HotkeyItem } from '../shared/hotkey'
 import { serverClient } from './net/server-client'
 import { loadServerConfig } from './server-config'
 import { setupTray, destroyTray, stopFlashTray } from './tray'
@@ -200,8 +203,10 @@ app.whenReady().then(() => {
           types: ['screen', 'window'],
           thumbnailSize: { width: 0, height: 0 }
         })
+        const activeId = remoteInputActiveDisplay().id
         const primaryId = String(screen.getPrimaryDisplay().id)
         const match =
+          sources.find((s) => s.display_id === activeId) ||
           sources.find((s) => s.display_id === primaryId && s.name.toLowerCase().includes('screen')) ||
           sources.find((s) => s.display_id === primaryId) ||
           sources[0]
@@ -291,6 +296,35 @@ app.whenReady().then(() => {
     remoteInputStop()
     return { ok: true }
   })
+  ipcMain.handle(IpcChannels.remoteInputListDisplays, () => {
+    return { ok: true, displays: remoteInputListDisplays() }
+  })
+  ipcMain.handle(IpcChannels.remoteInputSwitchDisplay, (_e, id: unknown) => {
+    return remoteInputSwitchDisplay(typeof id === 'string' ? id : '')
+  })
+
+  // ── 全局快捷键 ──
+  function dispatchHotkey(action: HotkeyAction): void {
+    if (action === 'remoteUnlock') {
+      // 被控端：解冻本地被 ClipCursor 锁定的鼠标 + 显示光标（并复位按下中的键/钮）
+      remoteInputUnlock()
+      return
+    }
+    if (action === 'screenshot') {
+      const w = getMainWindow()
+      if (w && !w.isDestroyed()) w.webContents.send(IpcEvents.hotkeyAction, { action })
+    }
+  }
+  ipcMain.handle(IpcChannels.hotkeyGet, () => {
+    const config: HotkeyConfig = loadHotkeyConfig()
+    return { ok: true, config, conflicts: detectInternalConflicts(config) }
+  })
+  ipcMain.handle(IpcChannels.hotkeySet, (_e, patch: unknown) => {
+    const p = (patch ?? {}) as Partial<Record<HotkeyAction, Partial<HotkeyItem>>>
+    const config = saveHotkeyConfig(p)
+    const { conflicts } = hotkey.registerAll(config, dispatchHotkey)
+    return { ok: conflicts.length === 0, config, conflicts }
+  })
 
   registerServerIpcHandlers(getMainWindow)
   checkUpdateJoin("startup").catch((err) => {
@@ -298,6 +332,8 @@ app.whenReady().then(() => {
   })
   createWindow()
   initNotifManager(showMainWindow, getMainWindow)
+  // 启动时按配置注册全局快捷键（缺失则生成默认值落盘）
+  hotkey.registerAll(loadHotkeyConfig(), dispatchHotkey)
 
   // 托盘常驻
   trayEnabled = setupTray({
@@ -337,5 +373,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  hotkey.unbindAll()
   destroyTray()
 })

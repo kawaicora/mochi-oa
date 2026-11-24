@@ -9,7 +9,7 @@ import GroupSettings from './GroupSettings.vue'
 import MsgVideo from './MsgVideo.vue'
 import MsgAudio from './MsgAudio.vue'
 import UserAvatar from './UserAvatar.vue'
-import type { ServerChatMessage } from '@shared/server-types'
+import type { ServerChatMessage, ConversationItem } from '@shared/server-types'
 import { convKey, type NotifyScope } from '../utils/notify-manager'
 import { isNearBottom, readPositionToReport, mergeReadPosition } from '../utils/read-receipt'
 import { fileNameOf } from '../utils/file-transfer'
@@ -194,6 +194,9 @@ const screenshot = ref(false)
 /** 输入框待发送文件（截图/粘贴后先预览，点发送才发出） */
 interface PendingFile { path: string; dataUrl?: string; name: string; isImage: boolean }
 const pendingFiles = ref<PendingFile[]>([])
+/** 未选会话时截下的图：待用户从选择器里挑一个聊天对象再发送；也可仅保存不发 */
+const showRecipientPicker = ref(false)
+const shotRecipient = ref<{ path: string; dataUrl?: string; name: string } | null>(null)
 /** 待发送图片右键菜单位置 */
 const pendingImgMenu = ref<{ x: number; y: number; idx: number } | null>(null)
 function onPendingImgCtx(e: MouseEvent, idx: number): void {
@@ -496,21 +499,51 @@ async function onScreenshot(): Promise<void> {
 // 必须保存退订函数并在 onBeforeUnmount 移除，否则组件每次重新挂载都会叠加一个监听，
 // 保存截图时各监听各自 sendFile 一次 → 同一张截图被重复发送（ipcRenderer.on 不受发送窗口生命周期约束）。
 let offScreenshotSaved: (() => void) | null = null
+let offHotkeyAction: (() => void) | null = null
 onMounted(() => {
-  offScreenshotSaved = window.pantry.onScreenshotSaved(async (path) => {
+  offScreenshotSaved = window.pantry.onScreenshotSaved(async ({ path, dataUrl }) => {
     if (!path || sending.value) return
-    sending.value = true
-    try {
-      await app.sendFile(path)
-    } finally {
-      sending.value = false
+    const name = `截图_${Date.now()}.png`
+    if (selected.value) {
+      // 情况二：在聊天框内截屏 → 进待发送预览，点发送才发出（不自动发送）
+      pendingFiles.value.push({ path, dataUrl, name, isImage: true })
+      return
     }
+    // 情况一：未选聊天对象 → 弹出选择器，选定后再发送；也可仅保存不发
+    shotRecipient.value = { path, dataUrl, name }
+    showRecipientPicker.value = true
+  })
+  // 全局快捷键：截图发送 → 打开截图编辑器（保存后仍走上面的分流）
+  offHotkeyAction = window.pantry.onHotkeyAction((action) => {
+    if (action === 'screenshot') void onScreenshot()
   })
 })
 onBeforeUnmount(() => {
   offScreenshotSaved?.()
   offScreenshotSaved = null
+  offHotkeyAction?.()
+  offHotkeyAction = null
 })
+
+/** 选择聊天对象 → 切到该会话并把截好的图发出 */
+async function pickRecipient(item: ConversationItem): Promise<void> {
+  const shot = shotRecipient.value
+  showRecipientPicker.value = false
+  if (!shot) return
+  await app.openConversation(item)
+  sending.value = true
+  try {
+    await app.sendFile(shot.path, '', shot.name)
+  } finally {
+    sending.value = false
+    shotRecipient.value = null
+  }
+}
+/** 关闭选择器：截图已落盘，仅保存不发送 */
+function dismissRecipientPicker(): void {
+  showRecipientPicker.value = false
+  shotRecipient.value = null
+}
 
 // ─── 拖放上传 ───
 /** 是否正处于拖放悬停状态（用于显示投放遮罩） */
@@ -1304,6 +1337,23 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
       </div>
     </div>
 
+    <!-- 截图发送：选择聊天对象（未在会话内截屏时） -->
+    <div v-if="showRecipientPicker" class="modal-mask" @click.self="dismissRecipientPicker">
+      <div class="modal recipient-modal">
+        <div class="modal-head">选择发送对象</div>
+        <div class="modal-body recipient-body">
+          <button v-for="c in app.conversations" :key="c.conversationId" class="recipient-item" @click="pickRecipient(c)">
+            <span class="recipient-name">{{ c.name }}</span>
+            <i class="fas fa-chevron-right"></i>
+          </button>
+          <div v-if="!app.conversations.length" class="recipient-empty">暂无会话</div>
+        </div>
+        <div class="modal-foot">
+          <button class="dt-btn" @click="dismissRecipientPicker">仅保存，不发送</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 消息右键菜单（teleport 到 body 避免父级定位影响） -->
     <Teleport to="body">
     <div v-if="showMsgMenu" ref="msgMenuEl" class="ctx-menu" :style="{ left: showMsgMenu.x + 'px', top: showMsgMenu.y + 'px' }">
@@ -2041,6 +2091,67 @@ async function openOfficePreview(m: { content: string; id: string }): Promise<vo
 }
 .member-row:hover {
   background: var(--dt-hover);
+}
+.recipient-modal {
+  width: 360px;
+}
+.recipient-body {
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recipient-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--dt-text);
+  text-align: left;
+}
+.recipient-item:hover {
+  background: var(--dt-hover);
+}
+.recipient-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipient-item i {
+  color: var(--dt-text-4);
+}
+.recipient-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--dt-text-4);
+  font-size: 13px;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--dt-border-light);
+}
+.dt-btn {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid var(--dt-border);
+  background: #fff;
+  color: var(--dt-text-2);
+  cursor: pointer;
+}
+.dt-btn:hover {
+  border-color: var(--dt-primary);
+  color: var(--dt-primary);
 }
 .member-av {
   width: 34px;

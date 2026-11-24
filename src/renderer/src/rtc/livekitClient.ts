@@ -11,7 +11,7 @@
  * 所有 token 均由服务端签发（.env LIVEKIT_*），客户端不持有 apiSecret。
  */
 
-import { Room, RoomEvent, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
+import { Room, RoomEvent, LocalVideoTrack, LocalAudioTrack, type TrackPublishOptions } from 'livekit-client'
 import type { RtcSfuInfo } from '@shared/server-types'
 import { attachSfuDiagnostics } from './rtc-debug'
 
@@ -77,7 +77,8 @@ export async function publishOrReplace(
   room: Room,
   name: string,
   kind: 'audio' | 'video',
-  track: MediaStreamTrack | null
+  track: MediaStreamTrack | null,
+  options?: TrackPublishOptions
 ): Promise<LocalVideoTrack | LocalAudioTrack | null> {
   // 1) 清理同名旧轨
   for (const pub of room.localParticipant.trackPublications.values()) {
@@ -93,6 +94,6 @@ export async function publishOrReplace(
   const lkTrack = kind === 'video'
     ? new LocalVideoTrack(track, {}, true)
     : new LocalAudioTrack(track, undefined, true)
-  await room.localParticipant.publishTrack(lkTrack, { name })
+  await room.localParticipant.publishTrack(lkTrack, { name, ...options })
   return lkTrack
 }

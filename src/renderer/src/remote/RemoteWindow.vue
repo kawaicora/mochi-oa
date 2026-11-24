@@ -6,7 +6,7 @@
  * LiveKit data 消息发送。窗口关闭自动结束会话并复位/解冻被控端鼠标。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability } from './RemoteSession'
+import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability, type RemoteDisplayMeta } from './RemoteSession'
 import { mapRemotePoint, type RemotePoint } from '../utils/remote-coords'
 import { rlog, rwarn } from '../../../shared/remote-log'
 
@@ -26,8 +26,13 @@ const stream = ref<MediaStream | null>(null)
 const meta = ref<{ w: number; h: number; mode: RemoteMode } | null>(null)
 /** 被控端键鼠注入能力：不可用时在界面上说清楚，否则用户会以为「连上了但坏了」 */
 const inputCap = ref<RemoteInputCapability | null>(null)
+/** 被控端显示器列表与当前活动显示器（会话内下拉切换） */
+const displays = ref<RemoteDisplayMeta[]>([])
+const activeDisplayId = ref('')
 const connected = ref(false)
 const errMsg = ref('')
+/** 按住中（拖动期间即使指针移出画面区也继续追踪；松开后只响应画面区内移动） */
+let pressing = false
 
 // ── 键鼠采集 → LiveKit data ──
 function screenOf(e: MouseEvent): RemotePoint | null {
@@ -44,17 +49,35 @@ function btnOf(button: number): 'left' | 'middle' | 'right' {
   return button === 2 ? 'right' : button === 1 ? 'middle' : 'left'
 }
 function onMouseMove(e: MouseEvent): void {
+  const holder = holderEl.value
+  const inside = !!holder && holder.contains(e.target as Node)
+  if (!pressing && !inside) return
   const p = screenOf(e)
   if (p) RemoteSession.sendControl({ t: 'move', x: p.x, y: p.y })
 }
 function onMouseDown(e: MouseEvent): void {
   if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
-  if (!screenOf(e)) return
+  // 阻止浏览器原生拖拽/文本选中，否则按住拖动会进入 HTML5 drag，页面收不到后续 mousemove
+  e.preventDefault()
+  const p = screenOf(e)
+  if (!p) return
+  pressing = true
+  // 先把光标落到按下点，再按下，保证拖动起点在正确位置
+  RemoteSession.sendControl({ t: 'move', x: p.x, y: p.y })
   RemoteSession.sendControl({ t: 'down', btn: btnOf(e.button) })
 }
 function onMouseUp(e: MouseEvent): void {
   if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
+  pressing = false
   RemoteSession.sendControl({ t: 'up', btn: btnOf(e.button) })
+}
+function onContextMenu(e: MouseEvent): void {
+  // 右键拖动时不弹本机菜单，避免打断远程右键按住
+  e.preventDefault()
+}
+function onEnterStage(): void {
+  // 指针滑入远程窗口：要求被控端强制显示鼠标（采集帧里可见远程光标）
+  RemoteSession.sendControl({ t: 'cursorShow' })
 }
 function onWheel(e: WheelEvent): void {
   e.preventDefault()
@@ -68,8 +91,14 @@ function onKeyUp(e: KeyboardEvent): void {
   const k = e.keyCode || e.which
   if (k) RemoteSession.sendControl({ t: 'kup', k })
 }
+function onSwitchDisplay(e: Event): void {
+  const id = (e.target as HTMLSelectElement).value
+  if (!id || id === activeDisplayId.value) return
+  RemoteSession.requestSwitchDisplay(id)
+}
 
 onMounted(() => {
+  document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', onMouseUp)
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
@@ -92,6 +121,8 @@ onMounted(() => {
       onMeta: (m) => {
         meta.value = m
         inputCap.value = m.input ?? null
+        displays.value = m.displays ?? []
+        activeDisplayId.value = m.active ?? ''
         if (m.input && !m.input.ok) {
           rwarn('window', `被控端键鼠注入不可用：${m.input.backend} ${m.input.detail}`)
         }
@@ -117,6 +148,8 @@ function onBeforeUnload(): void {
   RemoteSession.stop('window-unload')
 }
 onBeforeUnmount(() => {
+  pressing = false
+  document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('keyup', onKeyUp)
@@ -153,6 +186,17 @@ function close(): void {
         <span v-else-if="errMsg" class="rw-sub err">{{ errMsg }}</span>
       </div>
       <div class="rw-winbtns">
+        <select
+          v-if="displays.length > 1"
+          class="rw-display"
+          :value="activeDisplayId"
+          title="切换被控端显示器"
+          @change="onSwitchDisplay"
+        >
+          <option v-for="d in displays" :key="d.id" :value="d.id">
+            {{ d.primary ? '● ' : '' }}{{ d.label }} {{ d.w }}×{{ d.h }}
+          </option>
+        </select>
         <button class="rw-win" title="最小化" @click="minimize"><i class="fas fa-minus"></i></button>
         <button class="rw-win" title="最大化/还原" @click="toggleMax"><i class="far fa-square"></i></button>
         <button class="rw-win close" title="关闭" @click="close"><i class="fas fa-times"></i></button>
@@ -160,8 +204,8 @@ function close(): void {
     </div>
 
     <!-- 画面区：缩放不压缩布局（object-fit contain），键鼠事件采集 -->
-    <div ref="holderEl" class="rw-stage" @mousedown="onMouseDown" @mousemove="onMouseMove" @wheel="onWheel">
-      <video ref="videoEl" autoplay playsinline muted class="rw-video" />
+    <div ref="holderEl" class="rw-stage" @mouseenter="onEnterStage" @mousedown="onMouseDown" @wheel="onWheel" @contextmenu.prevent="onContextMenu">
+      <video ref="videoEl" autoplay playsinline muted draggable="false" class="rw-video" />
       <div v-if="!stream" class="rw-loading">
         {{ errMsg || (connected ? '正在建立远程控制连接…' : '等待对端接受远程控制…') }}
       </div>
@@ -216,6 +260,23 @@ function close(): void {
   display: flex;
   -webkit-app-region: no-drag;
   height: 100%;
+  align-items: center;
+  gap: 6px;
+}
+.rw-display {
+  -webkit-app-region: no-drag;
+  background: #22252c;
+  color: #e8eaed;
+  border: 1px solid #2f343d;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 220px;
+}
+.rw-display option {
+  background: #16181d;
+  color: #e8eaed;
 }
 .rw-win {
   width: 46px;
@@ -249,6 +310,10 @@ function close(): void {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* 禁止原生拖拽/选中，保证按住拖动全程能收到 mousemove */
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
 }
 .rw-loading {
   position: absolute;

@@ -33,6 +33,7 @@ import type {
   UserProfileUpdateAck,
 } from '../shared/server-types'
 import type { SfuAckFields } from '../shared/sfu'
+import type { HotkeyAction, HotkeyConfig, HotkeyConflict, HotkeyItem } from '../shared/hotkey'
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   const wrapped = (_e: unknown, payload: T): void => listener(payload)
@@ -137,6 +138,15 @@ const api = {
   setAutoLaunch: (openAtLogin: boolean): Promise<{ ok: boolean; openAtLogin: boolean; method?: string; error?: string }> =>
     safeInvoke(IpcChannels.setAutoLaunch, openAtLogin),
   isElevated: (): Promise<boolean> => safeInvoke(IpcChannels.isElevated),
+
+  // 全局快捷键：读取/保存配置（主进程做内部撞键 + 系统占用检测）
+  hotkeyGet: (): Promise<{ ok: boolean; config: HotkeyConfig; conflicts: HotkeyConflict[] }> =>
+    safeInvoke(IpcChannels.hotkeyGet),
+  hotkeySet: (patch: Partial<Record<HotkeyAction, Partial<HotkeyItem>>>): Promise<{ ok: boolean; config: HotkeyConfig; conflicts: HotkeyConflict[] }> =>
+    safeInvoke(IpcChannels.hotkeySet, patch),
+  /** 主进程转发快捷键触发动作（截图发送等） */
+  onHotkeyAction: (l: (action: HotkeyAction) => void): (() => void) =>
+    subscribe<{ action: HotkeyAction }>(IpcEvents.hotkeyAction, (p) => l(p.action)),
 
   // 连接 / 状态 / 设置
   serverConnect: (serverUrl: string, token?: string): Promise<void> =>
@@ -500,6 +510,17 @@ const api = {
     safeInvoke(IpcChannels.remoteInputStop),
   remoteInputEvent: (evt: Record<string, unknown>): Promise<{ ok: boolean }> =>
     safeInvoke(IpcChannels.remoteInputEvent, evt),
+  remoteInputListDisplays: (): Promise<{
+    ok: boolean
+    displays: Array<{ id: string; label: string; x: number; y: number; w: number; h: number; scaleFactor: number; primary: boolean }>
+  }> =>
+    safeInvoke(IpcChannels.remoteInputListDisplays),
+  remoteInputSwitchDisplay: (id: string): Promise<{
+    ok: boolean
+    display?: { id: string; label: string; x: number; y: number; w: number; h: number; scaleFactor: number; primary: boolean }
+    reason?: string
+  }> =>
+    safeInvoke(IpcChannels.remoteInputSwitchDisplay, id),
   // 远程设备控制（被控端）
   devGetInfo: (): Promise<{ deviceId: string; hostname: string; os: string; ip: string }> =>
     safeInvoke(IpcChannels.devGetInfo),
@@ -588,7 +609,8 @@ const api = {
   /** 自动更新状态：{ state, version?, message? } */
   onUpdateState: (l: (d: { state: string; version?: string; message?: string }) => void) =>
     subscribe<{ state: string; version?: string; message?: string }>(IpcEvents.updateState, l),
-  onScreenshotSaved: (l: (path: string) => void) => subscribe<string>(IpcEvents.screenshotSaved, l),
+  onScreenshotSaved: (l: (d: { path: string; dataUrl?: string }) => void) =>
+    subscribe<{ path: string; dataUrl?: string }>(IpcEvents.screenshotSaved, l),
   // 消息右键「复制」：文本/表情 → writeClipboardText；图片 → writeClipboardImage(本地绝对路径)
   writeClipboardText: (text: string): Promise<{ ok: boolean; error?: string }> =>
     safeInvoke(IpcChannels.appClipboardWriteText, text),
