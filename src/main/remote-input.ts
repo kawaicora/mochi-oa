@@ -72,6 +72,8 @@ interface RemoteInputCommand {
   k?: number
   c?: number
   btn?: string
+  buttons?: number[]
+  axes?: number[]
 }
 
 const FALLBACK_DISPLAY: RemoteDisplayInfo = {
@@ -496,6 +498,8 @@ let cursorLocked = false
 /** 按下中（未抬起）的键/钮，断线复位时补发 Up */
 const pendingButtons = new Set<'left' | 'right' | 'middle'>()
 const pendingKeys = new Set<number>()
+/** 按下中的触摸触点标识；断线复位时补发抬起 */
+const pendingTouches = new Set<number>()
 
 export function remoteInputCapability(): InputCapability {
   return { ...capability }
@@ -722,6 +726,41 @@ export function remoteInputKeyUp(code: number): void {
   if (backend === 'linux-xdotool') linuxXdotoolKey(code, false)
 }
 
+/**
+ * 触摸触点注入（被控端）。
+ * 本期注入路径先走左键鼠标兜底：点按 / 长按（触点保持按下）/ 滑动都映射为左键按下+移动+抬起；
+ * 原生多点触控（双指捏合/缩放）待 Windows InjectTouchInput、Linux uinput MT-B 设备补齐后接入。
+ */
+export function remoteInputTouch(phase: string, id: number, x: number, y: number): void {
+  const px = Math.round(x)
+  const py = Math.round(y)
+  const pt = transformPointPure(activeDisplay, px, py, PLATFORM)
+  if (phase === 'down') {
+    // 兜底单触点：只把第一路触点映射成左键，避免多指互相顶起
+    if (pendingTouches.size === 0) {
+      remoteInputMove(pt.x, pt.y)
+      remoteInputDown('left')
+    }
+    pendingTouches.add(id)
+  } else if (phase === 'move') {
+    if (pendingTouches.has(id) && pendingTouches.size === 1) remoteInputMove(pt.x, pt.y)
+  } else {
+    pendingTouches.delete(id)
+    if (pendingTouches.size === 0) remoteInputUp('left')
+  }
+}
+
+/** 手柄状态注入（被控端）。标准 Gamepad 映射：buttons[0..15] 按键，axes[0..3] 左右摇杆。 */
+export function remoteInputGamepad(buttons: number[], axes: number[]): void {
+  rlogThrottled(S, 'gamepad', `手柄按下 ${buttons.filter(Boolean).length} 键 轴=${axes.length}`, 500)
+  if (
+    backend === 'windows-rust' || backend === 'linux-rust-uinput' ||
+    backend === 'macos-rust-cgevent'
+  ) {
+    helperSend({ t: 'gamepad', buttons, axes })
+  }
+}
+
 /** 控制端指针滑入远程窗口：强制显示被控端光标（保证采集帧里看得到远程鼠标）。 */
 export function remoteInputShowCursor(): void {
   if (backend === 'windows-powershell') { winSend({ t: 'show' }); return }
@@ -738,6 +777,15 @@ export function remoteInputDispatch(evt: Record<string, unknown>): void {
     case 'scroll': remoteInputScroll(Number(evt.d) || 0); break
     case 'kdown': remoteInputKeyDown(Number(evt.k) || 0); break
     case 'kup': remoteInputKeyUp(Number(evt.k) || 0); break
+    case 'touchdown': remoteInputTouch('down', Number(evt.touchId) || 0, Number(evt.x) || 0, Number(evt.y) || 0); break
+    case 'touchmove': remoteInputTouch('move', Number(evt.touchId) || 0, Number(evt.x) || 0, Number(evt.y) || 0); break
+    case 'touchup': remoteInputTouch('up', Number(evt.touchId) || 0, Number(evt.x) || 0, Number(evt.y) || 0); break
+    case 'gamepad':
+      remoteInputGamepad(
+        Array.isArray(evt.buttons) ? evt.buttons.map(Number) : [],
+        Array.isArray(evt.axes) ? evt.axes.map(Number) : []
+      )
+      break
     case 'cursorShow': remoteInputShowCursor(); break
     default: rwarn(S, `未知控制指令：${JSON.stringify(evt).slice(0, 200)}`); break
   }
@@ -755,6 +803,10 @@ export function remoteInputReset(): void {
   for (const code of [...pendingKeys]) remoteInputKeyUp(code)
   pendingButtons.clear()
   pendingKeys.clear()
+  if (pendingTouches.size) {
+    remoteInputUp('left')
+    pendingTouches.clear()
+  }
   if (backend === 'windows-powershell' || backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
     // 恢复会话开始时记录的光标状态
@@ -772,6 +824,10 @@ export function remoteInputUnlock(): void {
   for (const code of [...pendingKeys]) remoteInputKeyUp(code)
   pendingButtons.clear()
   pendingKeys.clear()
+  if (pendingTouches.size) {
+    remoteInputUp('left')
+    pendingTouches.clear()
+  }
   if (backend === 'windows-powershell' || backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
     sendWinMode({ t: 'show' })

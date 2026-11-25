@@ -7,7 +7,7 @@
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability, type RemoteDisplayMeta } from './RemoteSession'
-import { mapRemotePoint, type RemotePoint } from '../utils/remote-coords'
+import { mapRemotePoint, containBox, type RemotePoint } from '../utils/remote-coords'
 import { rlog, rwarn } from '../../../shared/remote-log'
 
 const props = defineProps<{
@@ -33,6 +33,67 @@ const connected = ref(false)
 const errMsg = ref('')
 /** 按住中（拖动期间即使指针移出画面区也继续追踪；松开后只响应画面区内移动） */
 let pressing = false
+/** Pointer Lock 状态：锁定后指针锚在画面中心，靠相对位移控制远程光标 */
+let locked = false
+/** 锁定期间的虚拟远程光标坐标（被控端屏幕像素）；未锁定为 null */
+let virt: RemotePoint | null = null
+
+function targetSize(): { w: number; h: number } | null {
+  const m = meta.value
+  if (!m || !m.w || !m.h) return null
+  return { w: m.w, h: m.h }
+}
+
+/** 锁定成功：虚拟光标初始放到远程屏幕正中间 */
+function initVirtCenter(): void {
+  const t = targetSize()
+  if (!t) return
+  virt = { x: Math.round(t.w / 2), y: Math.round(t.h / 2) }
+}
+
+function lockPointer(): void {
+  const el = holderEl.value
+  if (!el || locked) return
+  try {
+    const r = el.requestPointerLock({ unadjustedMovement: true }) as unknown as Promise<void> | undefined
+    if (r && typeof r.catch === 'function') {
+      r.catch(() => { try { el.requestPointerLock() } catch { /* 不支持平滑位移就退回默认 */ } })
+    }
+  } catch {
+    try { el.requestPointerLock() } catch { /* Pointer Lock 不可用时退回绝对坐标 */ }
+  }
+}
+
+function unlockPointer(): void {
+  if (locked) { try { document.exitPointerLock() } catch { /* ignore */ } }
+}
+
+function onLockChange(): void {
+  locked = document.pointerLockElement === holderEl.value
+  if (locked) initVirtCenter()
+  else virt = null
+}
+
+function onLockError(): void {
+  rwarn('window', 'Pointer Lock 失败，退回绝对坐标操作')
+}
+
+/** 锁定态：按相对位移（movementX/Y）累积虚拟远程光标 */
+function moveLocked(e: MouseEvent): void {
+  const t = targetSize()
+  const holder = holderEl.value
+  if (!t || !holder || !virt) return
+  const rect = holder.getBoundingClientRect()
+  const frameW = videoEl.value?.videoWidth || t.w
+  const frameH = videoEl.value?.videoHeight || t.h
+  const box = containBox(rect.width, rect.height, frameW, frameH)
+  if (box.renderW <= 0 || box.renderH <= 0) return
+  const sx = t.w / box.renderW
+  const sy = t.h / box.renderH
+  virt.x = Math.min(t.w, Math.max(0, Math.round(virt.x + e.movementX * sx)))
+  virt.y = Math.min(t.h, Math.max(0, Math.round(virt.y + e.movementY * sy)))
+  RemoteSession.sendControl({ t: 'move', x: virt.x, y: virt.y })
+}
 
 // ── 键鼠采集 → LiveKit data ──
 function screenOf(e: MouseEvent): RemotePoint | null {
@@ -49,6 +110,7 @@ function btnOf(button: number): 'left' | 'middle' | 'right' {
   return button === 2 ? 'right' : button === 1 ? 'middle' : 'left'
 }
 function onMouseMove(e: MouseEvent): void {
+  if (locked) { moveLocked(e); return }
   const holder = holderEl.value
   const inside = !!holder && holder.contains(e.target as Node)
   if (!pressing && !inside) return
@@ -59,7 +121,8 @@ function onMouseDown(e: MouseEvent): void {
   if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
   // 阻止浏览器原生拖拽/文本选中，否则按住拖动会进入 HTML5 drag，页面收不到后续 mousemove
   e.preventDefault()
-  const p = screenOf(e)
+  lockPointer()
+  const p = locked && virt ? virt : screenOf(e)
   if (!p) return
   pressing = true
   // 先把光标落到按下点，再按下，保证拖动起点在正确位置
@@ -79,6 +142,49 @@ function onEnterStage(): void {
   // 指针滑入远程窗口：要求被控端强制显示鼠标（采集帧里可见远程光标）
   RemoteSession.sendControl({ t: 'cursorShow' })
 }
+
+// ── 触摸采集（Windows 触控屏平板）：多点触控 down/move/up，长按=触点保持按下 ──
+function mapTouch(t: Touch): RemotePoint | null {
+  const m = meta.value
+  const holder = holderEl.value
+  if (!m || !m.w || !m.h || !holder) return null
+  const rect = holder.getBoundingClientRect()
+  const frameW = videoEl.value?.videoWidth || m.w
+  const frameH = videoEl.value?.videoHeight || m.h
+  return mapRemotePoint(rect, t.clientX, t.clientY, frameW, frameH, m.w, m.h)
+}
+function forEachTouch(e: TouchEvent, phase: 'touchdown' | 'touchmove' | 'touchup'): void {
+  e.preventDefault()
+  for (const t of Array.from(e.changedTouches)) {
+    const p = mapTouch(t)
+    if (p) RemoteSession.sendControl({ t: phase, touchId: t.identifier, x: p.x, y: p.y })
+  }
+}
+function onTouchStart(e: TouchEvent): void { forEachTouch(e, 'touchdown') }
+function onTouchMove(e: TouchEvent): void { forEachTouch(e, 'touchmove') }
+function onTouchEnd(e: TouchEvent): void { forEachTouch(e, 'touchup') }
+
+// ── 手柄采集（Gamepad API）：轮询标准映射按键/摇杆，状态变化才上报 ──
+let padTimer: ReturnType<typeof setInterval> | null = null
+let lastPadKey = ''
+
+function readGamepad(): Gamepad | null {
+  if (!navigator.getGamepads) return null
+  const pads = navigator.getGamepads()
+  for (const p of pads) if (p) return p
+  return null
+}
+function pollGamepad(): void {
+  const g = readGamepad()
+  if (!g) return
+  const buttons = g.buttons.map((b) => (b.pressed ? 1 : 0))
+  const axes = Array.from(g.axes).map((a) => Number(a.toFixed(3)))
+  const key = JSON.stringify({ buttons, axes })
+  if (key === lastPadKey) return
+  lastPadKey = key
+  RemoteSession.sendControl({ t: 'gamepad', buttons, axes })
+}
+function onPadConnect(): void { lastPadKey = '' }
 function onWheel(e: WheelEvent): void {
   e.preventDefault()
   RemoteSession.sendControl({ t: 'scroll', d: e.deltaY })
@@ -102,6 +208,11 @@ onMounted(() => {
   document.addEventListener('mouseup', onMouseUp)
   document.addEventListener('keydown', onKeyDown)
   document.addEventListener('keyup', onKeyUp)
+  document.addEventListener('pointerlockchange', onLockChange)
+  document.addEventListener('pointerlockerror', onLockError)
+  window.addEventListener('gamepadconnected', onPadConnect)
+  window.addEventListener('gamepaddisconnected', onPadConnect)
+  padTimer = setInterval(pollGamepad, 50)
   rlog('window', `远程窗口打开 room=${props.room} peer=${props.peerId}(${props.peerName}) mode=${props.mode}`)
   // 窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时也要收场：
   // 渲染层来得及就自己 stop（会发 bye）；来不及则由主进程在 close 时补发（见 server-ipc）
@@ -149,10 +260,16 @@ function onBeforeUnload(): void {
 }
 onBeforeUnmount(() => {
   pressing = false
+  unlockPointer()
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('keyup', onKeyUp)
+  document.removeEventListener('pointerlockchange', onLockChange)
+  document.removeEventListener('pointerlockerror', onLockError)
+  window.removeEventListener('gamepadconnected', onPadConnect)
+  window.removeEventListener('gamepaddisconnected', onPadConnect)
+  if (padTimer) { clearInterval(padTimer); padTimer = null }
   window.removeEventListener('beforeunload', onBeforeUnload)
   RemoteSession.stop('window-unmount')
 })
@@ -204,7 +321,7 @@ function close(): void {
     </div>
 
     <!-- 画面区：缩放不压缩布局（object-fit contain），键鼠事件采集 -->
-    <div ref="holderEl" class="rw-stage" @mouseenter="onEnterStage" @mousedown="onMouseDown" @wheel="onWheel" @contextmenu.prevent="onContextMenu">
+    <div ref="holderEl" class="rw-stage" @mouseenter="onEnterStage" @mousedown="onMouseDown" @wheel="onWheel" @contextmenu.prevent="onContextMenu" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd" @touchcancel="onTouchEnd">
       <video ref="videoEl" autoplay playsinline muted draggable="false" class="rw-video" />
       <div v-if="!stream" class="rw-loading">
         {{ errMsg || (connected ? '正在建立远程控制连接…' : '等待对端接受远程控制…') }}
@@ -303,6 +420,8 @@ function close(): void {
   align-items: center;
   justify-content: center;
   background: #000;
+  /* 禁止浏览器原生触摸滚动/缩放手势，保证 touchmove 全程可采集 */
+  touch-action: none;
   /* 本地原生光标隐藏，光标以远程画面内嵌的被控端光标为准 */
   cursor: none;
 }

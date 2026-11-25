@@ -27,6 +27,8 @@ struct Cmd {
     k: Option<u32>,
     c: Option<u32>,
     btn: Option<String>,
+    buttons: Option<Vec<u8>>,
+    axes: Option<Vec<f32>>,
 }
 
 fn emit_json(v: &serde_json::Value) {
@@ -81,6 +83,11 @@ fn dispatch(b: &mut dyn platform::InputBackend, cmd: &Cmd) -> Result<(), String>
             Ok(())
         }
         "restore" => b.restore_cursor(),
+        "gamepad" => {
+            let buttons: &[u8] = cmd.buttons.as_deref().unwrap_or(&[]);
+            let axes: &[f32] = cmd.axes.as_deref().unwrap_or(&[]);
+            b.gamepad_report(buttons, axes)
+        }
         "ping" => {
             emit_json(&serde_json::json!({ "ok": true, "pong": true }));
             Ok(())

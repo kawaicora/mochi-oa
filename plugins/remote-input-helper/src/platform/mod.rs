@@ -37,6 +37,11 @@ pub trait InputBackend {
     fn restore_cursor(&mut self) -> Result<(), String> {
         Ok(())
     }
+    /// 手柄状态上报（标准映射：buttons 按键位图，axes 摇杆轴 -1..1）。
+    /// 默认空实现；Windows ViGEmBus / Linux uinput 手柄设备接入后覆写。
+    fn gamepad_report(&mut self, _buttons: &[u8], _axes: &[f32]) -> Result<(), String> {
+        Ok(())
+    }
     /// 会话结束清理（销毁虚拟设备等）。
     fn shutdown(&mut self) {}
 }

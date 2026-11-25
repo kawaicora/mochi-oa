@@ -18,7 +18,9 @@
  *
  * data 协议（JSON，沿用原 DataChannel 协议，仅承载通道换成 LiveKit data）：
  *  控制端 → 被控端：{t:'move',x,y} | {t:'down',btn} | {t:'up',btn} | {t:'scroll',d}
- *                   | {t:'kdown',k} | {t:'kup',k} | {t:'cursorShow'} | {t:'bye'}
+ *                   | {t:'kdown',k} | {t:'kup',k} | {t:'cursorShow'}
+ *                   | {t:'touchdown'|'touchmove'|'touchup',id,x,y}
+ *                   | {t:'gamepad',buttons,axes} | {t:'bye'}
  *  被控端 → 控制端：{t:'meta',w,h,mode,input}
  */
 
@@ -77,6 +79,11 @@ interface ControlMsg {
   id?: string
   displays?: RemoteDisplayMeta[]
   active?: string
+  /** 触摸触点标识（TouchEvent.identifier） */
+  touchId?: number
+  /** 手柄按键按下状态数组 / 摇杆轴数组 */
+  buttons?: number[]
+  axes?: number[]
 }
 
 export interface RemoteSessionCallbacks {
