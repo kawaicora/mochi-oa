@@ -2,14 +2,14 @@
  * Mochi OA - 远程控制输入注入（被控端 main 进程）—— 跨平台。
  *
  * 真实系统级键鼠注入。按平台分派后端（会话开始时探测并把选择结果写进日志）：
- *  - win32 ：常驻 PowerShell 子进程 + user32 原生 API
- *            （SetCursorPos / SendInput / mouse_event / ClipCursor / ShowCursor）。
- *            【注入行为本次不改】，只加握手与日志。
- *  - linux ：① Python3 + uinput 常驻进程（首选：Wayland / X11 都有效，零编译零依赖）
- *            ② xdotool（兜底：仅 X11）
+ *  - win32 ：内置 Rust 常驻助手（user32 SendInput / ClipCursor / ShowCursor）。
+ *  - linux ：① 内置 Rust 助手（uinput 虚拟键鼠，Wayland / X11 通用）
+ *            ② Python3 + uinput 常驻进程（零编译零依赖）
+ *            ③ xdotool（兜底：仅 X11）
  *            以前只有 xdotool —— 这就是「Linux 上鼠标键盘都发不过去」的根因：
  *            GNOME/KDE 默认 Wayland 会话，xdotool 注入不到任何东西。
- *  - darwin：osascript(JXA) 常驻进程调 CGEvent（kCGHIDEventTap），零编译。
+ *  - darwin：① 内置 Rust 助手（CGEvent，kCGHIDEventTap）
+ *            ② osascript(JXA) 常驻进程调 CGEvent，零编译。
  *            需要「辅助功能」权限，启动时用 AXIsProcessTrusted 自检并上报结果。
  *
  * 两种键鼠模式（控制端发起会话时指定）：
@@ -47,7 +47,6 @@ const PLATFORM: InputPlatform = IS_WIN ? 'win32' : IS_DARWIN ? 'darwin' : 'linux
 
 export type InputBackend =
   | 'windows-rust'
-  | 'windows-powershell'
   | 'linux-rust-uinput'
   | 'linux-uinput'
   | 'linux-xdotool'
@@ -111,117 +110,6 @@ function resolveDisplay(id?: string | null): RemoteDisplayInfo {
   return all.find((d) => d.primary) ?? all[0] ?? FALLBACK_DISPLAY
 }
 
-
-// ─────────────────────────── Windows：PowerShell + user32 ───────────────────────────
-// 注入分支保持原样，只补一行握手输出与 ping（便于主进程确认后端就绪 + 日志可读）。
-
-const POWERSHELL_SCRIPT = `
-$src = @'
-using System;
-using System.Runtime.InteropServices;
-public static class U32 {
-  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetCursorPos(int x, int y);
-  [DllImport("user32.dll")] public static extern bool ClipCursor(ref RECT lpRect);
-  [DllImport("user32.dll")] public static extern bool ClipCursor(IntPtr lpRect);
-  [DllImport("user32.dll")] public static extern int ShowCursor(bool bShow);
-  [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
-  [DllImport("user32.dll")] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
-  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public InputUnion U; }
-  [StructLayout(LayoutKind.Explicit)] public struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
-  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-  public const uint INPUT_MOUSE = 0; public const uint INPUT_KEYBOARD = 1;
-  public const uint MOUSEEVENTF_MOVE = 0x0001;
-  public const uint MOUSEEVENTF_LEFTDOWN = 0x0002; public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-  public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008; public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-  public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020; public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
-  public const uint MOUSEEVENTF_WHEEL = 0x0800;
-  public const uint KEYEVENTF_KEYUP = 0x0002;
-  public const int SM_CXSCREEN = 0; public const int SM_CYSCREEN = 1;
-  public static void SendMouse(uint flags, int dx, int dy, uint data) {
-    var mi = new MOUSEINPUT(); mi.dwFlags = flags; mi.dx = dx; mi.dy = dy; mi.mouseData = data;
-    var inp = new INPUT(); inp.type = INPUT_MOUSE; inp.U.mi = mi;
-    SendInput(1, new INPUT[] { inp }, Marshal.SizeOf(typeof(INPUT)));
-  }
-  public static void SendKey(ushort vk, bool down) {
-    var ki = new KEYBDINPUT(); ki.wVk = vk; ki.dwFlags = down ? 0u : KEYEVENTF_KEYUP;
-    var inp = new INPUT(); inp.type = INPUT_KEYBOARD; inp.U.ki = ki;
-    SendInput(1, new INPUT[] { inp }, Marshal.SizeOf(typeof(INPUT)));
-  }
-  public static int ScreenW() { return GetSystemMetrics(SM_CXSCREEN); }
-  public static int ScreenH() { return GetSystemMetrics(SM_CYSCREEN); }
-}
-'@
-Add-Type -TypeDefinition $src
-[Console]::Out.WriteLine('{"ok":true,"backend":"windows-powershell"}')
-[Console]::Out.Flush()
-while ($true) {
-  $line = [Console]::In.ReadLine()
-  if ($null -eq $line) { break }
-  try {
-    $c = $line | ConvertFrom-Json
-    switch ($c.t) {
-      'move'   { [void][U32]::SetCursorPos([int]$c.x, [int]$c.y) }
-      'ldown'  { [void][U32]::SendMouse([U32]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0) }
-      'lup'    { [void][U32]::SendMouse([U32]::MOUSEEVENTF_LEFTUP, 0, 0, 0) }
-      'rdown'  { [void][U32]::SendMouse([U32]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0) }
-      'rup'    { [void][U32]::SendMouse([U32]::MOUSEEVENTF_RIGHTUP, 0, 0, 0) }
-      'mdown'  { [void][U32]::SendMouse([U32]::MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0) }
-      'mup'    { [void][U32]::SendMouse([U32]::MOUSEEVENTF_MIDDLEUP, 0, 0, 0) }
-      'scroll' { [void][U32]::SendMouse([U32]::MOUSEEVENTF_WHEEL, 0, 0, [uint32]$c.d) }
-      'kdown'  { [void][U32]::SendKey([uint16]$c.k, $true) }
-      'kup'    { [void][U32]::SendKey([uint16]$c.k, $false) }
-      'cliplock' {
-        $r = New-Object U32+RECT
-        $r.Left = 0; $r.Top = 0; $r.Right = [U32]::ScreenW(); $r.Bottom = [U32]::ScreenH()
-        [void][U32]::ClipCursor([ref]$r)
-      }
-      'clipfree' { [void][U32]::ClipCursor([IntPtr]::Zero) }
-      'show' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
-      'restore' { for ($i = 0; $i -lt 5; $i++) { [void][U32]::ShowCursor($true) } }
-      'ping' { [Console]::Out.WriteLine('{"ok":true,"pong":true}') }
-      default { [Console]::Out.WriteLine('{"ok":false,"reason":"unknown cmd"}') }
-    }
-  } catch { Write-Error "注入失败: $_" }
-}
-`
-
-let winProc: ChildProcess | null = null
-
-function ensureWinProc(): ChildProcess | null {
-  if (winProc && !winProc.killed) return winProc
-  try {
-    const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_SCRIPT], {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-    p.stdin?.setDefaultEncoding('utf8')
-    p.on('error', (e) => { rerr(S, `PowerShell 注入进程启动失败：${e.message}`); winProc = null })
-    p.on('exit', (code) => { rwarn(S, `PowerShell 注入进程退出 code=${code}`); winProc = null })
-    attachHelperOutput(p, 'powershell')
-    winProc = p
-    rlog(S, '已启动 Windows 注入进程（powershell + user32 SendInput）')
-    return p
-  } catch (e) {
-    rerr(S, `启动 PowerShell 注入进程异常：${e instanceof Error ? e.message : String(e)}`)
-    winProc = null
-    return null
-  }
-}
-
-function winSend(cmd: RemoteInputCommand): boolean {
-  const p = ensureWinProc()
-  if (!p || !p.stdin) return false
-  try {
-    p.stdin.write(JSON.stringify(cmd) + '\n')
-    return true
-  } catch (e) {
-    rwarn(S, `写入注入命令失败 t=${cmd.t}：${e instanceof Error ? e.message : String(e)}`)
-    return false
-  }
-}
 
 // ─────────────── 常驻助手进程（Linux uinput / macOS CGEvent）───────────────
 // 统一约定：stdin 逐行 JSON 命令，stdout 逐行 JSON 结果，首行握手。
@@ -342,7 +230,7 @@ function helperSend(cmd: RemoteInputCommand): boolean {
 // 打包后经 extraResources 随包分发。路径口径与 branding.ts 一致：
 // 打包后 process.resourcesPath/resources；开发态 app.getAppPath()/resources（兜底 cwd/resources）。
 
-/** 解析当前平台 Rust 助手二进制；不存在返回 null（回退旧后端）。 */
+/** 解析当前平台 Rust 助手二进制；不存在返回 null（改走该平台其它后端或不可用）。 */
 function resolveHelper(): string | null {
   const plat = process.platform
   const arch = process.arch === 'x64' ? 'amd64' : process.arch
@@ -361,7 +249,7 @@ function resolveHelper(): string | null {
   return null
 }
 
-/** 停掉当前 helper 常驻进程（回退旧后端前清理）。 */
+/** 停掉当前 helper 常驻进程（切换后端前清理）。 */
 function stopHelperProc(): void {
   if (helper) {
     try { helper.stdin?.end() } catch { /* ignore */ }
@@ -375,7 +263,7 @@ function stopHelperProc(): void {
 async function startRustHelper(w: number, h: number): Promise<boolean> {
   const exe = resolveHelper()
   if (!exe) {
-    rlog(S, '未找到内置 Rust 助手二进制，回退旧后端')
+    rlog(S, '未找到内置 Rust 助手二进制，尝试该平台其它后端')
     return false
   }
   if (process.platform !== 'win32') { try { chmodSync(exe, 0o755) } catch { /* ignore */ } }
@@ -399,16 +287,9 @@ async function startRustHelper(w: number, h: number): Promise<boolean> {
   return false
 }
 
-/** Windows 边界/光标的模式指令：按当前后端路由（PowerShell 旧后端或 Rust 助手）。 */
+/** Windows 边界/光标/键鼠指令：统一走 Rust 助手。 */
 function sendWinMode(cmd: RemoteInputCommand): void {
-  if (backend === 'windows-powershell') winSend(cmd)
-  else if (backend === 'windows-rust') helperSend(cmd)
-}
-
-/** Windows 键鼠指令：按当前后端路由。 */
-function helperOrWinSend(cmd: RemoteInputCommand): void {
-  if (backend === 'windows-powershell') winSend(cmd)
-  else helperSend(cmd)
+  if (backend === 'windows-rust') helperSend(cmd)
 }
 
 // ─────────────────────────── Linux ───────────────────────────
@@ -543,11 +424,9 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
       capability = { ok: true, backend, detail: 'Rust 原生 SendInput 注入', screen: { ...screenSize } }
     } else {
       stopHelperProc()
-      backend = 'windows-powershell'
-      helperHandshake = null
-      ensureWinProc()
-      await waitHandshake(3000)
-      capability = { ok: true, backend, detail: 'Windows 原生 SendInput（PowerShell 兜底）', screen: { ...screenSize } }
+      backend = 'none'
+      const reason = handshakeReason() || '内置 Rust 助手不可用'
+      capability = { ok: false, backend, detail: `Windows 注入助手不可用：${reason}`, screen: { ...screenSize } }
     }
   } else if (IS_LINUX) {
     const rustOk = await startRustHelper(screenSize.w, screenSize.h)
@@ -631,7 +510,6 @@ export function remoteInputMove(x: number, y: number): void {
   const py = Math.round(y)
   const pt = transformPointPure(activeDisplay, px, py, PLATFORM)
   rlogThrottled(S, 'move', `鼠标移动到 ${px},${py} → 注入 ${pt.x},${pt.y}`, 1000)
-  if (backend === 'windows-powershell') { winSend({ t: 'move', x: pt.x, y: pt.y }); return }
   if (backend === 'windows-rust' || backend === 'macos-rust-cgevent' || backend === 'macos-cgevent') {
     helperSend({ t: 'move', x: pt.x, y: pt.y }); return
   }
@@ -647,7 +525,6 @@ export function remoteInputDown(btn: string): void {
   const b = btnName(btn)
   pendingButtons.add(b)
   rlog(S, `鼠标按下 ${b}`)
-  if (backend === 'windows-powershell') { winSend({ t: b === 'left' ? 'ldown' : b === 'right' ? 'rdown' : 'mdown' }); return }
   if (
     backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
     backend === 'linux-uinput'
@@ -660,7 +537,6 @@ export function remoteInputUp(btn: string): void {
   const b = btnName(btn)
   pendingButtons.delete(b)
   rlog(S, `鼠标抬起 ${b}`)
-  if (backend === 'windows-powershell') { winSend({ t: b === 'left' ? 'lup' : b === 'right' ? 'rup' : 'mup' }); return }
   if (
     backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
     backend === 'linux-uinput'
@@ -672,7 +548,6 @@ export function remoteInputUp(btn: string): void {
 export function remoteInputScroll(delta: number): void {
   const d = Math.round(delta)
   rlogThrottled(S, 'scroll', `滚轮 d=${d}`, 300)
-  if (backend === 'windows-powershell') { winSend({ t: 'scroll', d }); return }
   if (
     backend === 'windows-rust' || backend === 'linux-rust-uinput' || backend === 'macos-rust-cgevent' ||
     backend === 'linux-uinput' || backend === 'macos-cgevent'
@@ -684,8 +559,8 @@ export function remoteInputKeyDown(code: number): void {
   if (!(code > 0)) return
   pendingKeys.add(code)
   rlog(S, `键盘按下 keyCode=${code}`)
-  if (backend === 'windows-powershell' || backend === 'windows-rust') {
-    helperOrWinSend({ t: 'kdown', k: code })
+  if (backend === 'windows-rust') {
+    helperSend({ t: 'kdown', k: code })
     return
   }
   if (backend === 'linux-uinput' || backend === 'linux-rust-uinput') {
@@ -707,8 +582,8 @@ export function remoteInputKeyUp(code: number): void {
   if (!(code > 0)) return
   pendingKeys.delete(code)
   rlog(S, `键盘抬起 keyCode=${code}`)
-  if (backend === 'windows-powershell' || backend === 'windows-rust') {
-    helperOrWinSend({ t: 'kup', k: code })
+  if (backend === 'windows-rust') {
+    helperSend({ t: 'kup', k: code })
     return
   }
   if (backend === 'linux-uinput' || backend === 'linux-rust-uinput') {
@@ -763,7 +638,6 @@ export function remoteInputGamepad(buttons: number[], axes: number[]): void {
 
 /** 控制端指针滑入远程窗口：强制显示被控端光标（保证采集帧里看得到远程鼠标）。 */
 export function remoteInputShowCursor(): void {
-  if (backend === 'windows-powershell') { winSend({ t: 'show' }); return }
   if (backend === 'windows-rust') { helperSend({ t: 'show' }); return }
 }
 
@@ -807,7 +681,7 @@ export function remoteInputReset(): void {
     remoteInputUp('left')
     pendingTouches.clear()
   }
-  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+  if (backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
     // 恢复会话开始时记录的光标状态
     sendWinMode({ t: 'restore' })
@@ -828,7 +702,7 @@ export function remoteInputUnlock(): void {
     remoteInputUp('left')
     pendingTouches.clear()
   }
-  if (backend === 'windows-powershell' || backend === 'windows-rust') {
+  if (backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
     sendWinMode({ t: 'show' })
   }
@@ -838,12 +712,6 @@ export function remoteInputUnlock(): void {
 /** 彻底停止（会话结束）：复位 + 结束常驻进程。 */
 export function remoteInputStop(): void {
   remoteInputReset()
-  if (winProc) {
-    rlog(S, '结束 Windows 注入进程')
-    try { winProc.stdin?.end() } catch { console.warn('结束注入进程stdin失败') }
-    try { winProc.kill() } catch { console.warn('结束win注入进程失败') }
-    winProc = null
-  }
   if (helper) {
     rlog(S, `结束注入助手进程（${helperBackend}）`)
     try { helper.stdin?.end() } catch { console.warn('结束注入助手进程stdin失败')  }
