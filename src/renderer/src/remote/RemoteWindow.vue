@@ -6,7 +6,7 @@
  * LiveKit data 消息发送。窗口关闭自动结束会话并复位/解冻被控端鼠标。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability, type RemoteDisplayMeta } from './RemoteSession'
+import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability, type RemoteDisplayMeta, type RemoteDeviceKind } from './RemoteSession'
 import { mapRemotePoint, containBox, type RemotePoint } from '../utils/remote-coords'
 import { rlog, rwarn } from '../../../shared/remote-log'
 
@@ -31,6 +31,11 @@ const displays = ref<RemoteDisplayMeta[]>([])
 const activeDisplayId = ref('')
 const connected = ref(false)
 const errMsg = ref('')
+
+/** 初始输入设备预判：有多点触控能力的平板按触摸，否则按键鼠；首次实际事件会再校正。 */
+function detectInitialDevice(): RemoteDeviceKind {
+  return navigator.maxTouchPoints > 0 ? 'touch' : 'mouse'
+}
 /** 按住中（拖动期间即使指针移出画面区也继续追踪；松开后只响应画面区内移动） */
 let pressing = false
 /** Pointer Lock 状态：锁定后指针锚在画面中心，靠相对位移控制远程光标 */
@@ -110,6 +115,7 @@ function btnOf(button: number): 'left' | 'middle' | 'right' {
   return button === 2 ? 'right' : button === 1 ? 'middle' : 'left'
 }
 function onMouseMove(e: MouseEvent): void {
+  RemoteSession.announceDevice('mouse')
   if (locked) { moveLocked(e); return }
   const holder = holderEl.value
   const inside = !!holder && holder.contains(e.target as Node)
@@ -119,6 +125,7 @@ function onMouseMove(e: MouseEvent): void {
 }
 function onMouseDown(e: MouseEvent): void {
   if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
+  RemoteSession.announceDevice('mouse')
   // 阻止浏览器原生拖拽/文本选中，否则按住拖动会进入 HTML5 drag，页面收不到后续 mousemove
   e.preventDefault()
   lockPointer()
@@ -155,6 +162,7 @@ function mapTouch(t: Touch): RemotePoint | null {
 }
 function forEachTouch(e: TouchEvent, phase: 'touchdown' | 'touchmove' | 'touchup'): void {
   e.preventDefault()
+  RemoteSession.announceDevice('touch')
   for (const t of Array.from(e.changedTouches)) {
     const p = mapTouch(t)
     if (p) RemoteSession.sendControl({ t: phase, touchId: t.identifier, x: p.x, y: p.y })
@@ -177,6 +185,7 @@ function readGamepad(): Gamepad | null {
 function pollGamepad(): void {
   const g = readGamepad()
   if (!g) return
+  RemoteSession.announceDevice('gamepad')
   const buttons = g.buttons.map((b) => (b.pressed ? 1 : 0))
   const axes = Array.from(g.axes).map((a) => Number(a.toFixed(3)))
   const key = JSON.stringify({ buttons, axes })
@@ -218,7 +227,7 @@ onMounted(() => {
   // 渲染层来得及就自己 stop（会发 bye）；来不及则由主进程在 close 时补发（见 server-ipc）
   window.addEventListener('beforeunload', onBeforeUnload)
   // 建立会话（控制端订阅被控端 SFU 屏幕/声音，键鼠走 LiveKit data）
-  void RemoteSession.startMaster({
+  RemoteSession.startMaster({
     room: props.room,
     sfu: props.sfu!,
     mode: props.mode,
@@ -251,7 +260,7 @@ onMounted(() => {
         setTimeout(() => window.pantry.closeWindow(), 2600)
       }
     }
-  })
+  }).then(() => RemoteSession.announceDevice(detectInitialDevice()))
 })
 function onBeforeUnload(): void {
   // 主动结束：发 bye 通知被控端收场（best-effort，主进程还有一道兜底）

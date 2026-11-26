@@ -7,10 +7,10 @@
 use super::InputBackend;
 use windows::Win32::Foundation::RECT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    KEYBDINPUT, KEYEVENTF_KEYUP, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
-    VIRTUAL_KEY,
+    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+    MOUSEEVENTF_WHEEL, MOUSEINPUT, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ClipCursor, CURSORINFO, GetCursorInfo, GetSystemMetrics, SetCursorPos, ShowCursor,
@@ -54,14 +54,37 @@ impl WindowsBackend {
         SendInput(&[input], core::mem::size_of::<INPUT>() as i32);
     }
 
+    /// 需要 KEYEVENTF_EXTENDEDKEY 的扩展键（右侧修饰、方向键、导航键、右 Win）。
+    fn is_extended(vk: u16) -> bool {
+        matches!(
+            vk,
+            0xA3 | 0xA5 | 0x5C | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x26 | 0x27 | 0x28 | 0x2D | 0x2E
+        )
+    }
+
     unsafe fn send_key(code: u16, down: bool) {
+        // 系统/修饰键（Win、Ctrl/Alt、方向键等）靠扫描码才能被系统钩子与目标程序识别；
+        // 仅给 VK、wScan=0 时这些键经常注入不生效。这里由 VK 反查扫描码，优先按扫描码注入。
+        let scan = MapVirtualKeyW(code as u32, MAPVK_VK_TO_VSC);
+        let mut flags = KEYBD_EVENT_FLAGS(0);
+        let mut wscan: u16 = 0;
+        if scan != 0 {
+            flags |= KEYEVENTF_SCANCODE;
+            wscan = scan as u16;
+            if Self::is_extended(code) {
+                flags |= KEYEVENTF_EXTENDEDKEY;
+            }
+        }
+        if !down {
+            flags |= KEYEVENTF_KEYUP;
+        }
         let input = INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: VIRTUAL_KEY(code),
-                    wScan: 0,
-                    dwFlags: if down { Default::default() } else { KEYEVENTF_KEYUP },
+                    wScan: wscan,
+                    dwFlags: flags,
                     time: 0,
                     dwExtraInfo: 0,
                 },

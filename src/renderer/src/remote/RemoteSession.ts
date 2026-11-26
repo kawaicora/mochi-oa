@@ -31,6 +31,8 @@ import { rlog, rwarn, rlogThrottled, newTraceId } from '../../../shared/remote-l
 
 export type RemoteRole = 'master' | 'slave'
 export type RemoteMode = 'remote' | 'local'
+/** 控制端主输入设备类型：键鼠 / 触摸（平板）/ 手柄。注入仍按实际事件类型路由。 */
+export type RemoteDeviceKind = 'mouse' | 'touch' | 'gamepad'
 
 /**
  * 远程屏幕轨发布参数：画面不允许降清。
@@ -81,6 +83,8 @@ interface ControlMsg {
   active?: string
   /** 触摸触点标识（TouchEvent.identifier） */
   touchId?: number
+  /** 控制端主输入设备类型（键鼠/触摸/手柄） */
+  dev?: RemoteDeviceKind
   /** 手柄按键按下状态数组 / 摇杆轴数组 */
   buttons?: number[]
   axes?: number[]
@@ -90,7 +94,7 @@ export interface RemoteSessionCallbacks {
   /** 控制端：收到被控端屏幕/声音流 */
   onRemoteStream?: (stream: MediaStream) => void
   /** 控制端：收到被控端屏幕元信息（尺寸/模式/键鼠注入能力/显示器列表） */
-  onMeta?: (m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string }) => void
+  onMeta?: (m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string; dev?: RemoteDeviceKind }) => void
   /** 连接状态变化；ended=true 表示会话真的结束了（两端都据此收 UI） */
   onState?: (s: { connected: boolean; ended?: boolean }) => void
   onError?: (msg: string) => void
@@ -125,6 +129,8 @@ class RemoteSession {
   /** 被控端全部显示器与当前活动显示器 id */
   private _displays: RemoteDisplayMeta[] = []
   private _activeDisplay = ''
+  /** 对端主输入设备类型（键鼠/触摸/手柄） */
+  private _deviceKind: RemoteDeviceKind | null = null
 
   get isActive(): boolean { return !this.closed && !!this.room }
   get currentRole(): RemoteRole | null { return this.role }
@@ -136,6 +142,9 @@ class RemoteSession {
 
   /** 控制端：当前活动显示器 id */
   get activeDisplayId(): string { return this._activeDisplay }
+
+  /** 对端主输入设备类型 */
+  get deviceKind(): RemoteDeviceKind | null { return this._deviceKind }
 
   private say(msg: string, ...rest: unknown[]): void {
     rlog(`session/${this.role ?? '?'}${this.trace ? ' ' + this.trace : ''}`, msg, ...rest)
@@ -173,6 +182,7 @@ class RemoteSession {
     this._meta = null
     this._displays = []
     this._activeDisplay = ''
+    this._deviceKind = null
     this.trace = newTraceId('slave')
     this.say(`被控端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
@@ -273,6 +283,12 @@ class RemoteSession {
         void this.switchDisplay(String(msg.id ?? ''))
         return
       }
+      if (msg.t === 'device') {
+        this._deviceKind = msg.dev === 'touch' || msg.dev === 'gamepad' || msg.dev === 'mouse' ? msg.dev : null
+        this.say(`对端输入设备类型=${this._deviceKind ?? '未知'}`)
+        this.sendMeta()
+        return
+      }
       rlogThrottled(`session/${this.role}`, 'ctrl', `收到控制指令 t=${msg.t}`, 1000, msg.t === 'move' ? undefined : msg)
       void window.pantry.remoteInputEvent(msg as unknown as Record<string, unknown>)
     })
@@ -301,6 +317,7 @@ class RemoteSession {
     this._meta = null
     this._displays = []
     this._activeDisplay = ''
+    this._deviceKind = null
     this.trace = newTraceId('master')
     this.say(`控制端开始会话 room=${opts.room} peer=${opts.peerId} mode=${opts.mode} sfu=${opts.sfu.url}`)
 
@@ -355,7 +372,8 @@ class RemoteSession {
           mode: msg.mode === 'remote' ? 'remote' : 'local',
           input: msg.input,
           displays: msg.displays,
-          active: msg.active
+          active: msg.active,
+          dev: msg.dev
         })
         return
       }
@@ -375,6 +393,13 @@ class RemoteSession {
     if (this.role === 'master' && this.isActive) {
       this.dataToPeer(msg)
     }
+  }
+
+  /** 控制端：上报自己的主输入设备类型（键鼠/触摸/手柄），对端据此同步；类型不变不重复发。 */
+  announceDevice(kind: RemoteDeviceKind): void {
+    if (this._deviceKind === kind) return
+    this._deviceKind = kind
+    this.sendControl({ t: 'device', dev: kind })
   }
 
   /** 控制端：请求被控端切换显示器（注入目标 + 采集画面一起切）。 */
@@ -423,17 +448,19 @@ class RemoteSession {
       mode: this.mode,
       input: this.inputCap ?? undefined,
       displays: this._displays,
-      active: this._activeDisplay
+      active: this._activeDisplay,
+      dev: this._deviceKind ?? undefined
     }
     this.dataToPeer(payload)
     this.say(`已上报 meta ${payload.w}x${payload.h} 显示器=${this._displays.length} 注入=${this.inputCap?.backend ?? '探测中'}`)
   }
 
   /** 控制端：接收被控端 meta（屏幕尺寸/模式/注入能力/显示器列表） */
-  private setMeta(m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string }): void {
+  private setMeta(m: { w: number; h: number; mode: RemoteMode; input?: RemoteInputCapability; displays?: RemoteDisplayMeta[]; active?: string; dev?: RemoteDeviceKind }): void {
     this._meta = { w: m.w, h: m.h }
     this._displays = m.displays ?? []
     this._activeDisplay = m.active ?? ''
+    this._deviceKind = m.dev ?? null
     this.callbacks.onMeta?.(m)
   }
 
@@ -482,6 +509,7 @@ class RemoteSession {
     this.inputCap = null
     this._displays = []
     this._activeDisplay = ''
+    this._deviceKind = null
   }
 }
 

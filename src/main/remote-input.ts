@@ -2,7 +2,7 @@
  * Mochi OA - 远程控制输入注入（被控端 main 进程）—— 跨平台。
  *
  * 真实系统级键鼠注入。按平台分派后端（会话开始时探测并把选择结果写进日志）：
- *  - win32 ：内置 Rust 常驻助手（user32 SendInput / ClipCursor / ShowCursor）。
+ *  - win32 ：内置 Rust 常驻助手（user32 SendInput / ClipCursor）。
  *  - linux ：① 内置 Rust 助手（uinput 虚拟键鼠，Wayland / X11 通用）
  *            ② Python3 + uinput 常驻进程（零编译零依赖）
  *            ③ xdotool（兜底：仅 X11）
@@ -13,14 +13,13 @@
  *            需要「辅助功能」权限，启动时用 AXIsProcessTrusted 自检并上报结果。
  *
  * 两种键鼠模式（控制端发起会话时指定）：
- *  - remote：本机鼠标锁定在屏幕边界（ClipCursor），光标始终保持可见以便采集进画面帧；
- *            键鼠事件由控制端上报。
+ *  - remote：本机鼠标锁定在屏幕边界（ClipCursor）；键鼠事件由控制端上报。
  *  - local ：本机鼠标照常显示，仅按归一化坐标同步移动被控端鼠标。
- *  被控端光标在任何模式下都不隐藏；只有 Windows 有「锁定光标边界」的能力，其它平台一律按 local 处理并记日志说明。
+ *  光标是否可见由系统/设备自己决定，注入侧不调用 ShowCursor 强制显示或隐藏。
  *
  * 断线/结束必须复位：
  *  - 鼠标/键盘「按下中」断开 → 补发对应的 Up（防止粘连）。
- *  - Windows 强制解冻 + 显示鼠标（ClipCursor(null) + ShowCursor(true)）多次兜底。
+ *  - Windows 强制解冻光标边界（ClipCursor(null)）兜底。
  */
 
 import { app, screen } from 'electron'
@@ -482,20 +481,14 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
 
   rlog(S, `输入后端 = ${backend} ok=${capability.ok} 说明=${capability.detail}`)
 
-  // 键鼠模式：只有 Windows 有「锁定本机光标边界」的能力；被控端光标任何模式下都保持可见
+  // 键鼠模式：只有 Windows 有「锁定本机光标边界」的能力；光标是否可见交给系统，代码不强制显示/隐藏。
   let effMode = mode
   if (effMode === 'remote' && !IS_WIN) {
     rwarn(S, 'remote 模式（锁定本机光标边界）在 Windows 之外不可用，本会话按 local 处理（仅同步位置）')
     effMode = 'local'
   }
-  if (IS_WIN) {
-    // 先抓拍会话开始时的原始光标状态作为断开恢复基线，再强制显示
-    if (backend === 'windows-rust') helperSend({ t: 'record' })
-    sendWinMode({ t: 'show' })
-  }
   if (effMode === 'remote') {
     if (!cursorLocked) { sendWinMode({ t: 'cliplock' }); cursorLocked = true }
-    // 光标必须保留在屏幕/画面帧里，控制端直接看到远程鼠标位置，不隐藏被控端光标。
   } else if (IS_WIN) {
     sendWinMode({ t: 'clipfree' })
     cursorLocked = false
@@ -505,16 +498,21 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
 
 // ─────────────────────────── 指令分发 ───────────────────────────
 
+/** 已换算成注入全局坐标后的移动路由（触摸兜底复用，避免二次叠加屏偏移/缩放）。 */
+function injectMoveGlobal(pt: { x: number; y: number }): void {
+  if (backend === 'windows-rust' || backend === 'macos-rust-cgevent' || backend === 'macos-cgevent') {
+    helperSend({ t: 'move', x: pt.x, y: pt.y }); return
+  }
+  if (backend === 'linux-rust-uinput' || backend === 'linux-uinput') { helperSend({ t: 'move', x: pt.x, y: pt.y }); return }
+  if (backend === 'linux-xdotool') linuxXdotoolMove(pt.x, pt.y)
+}
+
 export function remoteInputMove(x: number, y: number): void {
   const px = Math.round(x)
   const py = Math.round(y)
   const pt = transformPointPure(activeDisplay, px, py, PLATFORM)
   rlogThrottled(S, 'move', `鼠标移动到 ${px},${py} → 注入 ${pt.x},${pt.y}`, 1000)
-  if (backend === 'windows-rust' || backend === 'macos-rust-cgevent' || backend === 'macos-cgevent') {
-    helperSend({ t: 'move', x: pt.x, y: pt.y }); return
-  }
-  if (backend === 'linux-rust-uinput' || backend === 'linux-uinput') { helperSend({ t: 'move', x: px, y: py }); return }
-  if (backend === 'linux-xdotool') linuxXdotoolMove(px, py)
+  injectMoveGlobal(pt)
 }
 
 function btnName(btn: string): 'left' | 'right' | 'middle' {
@@ -613,12 +611,12 @@ export function remoteInputTouch(phase: string, id: number, x: number, y: number
   if (phase === 'down') {
     // 兜底单触点：只把第一路触点映射成左键，避免多指互相顶起
     if (pendingTouches.size === 0) {
-      remoteInputMove(pt.x, pt.y)
+      injectMoveGlobal(pt)
       remoteInputDown('left')
     }
     pendingTouches.add(id)
   } else if (phase === 'move') {
-    if (pendingTouches.has(id) && pendingTouches.size === 1) remoteInputMove(pt.x, pt.y)
+    if (pendingTouches.has(id) && pendingTouches.size === 1) injectMoveGlobal(pt)
   } else {
     pendingTouches.delete(id)
     if (pendingTouches.size === 0) remoteInputUp('left')
@@ -636,14 +634,23 @@ export function remoteInputGamepad(buttons: number[], axes: number[]): void {
   }
 }
 
-/** 控制端指针滑入远程窗口：强制显示被控端光标（保证采集帧里看得到远程鼠标）。 */
+/** 光标可见性由系统/设备自己决定，注入侧不再强制显示或隐藏鼠标。 */
 export function remoteInputShowCursor(): void {
-  if (backend === 'windows-rust') { helperSend({ t: 'show' }); return }
+  // 保留空实现以兼容旧的 cursorShow 指令；不调用 ShowCursor。
 }
 
 /** 统一分发一条控制端经 DataChannel 发来的控制指令（{ t, ... }）。 */
+/** 需要注入后端的指令类型；后端不可用时显式告警，不静默丢弃。 */
+const INJECT_EVENTS = new Set([
+  'move', 'down', 'up', 'scroll', 'kdown', 'kup', 'touchdown', 'touchmove', 'touchup', 'gamepad'
+])
+
 export function remoteInputDispatch(evt: Record<string, unknown>): void {
   const t = typeof evt?.t === 'string' ? evt.t : ''
+  if (backend === 'none' && INJECT_EVENTS.has(t)) {
+    rwarn(S, `注入后端不可用，丢弃指令 t=${t}`)
+    return
+  }
   switch (t) {
     case 'move': remoteInputMove(Number(evt.x) || 0, Number(evt.y) || 0); break
     case 'down': remoteInputDown(String(evt.btn ?? 'left')); break
@@ -666,8 +673,8 @@ export function remoteInputDispatch(evt: Record<string, unknown>): void {
 }
 
 /**
- * 断线/结束复位：补发所有「按下中」的 Up，解冻光标边界，并按会话开始时抓拍的
- * 基线恢复光标可见性（不把强制显示遗留到会话结束后）。
+ * 断线/结束复位：补发所有「按下中」的 Up，解冻光标边界。
+ * 光标可见性交给系统，不在此恢复或强制显隐。
  */
 export function remoteInputReset(): void {
   if (pendingButtons.size || pendingKeys.size) {
@@ -683,15 +690,13 @@ export function remoteInputReset(): void {
   }
   if (backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
-    // 恢复会话开始时记录的光标状态
-    sendWinMode({ t: 'restore' })
   }
   cursorLocked = false
 }
 
 /**
- * 快捷键解锁被控端本地鼠标：解冻光标边界 + 强制显示光标 + 复位按下中。
- * 仅解锁当前会话，不结束会话，也不改动断开时的恢复基线。
+ * 快捷键解锁被控端本地鼠标：解冻光标边界 + 复位按下中。
+ * 仅解锁当前会话，不改动光标可见性。
  */
 export function remoteInputUnlock(): void {
   for (const b of [...pendingButtons]) remoteInputUp(b)
@@ -704,7 +709,6 @@ export function remoteInputUnlock(): void {
   }
   if (backend === 'windows-rust') {
     sendWinMode({ t: 'clipfree' })
-    sendWinMode({ t: 'show' })
   }
   cursorLocked = false
 }

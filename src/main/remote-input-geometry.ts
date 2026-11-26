@@ -33,7 +33,7 @@ export function displayPhysicalSize(d: RemoteDisplayInfo, platform: InputPlatfor
   return { w: d.w, h: d.h }
 }
 
-/** 把「活动屏本地坐标」换算成注入 API 使用的全局坐标。 */
+/** 把「活动屏本地物理坐标」换算成注入 API 使用的全局物理坐标。 */
 export function transformPoint(
   d: RemoteDisplayInfo,
   x: number,
@@ -42,7 +42,8 @@ export function transformPoint(
 ): { x: number; y: number } {
   if (platform === 'win32') {
     const sf = d.scaleFactor || 1
-    return { x: Math.round(d.x * sf + x * sf), y: Math.round(d.y * sf + y * sf) }
+    // 入参 x/y 已是本地物理像素；只叠加物理屏偏移（DIP 偏移 × 系数），不再二次缩放。
+    return { x: Math.round(d.x * sf + x), y: Math.round(d.y * sf + y) }
   }
   if (platform === 'darwin') {
     return { x: Math.round(d.x + x), y: Math.round(d.y + y) }
