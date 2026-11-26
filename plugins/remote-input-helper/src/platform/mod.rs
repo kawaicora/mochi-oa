@@ -17,26 +17,6 @@ pub trait InputBackend {
     fn mouse_up(&mut self, btn: &str) -> Result<(), String>;
     fn scroll(&mut self, delta: i32) -> Result<(), String>;
     fn key(&mut self, code: u32, down: bool) -> Result<(), String>;
-    /// 锁定光标在屏幕边界（仅 Windows 实现）。
-    fn clip_lock(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    /// 解除边界锁定（仅 Windows 实现）。
-    fn clip_free(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    /// 会话开始：抓拍当前光标可见性作为断开时的恢复基线（仅 Windows 实现）。
-    fn record_cursor(&mut self) -> Result<bool, String> {
-        Ok(true)
-    }
-    /// 兜底显示光标（仅 Windows 实现；其它平台光标本就不隐藏）。
-    fn show_cursor(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-    /// 会话结束：恢复会话开始时记录的光标状态（仅 Windows 实现）。
-    fn restore_cursor(&mut self) -> Result<(), String> {
-        Ok(())
-    }
     /// 手柄状态上报（标准映射：buttons 按键位图，axes 摇杆轴 -1..1）。
     /// 默认空实现；Windows ViGEmBus / Linux uinput 手柄设备接入后覆写。
     fn gamepad_report(&mut self, _buttons: &[u8], _axes: &[f32]) -> Result<(), String> {

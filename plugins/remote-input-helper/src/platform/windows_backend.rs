@@ -1,40 +1,22 @@
-//! Windows 后端：user32 SendInput / SetCursorPos / ClipCursor / ShowCursor。
+//! Windows 后端：user32 SendInput / SetCursorPos。
 //!
-//! 与旧 PowerShell 助手同一套 user32 口径，只是换成常驻原生进程，去掉 PS 管道
-//! 序列化与脚本解析抖动。仍是用户态注入：向管理员窗口发送受 UIPI 限制，
-//! 这一点由主进程在能力描述里提示。
+//! 只做键鼠/触摸/手柄事件注入；不锁定鼠标边界、不改动光标可见性（是否显示由系统决定）。
+//! 仍是用户态注入：向管理员窗口发送受 UIPI 限制，这一点由主进程在能力描述里提示。
 
 use super::InputBackend;
-use windows::Win32::Foundation::RECT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
     MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
     MOUSEEVENTF_WHEEL, MOUSEINPUT, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VIRTUAL_KEY,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    ClipCursor, CURSORINFO, GetCursorInfo, GetSystemMetrics, SetCursorPos, ShowCursor,
-    SM_CXSCREEN, SM_CYSCREEN,
-};
+use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
 
-/// CURSORINFO.flags：光标可见标志
-const CURSORINFO_FLAG_VISIBLE: u32 = 0x1;
-pub struct WindowsBackend {
-    /** 会话开始时记录的原始光标可见性；None 表示尚未记录/非 Windows 路径 */
-    baseline_visible: Option<bool>,
-}
+pub struct WindowsBackend {}
 
 impl WindowsBackend {
     pub fn new() -> Self {
-        Self { baseline_visible: None }
-    }
-
-    unsafe fn query_visible() -> bool {
-        let mut ci = CURSORINFO {
-            cbSize: core::mem::size_of::<CURSORINFO>() as u32,
-            ..Default::default()
-        };
-        GetCursorInfo(&mut ci).is_ok() && (ci.flags.0 & CURSORINFO_FLAG_VISIBLE) != 0
+        Self {}
     }
 
     unsafe fn send_mouse(flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS, data: u32) {
@@ -138,66 +120,6 @@ impl InputBackend for WindowsBackend {
 
     fn key(&mut self, code: u32, down: bool) -> Result<(), String> {
         unsafe { Self::send_key(code as u16, down) };
-        Ok(())
-    }
-
-    fn clip_lock(&mut self) -> Result<(), String> {
-        unsafe {
-            let rect = RECT {
-                left: 0,
-                top: 0,
-                right: GetSystemMetrics(SM_CXSCREEN),
-                bottom: GetSystemMetrics(SM_CYSCREEN),
-            };
-            ClipCursor(Some(&rect)).map_err(|e| format!("ClipCursor 锁定失败：{e}"))?;
-        }
-        Ok(())
-    }
-
-    fn clip_free(&mut self) -> Result<(), String> {
-        unsafe {
-            ClipCursor(None).map_err(|e| format!("ClipCursor 解冻失败：{e}"))?;
-        }
-        Ok(())
-    }
-
-    fn record_cursor(&mut self) -> Result<bool, String> {
-        let visible = unsafe { Self::query_visible() };
-        self.baseline_visible = Some(visible);
-        Ok(visible)
-    }
-
-    fn show_cursor(&mut self) -> Result<(), String> {
-        // 递增显示计数直到光标可见（复位上一会话遗留的隐藏计数），最多 10 次兜底
-        unsafe {
-            for _ in 0..10 {
-                ShowCursor(true);
-                if Self::query_visible() {
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn restore_cursor(&mut self) -> Result<(), String> {
-        match self.baseline_visible {
-            Some(false) => {
-                // 会话前原本隐藏：递减计数直到重新隐藏，最多 10 次兜底
-                unsafe {
-                    for _ in 0..10 {
-                        ShowCursor(false);
-                        if !Self::query_visible() {
-                            break;
-                        }
-                    }
-                }
-            }
-            // 会话前可见（或未记录）：保持显示即可
-            _ => {
-                self.show_cursor()?;
-            }
-        }
         Ok(())
     }
 }

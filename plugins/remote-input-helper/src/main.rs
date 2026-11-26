@@ -9,7 +9,7 @@
 //!   {"t":"down"|"up","btn":"left|right|middle"}
 //!   {"t":"scroll","d":±120}                 正=上滚
 //!   {"t":"kdown"|"kup","k":<原生键码>}       兼容旧字段 c
-//!   {"t":"cliplock"|"clipfree"|"show"|"record"|"restore"|"ping"}
+//!   {"t":"ping"}
 //!
 //! 结果：{"ok":true,...} / {"ok":false,"reason":"..."}
 
@@ -74,15 +74,6 @@ fn dispatch(b: &mut dyn platform::InputBackend, cmd: &Cmd) -> Result<(), String>
             }
             b.key(code, false)
         }
-        "cliplock" => b.clip_lock(),
-        "clipfree" => b.clip_free(),
-        "show" => b.show_cursor(),
-        "record" => {
-            let visible = b.record_cursor()?;
-            emit_json(&serde_json::json!({ "ok": true, "visible": visible }));
-            Ok(())
-        }
-        "restore" => b.restore_cursor(),
         "gamepad" => {
             let buttons: &[u8] = cmd.buttons.as_deref().unwrap_or(&[]);
             let axes: &[f32] = cmd.axes.as_deref().unwrap_or(&[]);

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerServerIpcHandlers } from './server-ipc'
 import { registerPermissionHandlers } from './permissions'
-import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputUnlock, remoteInputShutdown, remoteInputListDisplays, remoteInputSwitchDisplay, remoteInputActiveDisplay } from './remote-input'
+import { remoteInputStart, remoteInputDispatch, remoteInputStop, remoteInputReleaseStuck, remoteInputShutdown, remoteInputListDisplays, remoteInputSwitchDisplay, remoteInputActiveDisplay } from './remote-input'
 import { clearSystemProxy } from './system-proxy'
 import { IpcChannels, IpcEvents, type NotifTarget } from '../shared/ipc'
 import { hotkey } from './hotkey'
@@ -123,6 +123,7 @@ function showMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+  mainWindow.moveTop()
   stopFlashTray()
 }
 
@@ -305,9 +306,9 @@ app.whenReady().then(() => {
 
   // ── 全局快捷键 ──
   function dispatchHotkey(action: HotkeyAction): void {
-    if (action === 'remoteUnlock') {
-      // 被控端：解冻本地被 ClipCursor 锁定的鼠标 + 显示光标（并复位按下中的键/钮）
-      remoteInputUnlock()
+    if (action === 'remoteRelease') {
+      // 释放卡住的鼠标/按键（补发抬起事件）；不锁定鼠标边界，不改光标可见性
+      remoteInputReleaseStuck()
       return
     }
     if (action === 'screenshot') {

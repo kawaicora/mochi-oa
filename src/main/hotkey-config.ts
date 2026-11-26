@@ -27,13 +27,16 @@ function normalizeItem(raw: unknown, fallback: HotkeyItem): HotkeyItem {
   }
 }
 
-/** 读取配置；合并默认值补齐新增动作/缺失字段。 */
+/** 读取配置；合并默认值补齐新增动作/缺失字段。兼容旧版落盘的 remoteUnlock 键名。 */
 export function loadHotkeyConfig(): HotkeyConfig {
   const fallback = DEFAULT_HOTKEY_CONFIG
   try {
     const file = configPath()
     if (!existsSync(file)) return structuredClone(fallback)
-    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<Record<HotkeyAction, unknown>>
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<Record<HotkeyAction | 'remoteUnlock', unknown>>
+    // 旧版动作键名迁移：remoteUnlock → remoteRelease
+    const legacy = parsed.remoteUnlock
+    if (legacy && !parsed.remoteRelease) parsed.remoteRelease = legacy
     const out = {} as HotkeyConfig
     for (const a of HOTKEY_ACTIONS) {
       out[a] = normalizeItem(parsed[a], fallback[a])

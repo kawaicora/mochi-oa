@@ -2,9 +2,8 @@
 /**
  * 控制端远程查看面板（客户端对客户端，旧内嵌方案残留：实际会话由 RemoteWindow
  * 独立窗口建立，RemoteSession 已 SFU 化）。
- * 显示被控端屏幕 + 系统声音，采集本机键鼠事件 → 归一化坐标 → LiveKit data 发送。
- * 控制端默认显示鼠标（不需要隐藏）。mode=remote 时被控端本机鼠标锁定+隐藏；
- * mode=local 时仅同步位置。
+ * 显示被控端屏幕 + 系统声音，采集控制端键鼠事件 → 归一化坐标 → LiveKit data 发送。
+ * 光标可见性由被控端系统自己决定，注入侧不强制显示或隐藏。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession from './RemoteSession'

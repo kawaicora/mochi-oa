@@ -4,7 +4,7 @@
  * 统一走 LiveKit SFU：
  *  - 被控端（slave）：采集屏幕 + 系统声音 → publishTrack 发布到 LiveKit room；
  *    键鼠控制指令经 LiveKit data 消息接收 → IPC → main 进程真实注入键鼠。
- *  - 控制端（master）：TrackSubscribed 订阅被控端屏幕/声音；本机键鼠事件 →
+ *  - 控制端（master）：TrackSubscribed 订阅被控端屏幕/声音；控制端键鼠事件 →
  *    归一化坐标 → LiveKit data（publishData，destination=被控端）发送。
  *  - 屏幕元信息 meta / 结束 bye 也走 LiveKit data（被控端 → 控制端）。
  *
@@ -46,6 +46,11 @@ const SCREEN_PUBLISH_OPTIONS: TrackPublishOptions = {
   screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 30, priority: 'high' },
   videoEncoding: { maxBitrate: 12_000_000, maxFramerate: 30, priority: 'high' }
 }
+
+/** 心跳周期（控制端 → 被控端 ping）；被控端超过该超时仍未收到对端任何消息即判定掉线并收场。 */
+const HEARTBEAT_INTERVAL_MS = 2000
+const PEER_TIMEOUT_MS = 6000
+const WATCHDOG_INTERVAL_MS = 1000
 
 /** 被控端键鼠注入能力（main 进程探测，透传给控制端提示用） */
 export interface RemoteInputCapability {
@@ -131,6 +136,10 @@ class RemoteSession {
   private _activeDisplay = ''
   /** 对端主输入设备类型（键鼠/触摸/手柄） */
   private _deviceKind: RemoteDeviceKind | null = null
+  /** 控制端心跳定时器；被控端看门狗定时器；被控端最近一次收到对端消息的时间戳 */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null
+  private lastPeerAt = 0
 
   get isActive(): boolean { return !this.closed && !!this.room }
   get currentRole(): RemoteRole | null { return this.role }
@@ -157,6 +166,51 @@ class RemoteSession {
   /** 对端在 LiveKit room 里的 participant identity = String(peerId) */
   private peerIdentity(): string {
     return String(this.peerId)
+  }
+
+  /** 对端进程崩溃/掉线（未发 bye）：ParticipantDisconnected 兜底收场，释放输入并清状态。 */
+  private subscribePeerLeave(room: Room): void {
+    room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+      if (this.closed) return
+      if (participant?.identity === this.peerIdentity()) {
+        this.say('对端断开（participantDisconnected）→ 结束会话')
+        this.stop('peer-disconnected')
+      }
+    })
+  }
+
+  /** 控制端：周期发 ping 心跳，让被控端看门狗能及时发现硬断电/崩溃。 */
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      this.dataToPeer({ t: 'ping' })
+    }, HEARTBEAT_INTERVAL_MS)
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
+  }
+
+  /** 被控端：看门狗。超过 PEER_TIMEOUT_MS 没收到对端任何消息（含 ping）即判定掉线，主动收场释放粘连输入。 */
+  private startWatchdog(): void {
+    this.stopWatchdog()
+    this.lastPeerAt = Date.now()
+    this.watchdogTimer = setInterval(() => {
+      if (this.closed) return
+      if (Date.now() - this.lastPeerAt > PEER_TIMEOUT_MS) {
+        this.sayErr(`心跳超时（${PEER_TIMEOUT_MS}ms 未收到对端消息）→ 结束会话`)
+        this.stop('peer-timeout')
+      }
+    }, WATCHDOG_INTERVAL_MS)
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) { clearInterval(this.watchdogTimer); this.watchdogTimer = null }
+  }
+
+  private clearTimers(): void {
+    this.stopHeartbeat()
+    this.stopWatchdog()
   }
 
   /** 通过 LiveKit data 消息发给对端（通用 sendData，destination 限定对端） */
@@ -204,6 +258,8 @@ class RemoteSession {
       return false
     }
     this.room = room
+    this.subscribePeerLeave(room)
+    this.startWatchdog()
     this.say(`已连接 SFU room=${opts.sfu.roomName}`)
 
     // 2. 采集屏幕 + 系统声音（48kHz / 2ch / 高音质）
@@ -268,12 +324,14 @@ class RemoteSession {
     room.on(RoomEvent.DataReceived, (payload, participant) => {
       if (this.closed) return
       if (participant?.identity !== this.peerIdentity()) return
+      this.lastPeerAt = Date.now()
       let msg: ControlMsg
       try {
         msg = JSON.parse(new TextDecoder().decode(payload)) as ControlMsg
       } catch {
         return
       }
+      if (msg.t === 'ping') return
       if (msg.t === 'bye') {
         this.say('收到对端 bye → 结束会话')
         this.stop('peer-bye')
@@ -338,6 +396,8 @@ class RemoteSession {
       return false
     }
     this.room = room
+    this.subscribePeerLeave(room)
+    this.startHeartbeat()
     this.say(`已连接 SFU room=${opts.sfu.roomName}`)
 
     // 订阅被控端屏幕/声音
@@ -470,8 +530,8 @@ class RemoteSession {
   }
 
   /**
-   * 停止会话：先通知对端（bye），再复位/解冻鼠标、断开 SFU 与流，最后回报 ended。
-   * 可重复调用（只有第一次生效）。
+   * 停止会话：先通知对端（bye），再补发按下中的 Up 释放粘连、断开 SFU 与流，最后回报 ended。
+   * 不锁定/解冻鼠标边界，不改光标可见性。可重复调用（只有第一次生效）。
    */
   stop(reason = 'manual'): void {
     if (this.closed) return
@@ -485,10 +545,11 @@ class RemoteSession {
     } catch { /* ignore */ }
 
     if (role === 'slave') {
-      // 复位：补发按下中的 Up + 强制解冻 + 显示鼠标（宁可多执行）
+      // 复位：补发按下中的 Up，释放粘连的鼠标/按键；不锁定边界、不改光标显隐
       void window.pantry.remoteInputStop()
     }
 
+    this.clearTimers()
     this.room?.disconnect()
     this.room = null
 

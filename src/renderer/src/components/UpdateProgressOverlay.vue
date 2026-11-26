@@ -73,6 +73,15 @@ function onState(d: StatePayload): void {
       // 错误信息停留几秒后收起
       setTimeout(() => { visible.value = false }, 6000)
       break
+    case 'latest':
+      isDone.value = true
+      isInstalling.value = false
+      isError.value = false
+      title.value = '已是最新版本'
+      stateText.value = d.message ?? '当前已是最新版本'
+      // 最新提示短暂停留后收起
+      setTimeout(() => { visible.value = false }, 4000)
+      break
     case 'done':
       isDone.value = true
       isInstalling.value = false

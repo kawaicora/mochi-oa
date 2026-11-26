@@ -3,7 +3,7 @@
  * 独立远程控制窗口（控制端）。
  * 无边框 + 主窗口样式 + 可缩放（缩放不压缩内部布局，画面 object-fit: contain）。
  * 窗口内建立 LiveKit SFU 会话：订阅被控端屏幕 + 系统声音（48kHz/2ch），键鼠经
- * LiveKit data 消息发送。窗口关闭自动结束会话并复位/解冻被控端鼠标。
+ * LiveKit data 消息发送。窗口关闭自动结束会话并补发抬起事件释放粘连；不锁定被控端鼠标边界，不改光标显隐。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RemoteSession, { type RemoteMode, type RemoteRole, type RemoteInputCapability, type RemoteDisplayMeta, type RemoteDeviceKind } from './RemoteSession'
@@ -38,6 +38,9 @@ function detectInitialDevice(): RemoteDeviceKind {
 }
 /** 按住中（拖动期间即使指针移出画面区也继续追踪；松开后只响应画面区内移动） */
 let pressing = false
+/** 控制端当前按住中的鼠标按键 / 键盘键码；窗口失焦、卸载或指针锁退出时补发抬起，防止被控端粘连 */
+const heldButtons = new Set<string>()
+const heldKeys = new Set<number>()
 /** Pointer Lock 状态：锁定后指针锚在画面中心，靠相对位移控制远程光标 */
 let locked = false
 /** 锁定期间的虚拟远程光标坐标（被控端屏幕像素）；未锁定为 null */
@@ -71,6 +74,12 @@ function lockPointer(): void {
 
 function unlockPointer(): void {
   if (locked) { try { document.exitPointerLock() } catch { /* ignore */ } }
+}
+
+/** 窗口失焦：释放按住中的输入并退出指针锁（指针锁不跟到后台窗口）。 */
+function onRemoteBlur(): void {
+  flushRelease()
+  unlockPointer()
 }
 
 function onLockChange(): void {
@@ -132,24 +141,23 @@ function onMouseDown(e: MouseEvent): void {
   const p = locked && virt ? virt : screenOf(e)
   if (!p) return
   pressing = true
+  const btn = btnOf(e.button)
   // 先把光标落到按下点，再按下，保证拖动起点在正确位置
   RemoteSession.sendControl({ t: 'move', x: p.x, y: p.y })
-  RemoteSession.sendControl({ t: 'down', btn: btnOf(e.button) })
+  RemoteSession.sendControl({ t: 'down', btn })
+  heldButtons.add(btn)
 }
 function onMouseUp(e: MouseEvent): void {
   if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
   pressing = false
-  RemoteSession.sendControl({ t: 'up', btn: btnOf(e.button) })
+  const btn = btnOf(e.button)
+  RemoteSession.sendControl({ t: 'up', btn })
+  heldButtons.delete(btn)
 }
 function onContextMenu(e: MouseEvent): void {
   // 右键拖动时不弹本机菜单，避免打断远程右键按住
   e.preventDefault()
 }
-function onEnterStage(): void {
-  // 指针滑入远程窗口：要求被控端强制显示鼠标（采集帧里可见远程光标）
-  RemoteSession.sendControl({ t: 'cursorShow' })
-}
-
 // ── 触摸采集（Windows 触控屏平板）：多点触控 down/move/up，长按=触点保持按下 ──
 function mapTouch(t: Touch): RemotePoint | null {
   const m = meta.value
@@ -199,12 +207,31 @@ function onWheel(e: WheelEvent): void {
   RemoteSession.sendControl({ t: 'scroll', d: e.deltaY })
 }
 function onKeyDown(e: KeyboardEvent): void {
+  // Esc 为解锁快捷键：退出指针锁，不转发给被控端
+  if (e.key === 'Escape') { unlockPointer(); return }
   const k = e.keyCode || e.which
-  if (k) RemoteSession.sendControl({ t: 'kdown', k })
+  if (!k) return
+  // 会话期间按键一律转发远程：阻止本机浏览器/应用内默认行为（Win 键、系统级热键仍需主进程钩子拦截，见 14.11）
+  e.preventDefault()
+  if (e.repeat) return
+  RemoteSession.sendControl({ t: 'kdown', k })
+  heldKeys.add(k)
 }
 function onKeyUp(e: KeyboardEvent): void {
+  e.preventDefault()
   const k = e.keyCode || e.which
-  if (k) RemoteSession.sendControl({ t: 'kup', k })
+  if (!k) return
+  RemoteSession.sendControl({ t: 'kup', k })
+  heldKeys.delete(k)
+}
+
+/** 补发所有按住中的鼠标/按键抬起事件，清空本地按住状态；用于失焦、卸载、指针锁退出等收不住 up 的场景。 */
+function flushRelease(): void {
+  for (const btn of heldButtons) RemoteSession.sendControl({ t: 'up', btn })
+  heldButtons.clear()
+  for (const k of heldKeys) RemoteSession.sendControl({ t: 'kup', k })
+  heldKeys.clear()
+  pressing = false
 }
 function onSwitchDisplay(e: Event): void {
   const id = (e.target as HTMLSelectElement).value
@@ -219,8 +246,11 @@ onMounted(() => {
   document.addEventListener('keyup', onKeyUp)
   document.addEventListener('pointerlockchange', onLockChange)
   document.addEventListener('pointerlockerror', onLockError)
-  window.addEventListener('gamepadconnected', onPadConnect)
-  window.addEventListener('gamepaddisconnected', onPadConnect)
+  // 窗口失焦 / 指针滑出窗口时收不住 up：补发抬起，避免被控端按键/鼠标粘连；失焦同时退出指针锁
+  window.addEventListener('blur', onRemoteBlur)
+  document.addEventListener('mouseleave', flushRelease)
+  window.removeEventListener('gamepadconnected', onPadConnect)
+  window.removeEventListener('gamepaddisconnected', onPadConnect)
   padTimer = setInterval(pollGamepad, 50)
   rlog('window', `远程窗口打开 room=${props.room} peer=${props.peerId}(${props.peerName}) mode=${props.mode}`)
   // 窗口被关掉（任务栏 X / Alt+F4 / 系统关闭）时也要收场：
@@ -268,6 +298,7 @@ function onBeforeUnload(): void {
   RemoteSession.stop('window-unload')
 }
 onBeforeUnmount(() => {
+  flushRelease()
   pressing = false
   unlockPointer()
   document.removeEventListener('mousemove', onMouseMove)
@@ -276,6 +307,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('pointerlockchange', onLockChange)
   document.removeEventListener('pointerlockerror', onLockError)
+  window.removeEventListener('blur', onRemoteBlur)
+  document.removeEventListener('mouseleave', flushRelease)
   window.removeEventListener('gamepadconnected', onPadConnect)
   window.removeEventListener('gamepaddisconnected', onPadConnect)
   if (padTimer) { clearInterval(padTimer); padTimer = null }
@@ -330,7 +363,7 @@ function close(): void {
     </div>
 
     <!-- 画面区：缩放不压缩布局（object-fit contain），键鼠事件采集 -->
-    <div ref="holderEl" class="rw-stage" @mouseenter="onEnterStage" @mousedown="onMouseDown" @wheel="onWheel" @contextmenu.prevent="onContextMenu" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd" @touchcancel="onTouchEnd">
+    <div ref="holderEl" class="rw-stage" @mousedown="onMouseDown" @wheel="onWheel" @contextmenu.prevent="onContextMenu" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd" @touchcancel="onTouchEnd">
       <video ref="videoEl" autoplay playsinline muted draggable="false" class="rw-video" />
       <div v-if="!stream" class="rw-loading">
         {{ errMsg || (connected ? '正在建立远程控制连接…' : '等待对端接受远程控制…') }}

@@ -6,17 +6,17 @@
  *  - 启动：开机自启
  *  - 主邮件：仅服务器管理员可配 SMTP
  */
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useServerStore } from '../stores/server'
 import { useAppStore } from '../stores/app'
-import type { HotkeyAction, HotkeyConfig, HotkeyConflict } from '@shared/hotkey'
+import { DEFAULT_HOTKEY_CONFIG, type HotkeyAction, type HotkeyConfig, type HotkeyConflict } from '@shared/hotkey'
 
 const emit = defineEmits<{ close: [] }>()
 
 const server = useServerStore()
 const app = useAppStore()
 
-const tab = ref<'server' | 'notify' | 'launch' | 'hotkey' | 'mail'>('server')
+const tab = ref<'server' | 'notify' | 'launch' | 'hotkey' | 'mail' | 'about'>('server')
 
 // ── 服务器连接 ──
 const srvHost = ref('')
@@ -150,14 +150,16 @@ async function onSaveMainMail(): Promise<void> {
 
 // ── 全局快捷键 ──
 const HOTKEY_META: Record<HotkeyAction, { label: string; desc: string }> = {
-  remoteUnlock: { label: '解锁被控端鼠标', desc: '远程控制期间按此快捷键，解锁被控端被锁定的本地鼠标（解冻并显示光标）' },
+  remoteRelease: { label: '释放卡住的鼠标/按键', desc: '远程会话中断或拖动卡住时，补发所有按下中的鼠标/按键抬起事件，防止按键粘连；不锁定鼠标边界，也不改动光标显隐' },
   screenshot: { label: '截图发送', desc: '打开截图编辑器，框选/标注后保存并发送到当前会话' }
 }
-const hk = ref<HotkeyConfig>({
-  remoteUnlock: { enabled: true, accelerator: 'Ctrl+Enter' },
-  screenshot: { enabled: false, accelerator: '' }
-})
+const hk = ref<HotkeyConfig>(structuredClone(DEFAULT_HOTKEY_CONFIG))
 const hkConflicts = ref<HotkeyConflict[]>([])
+/** 关于页：应用版本 / 检查更新状态 */
+const appVersion = ref('')
+const appName = ref('')
+const updateChecking = ref(false)
+const updateStatus = ref('')
 /** 正在录制组合键的动作；null 表示空闲 */
 const recording = ref<HotkeyAction | null>(null)
 
@@ -210,10 +212,38 @@ async function toggleHotkey(a: HotkeyAction): Promise<void> {
 }
 
 async function saveHotkey(): Promise<void> {
-  const r = await window.pantry.hotkeySet(structuredClone(hk.value))
+  // 不能直接 structuredClone(reactive 代理)，会抛 DataCloneError；先 JSON 转成纯对象再发 IPC
+  const payload = JSON.parse(JSON.stringify(hk.value)) as HotkeyConfig
+  const r = await window.pantry.hotkeySet(payload)
   hk.value = r.config
   hkConflicts.value = r.conflicts
 }
+
+/** 手动触发版本检查；检查过程/结果由 updateState 事件回报 */
+async function onCheckUpdate(): Promise<void> {
+  updateChecking.value = true
+  updateStatus.value = ''
+  try {
+    await window.pantry.checkUpdate()
+  } catch {
+    updateChecking.value = false
+    updateStatus.value = '检查更新失败，请稍后再试'
+  }
+}
+
+function onUpdateState(d: { state: string; version?: string; message?: string }): void {
+  if (d.state === 'latest') {
+    updateChecking.value = false
+    updateStatus.value = d.message ?? '已是最新版本'
+  } else if (d.state === 'error') {
+    updateChecking.value = false
+    updateStatus.value = d.message ?? '检查更新失败'
+  } else if (d.state === 'downloading' || d.state === 'installing') {
+    updateStatus.value = d.message ?? ''
+  }
+}
+
+let offUpdateState: (() => void) | null = null
 
 onMounted(async () => {
   const cfg = await window.pantry.serverGetSettings()
@@ -236,7 +266,17 @@ onMounted(async () => {
   } catch (e) {
     console.warn('[settings] 读取快捷键配置失败：', e)
   }
+  offUpdateState = window.pantry.onUpdateState(onUpdateState)
+  try {
+    const info = await window.pantry.getAppInfo()
+    appName.value = info.name
+    appVersion.value = info.version
+  } catch { /* 版本号取不到则留空 */ }
   void loadMainMail()
+})
+
+onBeforeUnmount(() => {
+  offUpdateState?.()
 })
 </script>
 
@@ -249,6 +289,7 @@ onMounted(async () => {
         <button class="ps-tab" :class="{ on: tab === 'notify' }" @click="tab = 'notify'">通知</button>
         <button class="ps-tab" :class="{ on: tab === 'launch' }" @click="tab = 'launch'">启动</button>
         <button class="ps-tab" :class="{ on: tab === 'hotkey' }" @click="tab = 'hotkey'">快捷键</button>
+        <button class="ps-tab" :class="{ on: tab === 'about' }" @click="tab = 'about'">关于</button>
         <button v-if="mailServerAdmin" class="ps-tab" :class="{ on: tab === 'mail' }" @click="tab = 'mail'">主邮件</button>
       </div>
 
@@ -358,7 +399,7 @@ onMounted(async () => {
       <!-- 快捷键 -->
       <div v-else-if="tab === 'hotkey'" class="modal-body">
         <p class="modal-desc">全局快捷键在应用内任意位置生效；点击组合键框后直接按下想要的组合，Esc 清除。</p>
-        <div v-for="a in (['remoteUnlock', 'screenshot'] as HotkeyAction[])" :key="a" class="hk-row">
+        <div v-for="a in (['remoteRelease', 'screenshot'] as HotkeyAction[])" :key="a" class="hk-row">
           <div class="hk-head">
             <div class="hk-text">
               <div class="hk-label">{{ HOTKEY_META[a].label }}</div>
@@ -385,8 +426,22 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- 关于 -->
+      <div v-else-if="tab === 'about'" class="modal-body">
+        <div class="about-card">
+          <div class="about-name">{{ appName || '麻薯' }}</div>
+          <div class="about-version">版本 {{ appVersion || '未知' }}</div>
+          <div class="about-actions">
+            <button class="about-btn" :disabled="updateChecking" @click="onCheckUpdate">
+              {{ updateChecking ? '正在检查…' : '检查更新' }}
+            </button>
+            <span v-if="updateStatus" class="about-status" :class="{ error: updateStatus.includes('失败') }">{{ updateStatus }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 主邮件 -->
-      <div v-else class="modal-body">
+      <div v-else-if="mailServerAdmin" class="modal-body">
         <div v-if="!mailServerAdmin" class="mail-banner">
           <i class="fas fa-shield-alt"></i>&nbsp;仅服务器管理员（SERVER_ADMIN）可配置主邮件
         </div>
@@ -639,4 +694,28 @@ onMounted(async () => {
 .dt-btn-primary { background: var(--dt-primary); color: #fff; border-color: var(--dt-primary); }
 .dt-btn-primary:hover { color: #fff; }
 .dt-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.about-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 18px;
+}
+.about-name { font-size: 18px; font-weight: 600; color: var(--dt-text); }
+.about-version { font-size: 13px; color: var(--dt-text-3); }
+.about-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.about-btn {
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 6px;
+  border: 1px solid var(--dt-primary);
+  background: var(--dt-primary);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.about-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.about-status { font-size: 12px; color: var(--dt-text-3); }
+.about-status.error { color: var(--dt-danger); }
 </style>

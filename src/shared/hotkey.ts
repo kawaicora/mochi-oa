@@ -4,10 +4,11 @@
  */
 
 /** 快捷键动作：
- *  - remoteUnlock：被控端解锁本机被 ClipCursor 锁定的鼠标（复位解冻 + 显示光标）
+ *  - remoteRelease：释放卡住的鼠标/按键（补发抬起事件，防止粘连）。
+ *    不锁定/冻结鼠标边界，不改动光标可见性，也不存在「锁定被控端鼠标」这一行为。
  *  - screenshot  ：主窗口触发「截图并进入截图编辑器」（截图发送链路）
  */
-export type HotkeyAction = 'remoteUnlock' | 'screenshot'
+export type HotkeyAction = 'remoteRelease' | 'screenshot'
 
 export interface HotkeyItem {
   /** 是否启用；关闭后即使填了组合键也不注册 */
@@ -26,11 +27,11 @@ export interface HotkeyConflict {
   conflicts?: HotkeyAction[]
 }
 
-export const HOTKEY_ACTIONS: HotkeyAction[] = ['remoteUnlock', 'screenshot']
+export const HOTKEY_ACTIONS: HotkeyAction[] = ['remoteRelease', 'screenshot']
 
-/** 默认快捷键：被控端解锁鼠标 = Ctrl+Enter；截图发送默认不启用 */
+/** 默认快捷键：释放卡住的输入 = Ctrl+Enter；截图发送默认不启用 */
 export const DEFAULT_HOTKEY_CONFIG: HotkeyConfig = {
-  remoteUnlock: { enabled: true, accelerator: 'Ctrl+Enter' },
+  remoteRelease: { enabled: true, accelerator: 'Ctrl+Enter' },
   screenshot: { enabled: false, accelerator: '' }
 }
 

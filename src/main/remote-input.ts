@@ -1,8 +1,9 @@
 /**
  * Mochi OA - 远程控制输入注入（被控端 main 进程）—— 跨平台。
  *
- * 真实系统级键鼠注入。按平台分派后端（会话开始时探测并把选择结果写进日志）：
- *  - win32 ：内置 Rust 常驻助手（user32 SendInput / ClipCursor）。
+ * 注入只作用于被控端；控制端那台机器的鼠标/光标一律不动。
+ * 按平台分派后端（会话开始时探测并把选择结果写进日志）：
+ *  - win32 ：内置 Rust 常驻助手（user32 SendInput）。
  *  - linux ：① 内置 Rust 助手（uinput 虚拟键鼠，Wayland / X11 通用）
  *            ② Python3 + uinput 常驻进程（零编译零依赖）
  *            ③ xdotool（兜底：仅 X11）
@@ -12,14 +13,10 @@
  *            ② osascript(JXA) 常驻进程调 CGEvent，零编译。
  *            需要「辅助功能」权限，启动时用 AXIsProcessTrusted 自检并上报结果。
  *
- * 两种键鼠模式（控制端发起会话时指定）：
- *  - remote：本机鼠标锁定在屏幕边界（ClipCursor）；键鼠事件由控制端上报。
- *  - local ：本机鼠标照常显示，仅按归一化坐标同步移动被控端鼠标。
- *  光标是否可见由系统/设备自己决定，注入侧不调用 ShowCursor 强制显示或隐藏。
+ * 只做键鼠/触摸/手柄事件注入；不锁定被控端鼠标边界，不调用 ShowCursor 强制显示或隐藏，
+ * 光标是否可见由被控端系统/设备自己决定。
  *
- * 断线/结束必须复位：
- *  - 鼠标/键盘「按下中」断开 → 补发对应的 Up（防止粘连）。
- *  - Windows 强制解冻光标边界（ClipCursor(null)）兜底。
+ * 断线/结束必须复位：鼠标/键盘/触摸「按下中」断开 → 补发对应的 Up（防止粘连）。
  */
 
 import { app, screen } from 'electron'
@@ -286,11 +283,6 @@ async function startRustHelper(w: number, h: number): Promise<boolean> {
   return false
 }
 
-/** Windows 边界/光标/键鼠指令：统一走 Rust 助手。 */
-function sendWinMode(cmd: RemoteInputCommand): void {
-  if (backend === 'windows-rust') helperSend(cmd)
-}
-
 // ─────────────────────────── Linux ───────────────────────────
 
 /** 首选后端：Python3 + uinput（Wayland / X11 通用，零编译） */
@@ -374,7 +366,6 @@ let capability: InputCapability = { ok: false, backend: 'none', detail: '尚未�
 let screenSize = { w: 1920, h: 1080 }
 /** 当前注入目标显示器（默认主屏）；多屏切换时只改几何，不重启注入进程 */
 let activeDisplay: RemoteDisplayInfo = resolveDisplay(null)
-let cursorLocked = false
 /** 按下中（未抬起）的键/钮，断线复位时补发 Up */
 const pendingButtons = new Set<'left' | 'right' | 'middle'>()
 const pendingKeys = new Set<number>()
@@ -481,18 +472,7 @@ export async function remoteInputStart(mode: 'remote' | 'local', screen?: { w: n
 
   rlog(S, `输入后端 = ${backend} ok=${capability.ok} 说明=${capability.detail}`)
 
-  // 键鼠模式：只有 Windows 有「锁定本机光标边界」的能力；光标是否可见交给系统，代码不强制显示/隐藏。
-  let effMode = mode
-  if (effMode === 'remote' && !IS_WIN) {
-    rwarn(S, 'remote 模式（锁定本机光标边界）在 Windows 之外不可用，本会话按 local 处理（仅同步位置）')
-    effMode = 'local'
-  }
-  if (effMode === 'remote') {
-    if (!cursorLocked) { sendWinMode({ t: 'cliplock' }); cursorLocked = true }
-  } else if (IS_WIN) {
-    sendWinMode({ t: 'clipfree' })
-    cursorLocked = false
-  }
+  // 不锁定被控端鼠标边界、不强制显隐光标；鼠标行为与可见性都交给系统/设备。
   return { ...capability }
 }
 
@@ -673,7 +653,7 @@ export function remoteInputDispatch(evt: Record<string, unknown>): void {
 }
 
 /**
- * 断线/结束复位：补发所有「按下中」的 Up，解冻光标边界。
+ * 断线/结束复位：补发所有「按下中」的 Up，防止粘连。
  * 光标可见性交给系统，不在此恢复或强制显隐。
  */
 export function remoteInputReset(): void {
@@ -688,17 +668,13 @@ export function remoteInputReset(): void {
     remoteInputUp('left')
     pendingTouches.clear()
   }
-  if (backend === 'windows-rust') {
-    sendWinMode({ t: 'clipfree' })
-  }
-  cursorLocked = false
 }
 
 /**
- * 快捷键解锁被控端本地鼠标：解冻光标边界 + 复位按下中。
- * 仅解锁当前会话，不改动光标可见性。
+ * 释放卡住的鼠标/按键：补发所有按下中的 Up，防止断线/中断拖动造成粘连。
+ * 只补发抬起事件；不锁定、不冻结鼠标边界，也不改动光标可见性。
  */
-export function remoteInputUnlock(): void {
+export function remoteInputReleaseStuck(): void {
   for (const b of [...pendingButtons]) remoteInputUp(b)
   for (const code of [...pendingKeys]) remoteInputKeyUp(code)
   pendingButtons.clear()
@@ -707,26 +683,26 @@ export function remoteInputUnlock(): void {
     remoteInputUp('left')
     pendingTouches.clear()
   }
-  if (backend === 'windows-rust') {
-    sendWinMode({ t: 'clipfree' })
-  }
-  cursorLocked = false
 }
 
 /** 彻底停止（会话结束）：复位 + 结束常驻进程。 */
 export function remoteInputStop(): void {
   remoteInputReset()
-  if (helper) {
+  const p = helper
+  if (p) {
     rlog(S, `结束注入助手进程（${helperBackend}）`)
-    try { helper.stdin?.end() } catch { console.warn('结束注入助手进程stdin失败')  }
-    try { helper.kill() } catch { console.warn('结束注入助手进程失败') }
-    helper = null
+    // 先结束 stdin 冲刷掉补发的 Up 事件，再延迟杀进程，避免 Up 还没注入就被终止。
+    try { p.stdin?.end() } catch { console.warn('结束注入助手进程stdin失败') }
+    const proc = p
+    setTimeout(() => {
+      try { proc.kill() } catch { console.warn('结束注入助手进程失败') }
+    }, 120)
   }
+  helper = null
   helperBackend = 'none'
   helperHandshake = null
   backend = 'none'
   capability = { ok: false, backend: 'none', detail: '会话已结束' }
-  cursorLocked = false
 }
 
 /** 应用退出前兜底清理：子进程不会随父进程自动退出，必须显式收掉 */

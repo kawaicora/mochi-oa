@@ -94,7 +94,7 @@ let updatePromise: Promise<void> | null = null;
  *
  * @param source 触发来源：startup=应用启动兜底检查；broadcast=服务端发布更新包后的在线广播检查。
  */
-export function checkUpdateJoin(source: "startup" | "broadcast" = "startup"): Promise<void> {
+export function checkUpdateJoin(source: "startup" | "broadcast" | "manual" = "startup"): Promise<void> {
     if (updatePromise) {
         console.log(`自动更新：已有检查流程在进行，本次（来源：${source}）并入等待`)
         return updatePromise;
@@ -111,7 +111,7 @@ export function checkUpdateJoin(source: "startup" | "broadcast" = "startup"): Pr
 /**
  * 检查服务器版本并执行更新。
  */
-async function checkUpdate(source: "startup" | "broadcast" = "startup"): Promise<void> {
+async function checkUpdate(source: "startup" | "broadcast" | "manual" = "startup"): Promise<void> {
     const cfg: ServerConfig = loadServerConfig();
 
     if (!cfg.serverUrl) {
@@ -172,6 +172,10 @@ async function checkUpdate(source: "startup" | "broadcast" = "startup"): Promise
             console.log(
                 `自动更新：当前已是最新版本 ${currentVersion}，无需更新（来源：${source}）`
             );
+            broadcastUpdate(UPDATE_STATE_EVENT, {
+                state: "latest",
+                message: `已是最新版本 ${currentVersion}`
+            });
             return;
         }
 

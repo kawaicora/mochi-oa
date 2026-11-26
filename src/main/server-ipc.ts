@@ -16,7 +16,7 @@ import { setSystemProxy, clearSystemProxy } from './system-proxy'
 import { startTunProxy, stopTunProxy } from './tun-proxy'
 import { IpcChannels, IpcEvents, ScreenshotToolbar, type NotifKind } from '../shared/ipc'
 import { serverClient } from './net/server-client'
-import { notify as notifyManager, openMeetingWindow, resolveSoundFile } from './notif'
+import { notify as notifyManager, openMeetingWindow, raiseWindow, resolveSoundFile } from './notif'
 import { loadServerConfig, saveServerConfig } from './server-config'
 import { startSysReport, stopSysReport } from './sys-report'
 import { decodeUrlName } from './url-name'
@@ -1236,6 +1236,10 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     const { app } = require('electron') as typeof import('electron')
     return Promise.resolve({ version: app.getVersion(), name: app.getName() })
   })
+  ipcMain.handle(IpcChannels.appCheckUpdate, async () => {
+    await checkUpdateJoin('manual').catch((err) => console.error('[update] 手动检查更新失败：', err))
+    return { ok: true }
+  })
   ipcMain.handle(IpcChannels.appOpenFileLocation, (_e, p) => {
     if (typeof p === 'string' && p) shell.showItemInFolder(p)
     return Promise.resolve()
@@ -1332,6 +1336,7 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     } else {
       void win.loadFile(join(__dirname, '../renderer/meeting.html'), { query })
     }
+    raiseWindow(win)
   })
 
   // 打开独立任务详情窗口

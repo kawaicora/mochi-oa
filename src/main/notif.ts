@@ -5,8 +5,17 @@ import { flashTray } from './tray'
 import { resourceFilePath } from './branding'
 import { IpcEvents, type NavigateToConversationPayload, type NotifKind, type NotifTarget } from '../shared/ipc'
 
-/** 打开独立会议窗口（create/join，带 meetingNo/password 参数） */
-export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; meetingNo?: string; password?: string }): void {
+/** 前置指定窗口：最小化先恢复 → 显示 → 聚焦 → 置顶（通知点击后第一件事就是把目标窗口提到最前）。 */
+export function raiseWindow(win: BrowserWindow | null | undefined): void {
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  win.moveTop()
+}
+
+/** 打开独立会议窗口（create/join，带 meetingNo/password 参数），返回窗口实例便于前置 */
+export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; meetingNo?: string; password?: string }): BrowserWindow {
   const win = new BrowserWindow({
     width: 960,
     height: 646,
@@ -27,6 +36,7 @@ export function openMeetingWindow(p: { mode: 'create' | 'join'; kind?: string; m
   } else {
     void win.loadFile(join(__dirname, '../renderer/meeting.html'), { query })
   }
+  return win
 }
 
 let showMainWindow: (() => void) | null = null
@@ -51,7 +61,8 @@ export function openTarget(t: NotifTarget): void {
       getMainWindow?.()?.webContents.send(IpcEvents.navigateToConversation, payload)
     }
   } else if (t.kind === 'meeting') {
-    openMeetingWindow({ mode: t.mode, kind: t.callType, meetingNo: t.meetingNo, password: t.password })
+    const win = openMeetingWindow({ mode: t.mode, kind: t.callType, meetingNo: t.meetingNo, password: t.password })
+    raiseWindow(win)
   }
 }
 
