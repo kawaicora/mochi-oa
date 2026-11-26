@@ -105,6 +105,12 @@ const api = {
     safeInvoke(IpcChannels.remoteGetParams),
   openScreenshotWindow: (payload: { dataUrl: string; width: number; height: number }): Promise<void> =>
     safeInvoke(IpcChannels.openScreenshotWindow, payload),
+  /** 截图会话开始：主进程最小化主窗口；截图窗关闭兜底恢复 */
+  screenshotSessionBegin: (): Promise<{ ok: boolean }> =>
+    safeInvoke(IpcChannels.screenshotSessionBegin),
+  /** 截图会话中途放弃：手动恢复主窗口 */
+  screenshotSessionRestore: (): Promise<{ ok: boolean }> =>
+    safeInvoke(IpcChannels.screenshotSessionRestore),
   screenshotGetPending: (): Promise<{ dataUrl: string; width: number; height: number } | null> =>
     safeInvoke(IpcChannels.screenshotGetPending),
   screenshotSave: (dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
@@ -125,6 +131,9 @@ const api = {
     safeInvoke(IpcChannels.screenshotToolbarPos, pos),
   /** 截图窗口 → 工具栏窗口：已进入编辑，工具栏切换为完整工具/颜色/保存 */
   screenshotToolbarEdit: (): void => ipcRenderer.send(IpcChannels.screenshotToolbarEdit),
+  /** 工具栏按内容自适应宽度（DIP），主进程水平居中 */
+  screenshotToolbarResize: (width: number): Promise<void> =>
+    safeInvoke(IpcChannels.screenshotToolbarResize, { width }),
   /** 工具栏窗口订阅“进入编辑”通知（返回退订函数） */
   onScreenshotToolbarEdit: (l: () => void): (() => void) => subscribe(IpcEvents.screenshotToolbarEdit, l),
   // 最小化/后台提醒：Windows 通知 + 窗口状态/唤起

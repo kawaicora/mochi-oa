@@ -485,9 +485,14 @@ async function onPickAudio(): Promise<void> {
 
 async function onScreenshot(): Promise<void> {
   if (sending.value) return
+  // 先把主窗口最小化，避免主窗口被采进截图；截图窗关闭时主进程兜底恢复主窗
+  await window.pantry.screenshotSessionBegin()
+  // 等主窗口最小化重绘完成，避免主窗口仍留在画面里被采进截图
+  await new Promise((r) => setTimeout(r, 120))
   const shot = await window.pantry.captureScreen()
   console.log(`[screenshot] 截屏完成，dataUrl 长度=${shot?.dataUrl.length ?? 0} width=${shot?.width ?? 0} height=${shot?.height ?? 0}`)
   if (!shot) {
+    await window.pantry.screenshotSessionRestore()
     flashToast('截屏失败')
     return
   }

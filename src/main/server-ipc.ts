@@ -1422,6 +1422,8 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
   let pendingScreenshot: { dataUrl: string; width: number; height: number } | null = null
   let screenshotWin: BrowserWindow | null = null
   let screenshotToolbarWin: BrowserWindow | null = null
+  /** 截图会话是否曾把主窗口最小化；截图窗关闭兜底恢复主窗，避免取消后主窗一直最小化 */
+  let screenshotHidMain = false
   const openScreenshotToolbar = (): void => {
     const tw = new BrowserWindow({
       alwaysOnTop: true,
@@ -1454,6 +1456,26 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       if (screenshotToolbarWin === tw) screenshotToolbarWin = null
     })
   }
+  // 截图会话开始：最小化主窗口，避免主窗口被采进截图；截图窗关闭时在 closed 兜底恢复
+  ipcMain.handle(IpcChannels.screenshotSessionBegin, () => {
+    const main = getMainWindow()
+    if (main && !main.isDestroyed()) main.minimize()
+    screenshotHidMain = true
+    return { ok: true }
+  })
+  // 中途放弃（采集失败、未开窗）：手动还原主窗口
+  ipcMain.handle(IpcChannels.screenshotSessionRestore, () => {
+    if (screenshotHidMain) {
+      screenshotHidMain = false
+      const main = getMainWindow()
+      if (main && !main.isDestroyed()) {
+        if (main.isMinimized()) main.restore()
+        main.show()
+        main.focus()
+      }
+    }
+    return { ok: true }
+  })
   ipcMain.handle(IpcChannels.openScreenshotWindow, (_e, payload) => {
     const p = (payload ?? {}) as { dataUrl?: unknown; width?: unknown; height?: unknown }
     if (typeof p.dataUrl !== 'string') return { ok: false, error: 'no data' }
@@ -1486,6 +1508,16 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
       if (screenshotWin === win) screenshotWin = null
       if (screenshotToolbarWin && !screenshotToolbarWin.isDestroyed()) screenshotToolbarWin.close()
       screenshotToolbarWin = null
+      // 兜底恢复：截图窗无论保存还是取消关闭，都把会话开始前最小化的主窗口还原
+      if (screenshotHidMain) {
+        screenshotHidMain = false
+        const main = getMainWindow()
+        if (main && !main.isDestroyed()) {
+          if (main.isMinimized()) main.restore()
+          main.show()
+          main.focus()
+        }
+      }
     })
     screenshotWin = win
     // 工具栏窗口创建失败不得阻断截图窗口（否则截图窗口不会 loadURL/show → 黑屏）
@@ -1526,12 +1558,24 @@ export function registerServerIpcHandlers(getMainWindow: () => BrowserWindow | n
     const p = (pos ?? {}) as { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
     const x = Number(p.x)
     const y = Number(p.y)
-    const width = Number(p.width)
     const height = Number(p.height)
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return { ok: false }
-    tw.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(height) || height < 1) return { ok: false }
+    // 宽度由工具栏按内容自适应（screenshotToolbarResize），这里只负责定位与高度，避免写死宽度留空白
+    const cur = tw.getBounds()
+    tw.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(cur.width), height: Math.round(height) })
     tw.show()
     tw.moveTop()
+    return { ok: true }
+  })
+  // 工具栏按内容自适应宽度：水平居中、保持顶部，消除右侧多余空白
+  ipcMain.handle(IpcChannels.screenshotToolbarResize, (_e, payload: unknown) => {
+    const tw = screenshotToolbarWin
+    if (!tw || tw.isDestroyed()) return { ok: false }
+    const w = Number(((payload ?? {}) as { width?: unknown }).width)
+    if (!Number.isFinite(w) || w < 1) return { ok: false }
+    const disp = screen.getPrimaryDisplay()
+    const width = Math.min(Math.round(w), disp.workArea.width)
+    tw.setBounds({ x: Math.round((disp.workArea.width - width) / 2), y: 0, width, height: ScreenshotToolbar.HEIGHT })
     return { ok: true }
   })
   // 截图窗口 → 已进入编辑：通知工具栏窗口切换为完整工具/颜色/保存（选择阶段只显示全屏/取消）

@@ -23,6 +23,12 @@ function handleCommand(cmd: { action: string; value?: unknown }): void {
     case 'setColor':
       ed.setColor(cmd.value as string)
       break
+    case 'setFontFamily':
+      ed.setFontFamily(cmd.value as string)
+      break
+    case 'setFontSize':
+      ed.setFontSize(Number(cmd.value))
+      break
     case 'undo':
       ed.undo()
       break

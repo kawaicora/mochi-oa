@@ -23,6 +23,8 @@ const editCanvas = ref<HTMLCanvasElement | null>(null)
 const phase = ref<'select' | 'edit'>('select')
 const tool = ref<'pen' | 'arrow' | 'rect' | 'ellipse' | 'text'>('pen')
 const color = ref('#ff4444')
+const fontFamily = ref('sans-serif')
+const fontSize = ref(20)
 
 // 文字工具：点击画布放置内联输入框（Electron 下 window.prompt 不弹，改用 DOM 输入框）
 const textDraft = ref<{ active: boolean; text: string; px: number; py: number; left: number; top: number }>({
@@ -37,6 +39,15 @@ const textInputRef = ref<HTMLTextAreaElement | null>(null)
 
 const COLORS = ['#ff4444', '#ff8a00', '#ffd400', '#2ee62e', '#00c8ff', '#3b6bff', '#a43bff', '#ff3bd6', '#ffffff', '#000000']
 const TOOL_NAMES: Record<string, string> = { pen: '画笔', arrow: '箭头', rect: '矩形', ellipse: '椭圆', text: '文字' }
+const FONT_FAMILIES: { label: string; value: string }[] = [
+  { label: '默认', value: 'sans-serif' },
+  { label: '微软雅黑', value: '"Microsoft YaHei", sans-serif' },
+  { label: '宋体', value: 'SimSun, serif' },
+  { label: '黑体', value: 'SimHei, sans-serif' },
+  { label: '楷体', value: 'KaiTi, serif' },
+  { label: '等宽', value: 'Consolas, monospace' }
+]
+const FONT_SIZES = [16, 20, 26, 32]
 
 let img: HTMLImageElement | null = null
 let sel: { x: number; y: number; w: number; h: number } | null = null // select 阶段选框（源像素）
@@ -45,6 +56,8 @@ let anchor: { x: number; y: number } | null = null
 let pts: { x: number; y: number }[] = [] // 画笔：本笔路径点集
 let undoStack: ImageData[] = []
 let redoStack: ImageData[] = []
+/** 本笔按下时的基线快照：拖动过程中每帧恢复它再重画临时图形，避免残影叠加 */
+let baseline: ImageData | null = null
 
 function canvasPixel(c: HTMLCanvasElement, e: PointerEvent): { x: number; y: number } {
   const r = c.getBoundingClientRect()
@@ -152,6 +165,8 @@ function onEditDown(e: PointerEvent): void {
   if (!c) return
   anchor = canvasPixel(c, e)
   editing = true
+  const g = c.getContext('2d')
+  baseline = g ? g.getImageData(0, 0, c.width, c.height) : null
   if (tool.value === 'pen') pts = [{ ...anchor }]
   if (tool.value === 'text') {
     // 在点击处放置内联输入框。输入框挂到 mask 下（position:absolute），
@@ -178,10 +193,10 @@ function commitText(): void {
   const g = c?.getContext('2d')
   if (!c || !g) return
   const r = c.getBoundingClientRect()
-  const scale = c.width / r.width
+  const scale = r.width > 0 ? c.width / r.width : 1
   snapshot()
   g.fillStyle = color.value
-  g.font = `600 ${Math.round(20 * scale)}px sans-serif`
+  g.font = `600 ${Math.round(fontSize.value * scale)}px ${fontFamily.value}`
   g.textBaseline = 'top'
   g.fillText(t, d.px, d.py)
 }
@@ -194,8 +209,8 @@ function onEditMove(e: PointerEvent): void {
   const g = c?.getContext('2d')
   if (!c || !g) return
   const p = canvasPixel(c, e)
-  // 恢复进入本笔前的画面（撤销本笔已画的临时内容）
-  if (undoStack.length) g.putImageData(undoStack[undoStack.length - 1], 0, 0)
+  // 恢复本笔按下前的基线画面（撤销本笔已画的临时内容），再重画当前图形
+  if (baseline) g.putImageData(baseline, 0, 0)
   g.strokeStyle = color.value
   g.fillStyle = color.value
   g.lineWidth = lw()
@@ -226,6 +241,7 @@ function onEditUp(e: PointerEvent): void {
   if (!editing) return
   editing = false
   pts = []
+  baseline = null
   snapshot()
 }
 /** 指针离开画布（拖出窗口/拖到工具栏）立即结束本笔，防止卡死，同时不吞按钮事件 */
@@ -239,6 +255,7 @@ function onLeave(e: PointerEvent): void {
   if (!editing || !c) return
   editing = false
   pts = []
+  baseline = null
   snapshot()
 }
 function onCancel(e: PointerEvent): void {
@@ -275,7 +292,8 @@ function save(): void {
 /* 键盘：Esc 取消，Enter 保存，Ctrl+Z 撤销 */
 function onKey(e: KeyboardEvent): void {
   // 文字输入框聚焦时，全局快捷键停用（Esc/Enter/Ctrl+Z 已由输入框自行处理）
-  if (textDraft.value.active) return
+  const el = e.target as HTMLElement | null
+  if (textDraft.value.active || el?.tagName === 'TEXTAREA' || el?.tagName === 'SELECT') return
   if (e.key === 'Escape') emit('cancel')
   else if (e.key === 'Enter') save()
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -304,6 +322,8 @@ onBeforeUnmount(() => {
 export interface ScreenshotEditorExpose {
   setTool(t: 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text'): void
   setColor(c: string): void
+  setFontFamily(f: string): void
+  setFontSize(s: number): void
   undo(): void
   redo(): void
   selectAll(): void
@@ -317,6 +337,13 @@ defineExpose({
   },
   setColor: (c: string) => {
     color.value = c
+  },
+  setFontFamily: (f: string) => {
+    if (f) fontFamily.value = f
+  },
+  setFontSize: (s: number) => {
+    const n = Number(s)
+    if (Number.isFinite(n) && n > 0) fontSize.value = Math.round(n)
   },
   undo,
   redo,
@@ -363,6 +390,13 @@ defineExpose({
           @click="color = c"
         ></button>
         <span class="shot-sep"></span>
+        <select class="shot-select" :value="fontFamily" @change="fontFamily = ($event.target as HTMLSelectElement).value" title="字体">
+          <option v-for="f in FONT_FAMILIES" :key="f.value" :value="f.value">{{ f.label }}</option>
+        </select>
+        <select class="shot-select" :value="fontSize" @change="fontSize = Number(($event.target as HTMLSelectElement).value)" title="字号">
+          <option v-for="s in FONT_SIZES" :key="s" :value="s">{{ s }}</option>
+        </select>
+        <span class="shot-sep"></span>
         <button class="shot-btn" title="撤销 (Ctrl+Z)" @click="undo"><i class="fas fa-undo"></i></button>
         <button class="shot-btn" title="重做 (Ctrl+Shift+Z)" @click="redo"><i class="fas fa-redo"></i></button>
         <span class="shot-sep"></span>
@@ -401,11 +435,11 @@ defineExpose({
       v-if="textDraft.active"
       ref="textInputRef"
       class="shot-text-input"
-      :style="{ left: textDraft.left + 'px', top: textDraft.top + 'px', color }"
+      :style="{ left: textDraft.left + 'px', top: textDraft.top + 'px', color, fontFamily, fontSize: fontSize + 'px' }"
       v-model="textDraft.text"
       rows="1"
       placeholder="输入文字…"
-      @keydown.enter.prevent="commitText"
+      @keydown.enter.prevent.stop="commitText"
       @keydown.esc.stop.prevent="cancelText"
       @blur="commitText"
     ></textarea>
@@ -553,5 +587,20 @@ defineExpose({
 }
 .shot-color.active {
   border-color: #fff;
+}
+.shot-select {
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: #26262b;
+  color: #e8e8ea;
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+  outline: none;
+}
+.shot-select option {
+  background: #26262b;
+  color: #e8e8ea;
 }
 </style>

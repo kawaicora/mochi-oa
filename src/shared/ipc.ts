@@ -360,6 +360,12 @@ export const IpcChannels = {
   screenshotToolbarPos: 'shot:toolbarPos',
   /** 截图窗口 → 主进程 → 工具栏窗口：已进入编辑（框选完成），工具栏切换到完整工具/颜色/保存 */
   screenshotToolbarEdit: 'shot:toolbarEdit',
+  /** 工具栏按内容自适应宽度：{ width }（DIP），主进程水平居中、保持顶部 */
+  screenshotToolbarResize: 'shot:toolbarResize',
+  /** 截图会话开始：主进程最小化主窗口（避免被采进截图）；截图窗关闭时兜底恢复 */
+  screenshotSessionBegin: 'shot:sessionBegin',
+  /** 截图会话中途放弃（采集失败等未开窗）：手动恢复主窗口 */
+  screenshotSessionRestore: 'shot:sessionRestore',
   /** 最小化/后台时弹 Windows 通知（点击唤起窗口） */
   notify: 'win:notify',
   /** 查询当前窗口聚焦/可见/最小化状态 */
